@@ -15,6 +15,7 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -188,7 +189,107 @@ const PROMPTS = [
   { id: 60, text: "Te dejan cambiarle una sola cosa física a tu pareja. ¿Qué le cambiarías?", category: "pareja" },
   { id: 61, text: "Te dan un deseo para vos, o un deseo para cada integrante de tu familia, pero no podés explicarles nada sobre lo que pediste para ellos. ¿Cuál opción elegís?", category: "imaginación" },
   { id: 62, text: "Te dan un deseo. ¿Qué pedís?", category: "imaginación" },
+  { id: 63, text: "¿Cómo vas a morir? ¿De qué?", category: "introspección" },
+  { id: 64, text: "Podés elegir entre tu pareja, tu primer hijo o tu padre. ¿A quién elegís?", category: "picantes" },
+  { id: 65, text: "Lo mismo, pero la persona que más te odia en el mundo elige por vos: entre tu pareja, tu primer hijo o tu padre. ¿A quién elegiría?", category: "picantes" },
+  { id: 66, text: "Tenés 100 años para repartir con tu pareja. ¿Cómo los repartirían?", category: "pareja" },
+  { id: 67, text: "Tenés 50 años para repartir con tu pareja. ¿Cómo los repartirían?", category: "pareja" },
+  { id: 68, text: "Tenés 10 años para repartir con tu pareja. ¿Cómo los repartirían?", category: "pareja" },
+  { id: 69, text: "Podés elegir entre tu cuerpo o el de tu pareja, pero el cuerpo que elijas será tuyo durante toda la vida. ¿Cuál elegís?", category: "picantes" },
+  { id: 70, text: "Podés elegir tus partes íntimas o las de tu pareja. ¿Cuáles elegís?", category: "picantes" },
+  { id: 71, text: "Tu sándwich ideal para las 18:00, con hambre. ¿Qué ponés dentro de los panes? Todo lo que quieras.", category: "comida" },
+  { id: 72, text: "Llamado a las 3:00 AM. Atiende tu pareja y es una mala noticia. ¿Cuál es?", category: "imaginación" },
+  { id: 73, text: "Te morís. ¿Quién se pone peor? ¿Quién te recuerda más veces a medida que pasan los años?", category: "introspección" },
+  { id: 74, text: "Te dejan cambiar una cosa estética tuya que nunca hayas cambiado. ¿Qué cambiás?", category: "personalidad" },
+  { id: 75, text: "Van a tener un hijo más. ¿A quién llamás primero?", category: "pareja" },
+  { id: 76, text: "Sacando a tu pareja, podés borrar de la cabeza de una persona la existencia total de otra persona. Para quien elijas, esa persona nunca existió, y también desaparecen todos los recuerdos de lo que vivieron juntos. Nadie puede demostrarle que existió. ¿A quién hacés desaparecer de su memoria?", category: "imaginación" },
+  { id: 77, text: "¿Qué momento de tu vida cambiarías? Algo que pasó y que, por cosas del destino, salió \"blanco\", pero podría haber salido \"negro\". ¿Qué momento cambiarías?", category: "introspección" },
+  { id: 78, text: "¿Qué momento deportivo tuyo, en una competencia en la que participaste, cambiarías de resultado hoy?", category: "introspección" },
+  { id: 79, text: "¿Qué persona creés que mira tu vida y piensa: \"Me hubiera gustado casarme con él/ella\"?", category: "personalidad" },
+  { id: 80, text: "¿Cuándo fue la última vez que le pediste perdón a tu pareja y por qué?", category: "pareja" },
+  { id: 81, text: "¿Cuándo fue la última vez que desilusionaste a un hijo? Algo por lo que le tuviste que pedir perdón. ¿Qué pasó?", category: "recuerdos" },
+  { id: 82, text: "¿Cuál es la mejor sorpresa que podrías darle a tu hijo mayor y que él puede esperar de vos?", category: "cotidianas" },
+  { id: 83, text: "¿Cuál es la mejor sorpresa que podrías darle a tu segundo hijo y que él puede esperar de vos?", category: "cotidianas" },
+  { id: 84, text: "Te llaman del colegio a las 14:00. ¿Por cuál hijo es el tema?", category: "situaciones" },
+  { id: 85, text: "Va toda la familia en el auto. Se siente olor a cuete. ¿Quién fue?", category: "divertidas" },
+  { id: 86, text: "Entrás a tu casa y toda tu familia te preparó una sorpresa. Apenas cruzás la puerta te muestran un papel. ¿Qué dice?", category: "imaginación" },
+  { id: 87, text: "Te vendan los ojos para una sorpresa de cumpleaños. Te llevan caminando, en auto, en avión o como quieran. Te sacan la venda. ¿Qué ves?", category: "imaginación" },
+  { id: 88, text: "Avión jumbo, viaje largo, configuración 3-4-3, clase turista. Numeramos los asientos del 1 al 20 y todos son igual de cómodos, con un asiento libre adelante de cada fila. Cada integrante de la familia elige una vez y, como te toca elegir primero esta vez, podés sacar ventaja sin que haya pelea. ¿En qué número sentás a cada integrante de tu familia que vive en tu casa?", category: "viajes" },
+  { id: 89, text: "Te dan los cuatro asientos del medio para un viaje largo: asientos 4, 5, 6 y 7. ¿Cómo viaja cada uno durante la mayor parte del viaje?", category: "viajes" },
+  { id: 90, text: "Comés milanesas. ¿Qué ensalada te pedís? Nombrá todo lo que querés dentro de ese bowl personal.", category: "comida" },
+  { id: 91, text: "Parrillada premium, con absolutamente todo y sin vegetales. Todo está disponible y en el punto que querés. ¿Qué le pedís primero, segundo y tercero al parrillero?", category: "comida" },
+  { id: 92, text: "¿Qué comida, si la ponen sobre la mesa, puede darte arcadas?", category: "comida" },
+  { id: 93, text: "Hay una fiestita improvisada en tu casa por tu cumpleaños. ¿Qué persona podría aparecer sin invitación y te jodería más? Nunca va a aparecer, pero podría porque fue amigo, es amigo de amigos, pareja de alguno o pariente.", category: "divertidas" },
+  { id: 94, text: "Hay un botón. Lo apretás y te da plata suficiente para darte varios gustos, pero no te cambia la vida. Al apretarlo, muere alguien que no conocés. Solo vos sabés que lo apretaste. La plata aparece en tu caja fuerte y nadie sospecharía nada, ni siquiera tu pareja. ¿Lo apretás? ¿Le contás a tu pareja lo que decidiste?", category: "picantes" },
+  { id: 95, text: "Un amigo necesita que embaraces a su pareja para que puedan tener hijos. Siempre quedaría en secreto. ¿Qué decidís?", category: "picantes" },
+  { id: 96, text: "Estás en el shopping con algo de plata extra. Ves algo que le gusta a uno de tus hijos y lo comprás. Cuando salís, ¿buscás cómo emparejar el regalo con los otros hijos o no?", category: "cotidianas" },
+  { id: 97, text: "Tu hijo mayor agarra Spotify y pone un tema. ¿Qué cantante y qué canción puso?", category: "personalidad" },
+  { id: 98, text: "Tu segundo hijo agarra Spotify y pone un tema. ¿Qué cantante y qué canción puso?", category: "personalidad" },
+  { id: 99, text: "¿Quién es tu mejor amigo/a del sexo opuesto?", category: "pareja" },
+  { id: 100, text: "¿Qué emoticón usás más últimamente en grupos donde está tu pareja o cuando hablás con tu pareja?", category: "pareja" },
+  { id: 101, text: "¿Qué costumbre de tu pareja te molesta más? Una acción premeditada que repite habitualmente.", category: "pareja" },
+  { id: 102, text: "¿Cuál fue lo más cerca que estuviste de la muerte?", category: "introspección" },
+  { id: 103, text: "¿Quién tiene la mejor risa de la familia?", category: "divertidas" },
+  { id: 104, text: "¿Quién es el más gracioso del árbol familiar?", category: "divertidas" },
+  { id: 105, text: "Nuevo hijo. ¿Qué característica física querés que saque de uno de sus padres?", category: "imaginación" },
+  { id: 106, text: "¿Qué es lo mejor que hacés, sin contar nada sexual?", category: "personalidad" },
+  { id: 107, text: "¿Cuál es la comida más rica que podés cocinar?", category: "comida" },
+  { id: 108, text: "Si te regalan un viaje de 10 días con tu familia, ¿a dónde te vas?", category: "viajes" },
+  { id: 109, text: "¿Qué familiar te rompe más las pelotas con su presencia?", category: "divertidas" },
+  { id: 110, text: "¿Cuál es tu postre preferido?", category: "comida" },
+  { id: 111, text: "¿Cuál es tu plato preferido de Kansas?", category: "comida" },
+  { id: 112, text: "¿Cuál es tu trago preferido?", category: "comida" },
+  { id: 113, text: "¿Cuál es tu tema preferido para saltar en la pista?", category: "personalidad" },
+  { id: 114, text: "En un viaje de aproximadamente 3 horas, viajan los cuatro integrantes de tu familia y tu mamá. Los lugares están numerados del 1 al 5. ¿Cómo se sientan?", category: "situaciones" },
+  { id: 115, text: "¿Dulce o salado?", category: "comida" },
+  { id: 116, text: "¿A quién llamás primero para contarle una muy buena noticia?", category: "pareja" },
+  { id: 117, text: "Una noche con el siguiente famoso/a. ¿A quién elegís?", category: "imaginación" },
+  { id: 118, text: "¿Cuál es tu película preferida?", category: "personalidad" },
+  { id: 119, text: "¿Cuál es tu serie preferida?", category: "personalidad" },
+  { id: 120, text: "¿Preferís comer con tu familia o con la familia de tu pareja?", category: "pareja" },
+  { id: 121, text: "¿A qué preferís jugar y con cuál de tus hijos?", category: "cotidianas" },
+  { id: 122, text: "¿Sexo a la mañana, tarde o noche?", category: "picantes" },
+  { id: 123, text: "¿En qué estás malcriando a tus hijos?", category: "cotidianas" },
+  { id: 124, text: "¿Qué es lo peor que tiene tu pareja que heredó de su padre o de su madre? Decí de quién.", category: "pareja" },
+  { id: 125, text: "¿A qué famoso te parecés?", category: "personalidad" },
+  { id: 126, text: "Si hubiera un trío, ¿preferís que sea con una mujer o con un hombre?", category: "picantes" },
+  { id: 127, text: "¿Cuál es la mentira más grande que le dijiste a un hijo?", category: "introspección" },
+  { id: 128, text: "¿Quién tiene más razón: tu mamá o la mamá de tu pareja?", category: "pareja" },
+  { id: 129, text: "¿Morirías por tu pareja? Tenés que decidir sin poder hablarlo previamente: tu pareja está en coma y necesita tu corazón. Si se lo donás, sobrevive seguro y va a vivir bien. ¿Se lo das?", category: "picantes" },
+  { id: 130, text: "Hacés un cumpleaños con todos tus amigos y familiares cercanos. Falta plata de una cartera. ¿Quién fue?", category: "divertidas" },
+  { id: 131, text: "En el baño hay una frenada de alfajor. Son cuatro personas. ¿Quién fue?", category: "divertidas" },
+  { id: 132, text: "¿Qué es lo que más te molesta de tu pareja?", category: "pareja" },
+  { id: 133, text: "¿Quién es tu ídolo?", category: "personalidad" },
+  { id: 134, text: "Cuando conociste a tu pareja, ¿qué cosa te hizo dudar de estar con ella/él?", category: "pareja" },
+  { id: 135, text: "Los chicos están jugando y se pelean. Los dos dicen que empezó el otro. ¿A quién le creés?", category: "cotidianas" },
+  { id: 136, text: "¿Qué desayunás regularmente?", category: "cotidianas" },
+  { id: 137, text: "¿En qué posición dormís? Boca abajo, costado externo, boca arriba o costado interno.", category: "cotidianas" },
+  { id: 138, text: "¿Sabés mentir?", category: "personalidad" },
+  { id: 139, text: "¿Sos el preferido de alguno de tus hijos? ¿De cuál?", category: "introspección" },
+  { id: 140, text: "Tenés que empujar a un acantilado a tu papá y tu mamá, o a vos mismo. Si no lo hacés, mueren todos los demás. ¿A quién empujás?", category: "picantes" },
+  { id: 141, text: "¿Le das la razón a tu pareja siempre que sabés que la tiene?", category: "pareja" },
+  { id: 142, text: "¿Quién va a vivir más?", category: "divertidas" },
+  { id: 143, text: "Si alguien tuviera que describirte, ¿qué es lo que más destacaría de vos?", category: "personalidad" },
+  { id: 144, text: "Si decís que viste un OVNI o un fantasma, ¿tu pareja te cree sin dudar?", category: "divertidas" },
 ];
+
+// Para sumar consignas nuevas sin repetir las que ya existen (oficiales o
+// agregadas antes en la misma sala).
+function normalizePromptText(t) {
+  return (t || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+function dedupePrompts(candidateTexts, existingPrompts) {
+  const seen = new Set(existingPrompts.map((p) => normalizePromptText(p.text)));
+  const out = [];
+  for (const raw of candidateTexts) {
+    const text = (raw || "").trim();
+    const norm = normalizePromptText(text);
+    if (!norm || seen.has(norm)) continue;
+    seen.add(norm);
+    out.push(text);
+  }
+  return out;
+}
 
 // ==================== UI COMPARTIDA ====================
 const C = {
@@ -408,7 +509,7 @@ function JoinScreen({ mode, onBack, onEntered }) {
           hostId: me.id,
           players: [me],
           phase: "lobby",
-          promptIds: [],
+          prompts: [], // se completa al empezar la partida: [{id, text}, ...] (oficiales y/o nuevas, embebidas en la sala)
           createdAt: Date.now(),
         };
       } else {
@@ -506,20 +607,47 @@ function Lobby({ room, myId, onStarted }) {
   const isHost = room.hostId === myId;
   const couples = couplesFromPlayers(room.players || []);
   const confirmedCount = couples.filter((c) => c.length === 2).length;
+  const [customPrompts, setCustomPrompts] = useState([]);
+  const [showImport, setShowImport] = useState(false);
+
+  const addCustomPrompts = (texts) => {
+    setCustomPrompts((prev) => {
+      const toAdd = dedupePrompts(texts, [...PROMPTS, ...prev]);
+      return [...prev, ...toAdd.map((text) => ({ id: "nueva-" + randomId(), text }))];
+    });
+  };
+  const removeCustomPrompt = (id) => {
+    setCustomPrompts((prev) => prev.filter((p) => p.id !== id));
+  };
 
   const startGame = async () => {
     const fresh = await readRoom(room.code);
     if (!fresh) return;
-    const bank = [...PROMPTS];
+    const bank = [...PROMPTS, ...customPrompts];
     for (let i = bank.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [bank[i], bank[j]] = [bank[j], bank[i]];
     }
-    fresh.promptIds = bank.slice(0, Math.min(TOTAL_PROMPTS, bank.length)).map((p) => p.id);
+    // Se guarda el texto completo (no solo el id) para que las consignas
+    // nuevas que sumó el anfitrión/a funcionen igual que las oficiales en
+    // TODOS los celus, aunque esas otras personas no las tengan cargadas.
+    fresh.prompts = bank.slice(0, Math.min(TOTAL_PROMPTS, bank.length)).map((p) => ({ id: p.id, text: p.text }));
     fresh.phase = "playing";
     await writeRoom(room.code, fresh);
     onStarted(fresh);
   };
+
+  if (showImport) {
+    return (
+      <CustomPromptsScreen
+        existingPrompts={[...PROMPTS, ...customPrompts]}
+        customPrompts={customPrompts}
+        onAdd={addCustomPrompts}
+        onRemove={removeCustomPrompt}
+        onClose={() => setShowImport(false)}
+      />
+    );
+  }
 
   return (
     <Screen style={{ justifyContent: "center" }}>
@@ -540,6 +668,15 @@ function Lobby({ room, myId, onStarted }) {
         ))}
       </Card>
       {confirmedCount === 0 && <Sub>Necesitás al menos una pareja confirmada (❤️) para empezar.</Sub>}
+      {isHost && (
+        <BigButton
+          onClick={() => setShowImport(true)}
+          color="transparent"
+          style={{ border: `1px solid ${C.gold}`, color: C.gold, boxShadow: "none" }}
+        >
+          ➕ Consignas nuevas {customPrompts.length > 0 ? `(${customPrompts.length} sumadas)` : "(opcional)"}
+        </BigButton>
+      )}
       {isHost ? (
         <BigButton onClick={startGame} disabled={confirmedCount === 0}>
           Comenzar partida ➜
@@ -547,6 +684,136 @@ function Lobby({ room, myId, onStarted }) {
       ) : (
         <Sub>Esperando a que el anfitrión/a empiece la partida...</Sub>
       )}
+    </Screen>
+  );
+}
+
+// ==================== CONSIGNAS NUEVAS (texto pegado o foto) ====================
+function CustomPromptsScreen({ existingPrompts, customPrompts, onAdd, onRemove, onClose }) {
+  const [pasteText, setPasteText] = useState("");
+  const [ocrText, setOcrText] = useState("");
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrError, setOcrError] = useState("");
+  const fileInputRef = useRef(null);
+
+  const linesOf = (text) => text.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  const addFrom = (text) => {
+    const lines = linesOf(text);
+    if (lines.length === 0) return;
+    onAdd(lines);
+  };
+
+  const handleFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setOcrBusy(true);
+    setOcrError("");
+    setOcrText("");
+    try {
+      const result = await Tesseract.recognize(file, "spa");
+      const text = (result && result.data && result.data.text) || "";
+      if (!text.trim()) {
+        setOcrError("No se pudo leer texto en esa foto. Probá con más luz, más cerca, o pegá el texto a mano.");
+      } else {
+        setOcrText(text);
+      }
+    } catch (err) {
+      setOcrError("No se pudo leer la foto. Probá de nuevo o pegá el texto a mano.");
+    } finally {
+      setOcrBusy(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const pasteNew = dedupePrompts(linesOf(pasteText), existingPrompts);
+  const ocrNew = dedupePrompts(linesOf(ocrText), existingPrompts);
+
+  return (
+    <Screen>
+      <Title size={22}>Consignas nuevas</Title>
+      <Sub>Se suman solo para esta partida — una consigna por renglón</Sub>
+
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontFamily: "'Fraunces', serif", fontSize: 14, color: C.gold, marginBottom: 8 }}>✍️ Pegar texto</div>
+        <textarea
+          value={pasteText}
+          onChange={(e) => setPasteText(e.target.value)}
+          placeholder={"Una consigna por renglón..."}
+          style={{ ...inputStyle, minHeight: 110, resize: "vertical", fontFamily: "'Nunito', sans-serif" }}
+        />
+        {pasteText.trim() && (
+          <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 8 }}>
+            {linesOf(pasteText).length} renglones — {pasteNew.length} nuevas (sin repetir)
+          </div>
+        )}
+        <BigButton
+          onClick={() => { addFrom(pasteText); setPasteText(""); }}
+          disabled={pasteNew.length === 0}
+          style={{ marginBottom: 0 }}
+        >
+          Agregar {pasteNew.length > 0 ? `(${pasteNew.length})` : ""}
+        </BigButton>
+      </Card>
+
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontFamily: "'Fraunces', serif", fontSize: 14, color: C.gold, marginBottom: 8 }}>📷 Subir foto</div>
+        <Sub style={{ margin: "0 0 10px", fontSize: 12.5 }}>
+          Sacale una foto a una lista escrita o impresa. El reconocimiento no es perfecto — revisá el texto antes de agregarlo.
+        </Sub>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFile}
+          style={{ marginBottom: 10, color: C.textMuted, fontSize: 13, width: "100%" }}
+        />
+        {ocrBusy && <Sub style={{ margin: "0 0 10px" }}>Leyendo la foto...</Sub>}
+        {ocrError && <div style={{ color: C.roseSoft, fontSize: 13, marginBottom: 10 }}>{ocrError}</div>}
+        {ocrText && (
+          <React.Fragment>
+            <textarea
+              value={ocrText}
+              onChange={(e) => setOcrText(e.target.value)}
+              style={{ ...inputStyle, minHeight: 110, resize: "vertical", fontFamily: "'Nunito', sans-serif" }}
+            />
+            <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 8 }}>
+              {linesOf(ocrText).length} renglones — {ocrNew.length} nuevas (sin repetir)
+            </div>
+            <BigButton
+              onClick={() => { addFrom(ocrText); setOcrText(""); }}
+              disabled={ocrNew.length === 0}
+              style={{ marginBottom: 0 }}
+            >
+              Agregar {ocrNew.length > 0 ? `(${ocrNew.length})` : ""}
+            </BigButton>
+          </React.Fragment>
+        )}
+      </Card>
+
+      {customPrompts.length > 0 && (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontSize: 14, color: C.gold, marginBottom: 8 }}>
+            Sumadas para esta partida ({customPrompts.length})
+          </div>
+          {customPrompts.map((p) => (
+            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+              <span style={{ fontSize: 13.5 }}>{p.text}</span>
+              <button
+                onClick={() => onRemove(p.id)}
+                style={{ background: "none", border: "none", color: C.roseSoft, fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+              >
+                Quitar
+              </button>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      <BigButton onClick={onClose} color="transparent" style={{ boxShadow: "none", color: C.textMuted }}>
+        ← Volver a la sala
+      </BigButton>
     </Screen>
   );
 }
@@ -580,7 +847,7 @@ function PlayScreen({ room, myId, progressMap, onAnswered }) {
     );
   }
 
-  const prompt = PROMPTS.find((p) => p.id === room.promptIds[myProgress]) || { text: "(consigna no encontrada)" };
+  const prompt = room.prompts[myProgress] || { text: "(consigna no encontrada)" };
 
   const confirm = async () => {
     if (saving) return; // evita doble-submit por doble-tap
@@ -667,7 +934,7 @@ function ReviewScreen({ room, myId, progressMap, onDone }) {
       ) : (
         <Card style={{ marginBottom: 16, maxHeight: 420, overflowY: "auto" }}>
           {blanks.map((b) => {
-            const prompt = PROMPTS.find((p) => p.id === room.promptIds[b.i]) || {};
+            const prompt = room.prompts[b.i] || {};
             return (
               <div key={b.i} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                 <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 6 }}>
@@ -753,7 +1020,7 @@ function RevealBrowser({ room, frontier, progressMap, judgmentsMap, onClose }) {
         <Sub>Pasale el celu a otra pareja para que los juzguen 😄</Sub>
         <Card style={{ marginBottom: 16, width: "100%", maxWidth: 420 }}>
           {Array.from({ length: frontier }).map((_, i) => {
-            const prompt = PROMPTS.find((p) => p.id === room.promptIds[i]) || {};
+            const prompt = room.prompts[i] || {};
             const aAns = (progressMap[A.id]?.answers || [])[i] || { yo: "", partner: "" };
             const bAns = (progressMap[B.id]?.answers || [])[i] || { yo: "", partner: "" };
             const j = judgments[i] || {};
