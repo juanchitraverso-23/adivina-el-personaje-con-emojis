@@ -1,7 +1,12 @@
 {
   "name": "adivina-el-personaje-con-emojis",
   "compatibility_date": "2026-08-18",
+  "main": "src/worker.js",
   "assets": {
-    "directory": "./juegos-site"
-  }
+    "directory": "./juegos-site",
+    "binding": "ASSETS"
+  },
+  "kv_namespaces": [
+    { "binding": "ROOMS", "id": "4f087d4cae244e88bc597f213b53da59" }
+  ]
 }
