@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Juegos de JX</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Juegos JX" />
+<meta name="theme-color" content="#1B1035" />
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@700;800&family=Nunito:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100vh;
+    background: radial-gradient(circle at 20% -10%, #3a2166 0%, #170b2e 45%, #0c0620 100%);
+    font-family: 'Nunito', sans-serif;
+    color: #F3EEFF;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 40px 20px;
+  }
+  h1 {
+    font-family: 'Baloo 2', sans-serif;
+    font-weight: 800;
+    font-size: 32px;
+    color: #FFD23F;
+    text-shadow: 0 3px 0 rgba(0,0,0,0.35);
+    margin: 10px 0 30px;
+    text-align: center;
+  }
+  .card {
+    width: 100%; max-width: 380px;
+    display: flex; align-items: center; gap: 14px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 18px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+    text-decoration: none;
+    color: inherit;
+  }
+  .card.disabled { opacity: 0.45; pointer-events: none; }
+  .emoji { font-size: 34px; }
+  .name { font-family: 'Baloo 2', sans-serif; font-weight: 700; font-size: 18px; color: #F3EEFF; }
+  .tag { font-size: 12px; color: #C9B8F0; }
+</style>
+</head>
+<body>
+  <div style="font-size:56px;">🎉</div>
+  <h1>Juegos de JX</h1>
+
+  <a class="card" href="./quien-soy/">
+    <div class="emoji">🕵️‍♂️</div>
+    <div>
+      <div class="name">¿Quién Soy?</div>
+      <div class="tag">Adiviná con emojis</div>
+    </div>
+  </a>
+
+  <a class="card disabled" href="#">
+    <div class="emoji">🎭</div>
+    <div>
+      <div class="name">El Impostor</div>
+      <div class="tag">Próximamente</div>
+    </div>
+  </a>
+
+  <a class="card disabled" href="#">
+    <div class="emoji">😂</div>
+    <div>
+      <div class="name">Adiviná el Emoji</div>
+      <div class="tag">Próximamente</div>
+    </div>
+  </a>
+</body>
+</html>

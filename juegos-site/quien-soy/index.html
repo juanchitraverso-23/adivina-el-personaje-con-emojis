@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>¿Quién Soy? — Juego de emojis</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="¿Quién Soy?" />
+<meta name="theme-color" content="#1B1035" />
+<style>
+  html, body { margin:0; padding:0; background:#0c0620; }
+  #root { min-height: 100vh; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+
+const QUICK_EMOJIS = [
+  "😀","😎","🤴","👑","🎤","⚽","🏎️","🎬","🎸","🥊",
+  "🚀","🧙","🦸","🎨","📚","💃","🕺","🐐","🔥","🌟",
+  "🍕","🍺","🐍","🦁","👽","🤖","🎩","🥋","⛳","🏆",
+];
+
+const GRADIENT_BG =
+  "radial-gradient(circle at 20% -10%, #3a2166 0%, #170b2e 45%, #0c0620 100%)";
+
+function useInjectFont() {
+  useEffect(() => {
+    if (document.getElementById("aq-fonts")) return;
+    const link = document.createElement("link");
+    link.id = "aq-fonts";
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap";
+    document.head.appendChild(link);
+  }, []);
+}
+
+function Screen({ children, style }) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        width: "100%",
+        background: GRADIENT_BG,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        padding: "28px 18px 40px",
+        fontFamily: "'Nunito', sans-serif",
+        color: "#F3EEFF",
+        boxSizing: "border-box",
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Title({ children, size = 30 }) {
+  return (
+    <h1
+      style={{
+        fontFamily: "'Baloo 2', sans-serif",
+        fontWeight: 800,
+        fontSize: size,
+        color: "#FFD23F",
+        textShadow: "0 3px 0 rgba(0,0,0,0.35)",
+        margin: "0 0 6px",
+        textAlign: "center",
+        letterSpacing: 0.3,
+      }}
+    >
+      {children}
+    </h1>
+  );
+}
+
+function Sub({ children }) {
+  return (
+    <p
+      style={{
+        color: "#C9B8F0",
+        fontSize: 15,
+        textAlign: "center",
+        margin: "0 0 22px",
+        lineHeight: 1.4,
+      }}
+    >
+      {children}
+    </p>
+  );
+}
+
+function BigButton({ children, onClick, color = "#FF3E7F", disabled, style }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        width: "100%",
+        maxWidth: 380,
+        padding: "16px 20px",
+        borderRadius: 18,
+        border: "none",
+        background: disabled ? "#4a3d63" : color,
+        color: disabled ? "#8b7fa8" : "#1B1035",
+        fontFamily: "'Baloo 2', sans-serif",
+        fontWeight: 700,
+        fontSize: 18,
+        boxShadow: disabled ? "none" : "0 6px 0 rgba(0,0,0,0.28)",
+        cursor: disabled ? "default" : "pointer",
+        marginBottom: 14,
+        transition: "transform 0.08s ease",
+        ...style,
+      }}
+      onMouseDown={(e) => {
+        if (!disabled) e.currentTarget.style.transform = "translateY(4px)";
+      }}
+      onMouseUp={(e) => {
+        e.currentTarget.style.transform = "translateY(0)";
+      }}
+      onTouchStart={(e) => {
+        if (!disabled) e.currentTarget.style.transform = "translateY(4px)";
+      }}
+      onTouchEnd={(e) => {
+        e.currentTarget.style.transform = "translateY(0)";
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Card({ children, style }) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 420,
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.12)",
+        borderRadius: 22,
+        padding: 20,
+        boxSizing: "border-box",
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ClueTrail({ clues }) {
+  if (!clues.length) return null;
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 420,
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 8,
+        justifyContent: "center",
+        marginBottom: 22,
+        padding: "14px 12px",
+        background: "rgba(0,0,0,0.25)",
+        borderRadius: 18,
+        border: "1px dashed rgba(255,210,63,0.4)",
+      }}
+    >
+      {clues.map((c, i) => (
+        <div
+          key={i}
+          style={{
+            fontSize: 34,
+            background: "rgba(255,255,255,0.08)",
+            borderRadius: 12,
+            padding: "6px 10px",
+            position: "relative",
+          }}
+        >
+          {c}
+          <span
+            style={{
+              position: "absolute",
+              top: -8,
+              right: -4,
+              fontSize: 10,
+              background: "#FFD23F",
+              color: "#1B1035",
+              borderRadius: 8,
+              padding: "1px 5px",
+              fontWeight: 800,
+              fontFamily: "'Baloo 2', sans-serif",
+            }}
+          >
+            {i + 1}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function App() {
+  useInjectFont();
+
+  const [screen, setScreen] = useState("home");
+  const [players, setPlayers] = useState([]);
+  const [nameDraft, setNameDraft] = useState("");
+  const [playerCount, setPlayerCount] = useState(4);
+  const [scores, setScores] = useState({});
+  const [clueGiverIdx, setClueGiverIdx] = useState(0);
+  const [clues, setClues] = useState([]);
+  const [emojiDraft, setEmojiDraft] = useState("");
+  const [guessers, setGuessers] = useState([]);
+  const [guessIdx, setGuessIdx] = useState(0);
+  const [guessDraft, setGuessDraft] = useState("");
+  const [guesses, setGuesses] = useState([]);
+  const [lastWinner, setLastWinner] = useState(null);
+  const [round, setRound] = useState(1);
+  const inputRef = useRef(null);
+
+  const clueGiver = players[clueGiverIdx];
+
+  function goHome() {
+    setScreen("home");
+    setPlayers([]);
+    setScores({});
+    setClues([]);
+    setGuesses([]);
+    setRound(1);
+    setClueGiverIdx(0);
+  }
+
+  function startOnline() {
+    alert("El modo Online todavía no está listo 🚧 ¡Pronto! Por ahora jugá offline pasando el celu.");
+  }
+
+  function confirmCount() {
+    setPlayers(Array.from({ length: playerCount }, () => ""));
+    setScreen("names");
+  }
+
+  function setPlayerName(i, val) {
+    setPlayers((prev) => {
+      const copy = [...prev];
+      copy[i] = val;
+      return copy;
+    });
+  }
+
+  function namesReady() {
+    const cleaned = players.map((p, i) => p.trim() || `Jugador ${i + 1}`);
+    setPlayers(cleaned);
+    setScores(Object.fromEntries(cleaned.map((n) => [n, 0])));
+    setScreen("passToClue");
+  }
+
+  function beginClueInput() {
+    setClues([]);
+    setEmojiDraft("");
+    setScreen("clueInput");
+  }
+
+  function addClueAndPass() {
+    const val = emojiDraft.trim();
+    if (!val) return;
+    setClues((prev) => [...prev, val]);
+    setEmojiDraft("");
+    const gList = players.filter((_, i) => i !== clueGiverIdx);
+    setGuessers(gList);
+    setGuessIdx(0);
+    setGuesses([]);
+    setGuessDraft("");
+    setScreen("passToGuess");
+  }
+
+  function submitGuess() {
+    const g = { name: guessers[guessIdx], text: guessDraft.trim() || "(sin respuesta)" };
+    setGuesses((prev) => [...prev, g]);
+    setGuessDraft("");
+    if (guessIdx + 1 < guessers.length) {
+      setGuessIdx((i) => i + 1);
+      setScreen("passToGuess");
+    } else {
+      setScreen("passToReview");
+    }
+  }
+
+  function markWinner(name) {
+    setScores((prev) => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
+    setLastWinner(name);
+    setScreen("winner");
+  }
+
+  function nobodyGuessed() {
+    setScreen("clueInputAgain");
+  }
+
+  function nextRound() {
+    setClueGiverIdx((i) => (i + 1) % players.length);
+    setRound((r) => r + 1);
+    setClues([]);
+    setGuesses([]);
+    setLastWinner(null);
+    setScreen("passToClue");
+  }
+
+  // ---------- HOME ----------
+  if (screen === "home") {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <div style={{ fontSize: 64, marginBottom: 6 }}>🕵️‍♂️</div>
+        <Title size={36}>¿Quién Soy?</Title>
+        <Sub>
+          Uno piensa una persona o personaje famoso y lo describe con emojis.
+          Los demás intentan adivinar. ¡Sin hablar!
+        </Sub>
+        <BigButton onClick={() => setScreen("count")} color="#FF3E7F">
+          📴 Jugar Offline (pasando el celu)
+        </BigButton>
+        <BigButton onClick={startOnline} color="#5B4B8A" style={{ opacity: 0.85 }}>
+          🌐 Jugar Online (próximamente)
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- COUNT ----------
+  if (screen === "count") {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <Title>¿Cuántos juegan?</Title>
+        <Sub>Entre 3 y 8 jugadores</Sub>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 18,
+            marginBottom: 26,
+          }}
+        >
+          <button
+            onClick={() => setPlayerCount((c) => Math.max(3, c - 1))}
+            style={counterBtnStyle}
+          >
+            −
+          </button>
+          <div
+            style={{
+              fontFamily: "'Baloo 2', sans-serif",
+              fontSize: 48,
+              color: "#FFD23F",
+              width: 70,
+              textAlign: "center",
+            }}
+          >
+            {playerCount}
+          </div>
+          <button
+            onClick={() => setPlayerCount((c) => Math.min(8, c + 1))}
+            style={counterBtnStyle}
+          >
+            +
+          </button>
+        </div>
+        <BigButton onClick={confirmCount}>Siguiente ➜</BigButton>
+        <BigButton onClick={goHome} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          ← Volver
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- NAMES ----------
+  if (screen === "names") {
+    const allFilled = true; // names optional, defaults applied
+    return (
+      <Screen>
+        <Title size={26}>Nombres de los jugadores</Title>
+        <Sub>Se van a ir pasando el celu en este orden</Sub>
+        <Card style={{ marginBottom: 20 }}>
+          {players.map((p, i) => (
+            <input
+              key={i}
+              value={p}
+              onChange={(e) => setPlayerName(i, e.target.value)}
+              placeholder={`Jugador ${i + 1}`}
+              style={inputStyle}
+            />
+          ))}
+        </Card>
+        <BigButton onClick={namesReady}>¡Listo, arrancar! 🎉</BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- PASS TO CLUE GIVER ----------
+  if (screen === "passToClue") {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <div style={{ fontSize: 56, marginBottom: 10 }}>🤫</div>
+        <Title size={24}>Ronda {round}</Title>
+        <Sub>
+          Pasale el celu a <b style={{ color: "#FFD23F" }}>{clueGiver}</b>.
+          Nadie más tiene que mirar la pantalla.
+        </Sub>
+        <BigButton onClick={beginClueInput}>
+          Ya lo tengo yo, {clueGiver} 👀
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- CLUE INPUT (first clue of the round) ----------
+  if (screen === "clueInput" || screen === "clueInputAgain") {
+    const isAgain = screen === "clueInputAgain";
+    return (
+      <Screen>
+        <Title size={24}>
+          {isAgain ? "Nadie adivinó 😬" : `Pensá a alguien, ${clueGiver}`}
+        </Title>
+        <Sub>
+          {isAgain
+            ? "Agregá otro emoji como pista extra"
+            : "Elegí una persona o personaje que todos conozcan, y describilo con un emoji"}
+        </Sub>
+        <ClueTrail clues={clues} />
+        <Card style={{ marginBottom: 16 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(6, 1fr)",
+              gap: 6,
+              marginBottom: 14,
+            }}
+          >
+            {QUICK_EMOJIS.map((e) => (
+              <button
+                key={e}
+                onClick={() => setEmojiDraft(e)}
+                style={{
+                  fontSize: 22,
+                  background:
+                    emojiDraft === e ? "rgba(255,210,63,0.3)" : "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 10,
+                  padding: "6px 0",
+                  cursor: "pointer",
+                }}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+          <input
+            value={emojiDraft}
+            onChange={(e) => setEmojiDraft(e.target.value)}
+            placeholder="o escribí/pegá tu propio emoji"
+            style={inputStyle}
+          />
+        </Card>
+        <BigButton
+          onClick={isAgain ? () => {
+            const val = emojiDraft.trim();
+            if (!val) return;
+            setClues((prev) => [...prev, val]);
+            setEmojiDraft("");
+            setGuessIdx(0);
+            setGuesses([]);
+            setGuessDraft("");
+            setScreen("passToGuess");
+          } : addClueAndPass}
+          disabled={!emojiDraft.trim()}
+        >
+          Pasar el celu para adivinar ➜
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- PASS TO GUESSER ----------
+  if (screen === "passToGuess") {
+    const current = guessers[guessIdx];
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <div style={{ fontSize: 56, marginBottom: 10 }}>📲</div>
+        <Sub>
+          Jugador {guessIdx + 1} de {guessers.length}
+        </Sub>
+        <Title size={24}>Pasale el celu a {current}</Title>
+        <BigButton onClick={() => setScreen("guessing")}>
+          Soy {current}, ¡a adivinar! 🔍
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- GUESSING ----------
+  if (screen === "guessing") {
+    const current = guessers[guessIdx];
+    return (
+      <Screen>
+        <Title size={22}>¿Quién es, {current}?</Title>
+        <ClueTrail clues={clues} />
+        <Card style={{ marginBottom: 16 }}>
+          <input
+            autoFocus
+            value={guessDraft}
+            onChange={(e) => setGuessDraft(e.target.value)}
+            placeholder="Escribí tu respuesta..."
+            style={inputStyle}
+            onKeyDown={(e) => e.key === "Enter" && submitGuess()}
+          />
+        </Card>
+        <BigButton onClick={submitGuess}>Confirmar respuesta ✅</BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- PASS TO REVIEW ----------
+  if (screen === "passToReview") {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <div style={{ fontSize: 56, marginBottom: 10 }}>🎯</div>
+        <Sub>Ya respondieron todos</Sub>
+        <Title size={24}>Pasale el celu a {clueGiver}</Title>
+        <BigButton onClick={() => setScreen("review")}>
+          Soy {clueGiver}, veamos las respuestas 👁️
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- REVIEW ----------
+  if (screen === "review") {
+    return (
+      <Screen>
+        <Title size={22}>Respuestas — {clueGiver} decide</Title>
+        <ClueTrail clues={clues} />
+        <Card style={{ marginBottom: 16 }}>
+          {guesses.map((g, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 6px",
+                borderBottom:
+                  i < guesses.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 12, color: "#C9B8F0" }}>{g.name}</div>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>{g.text}</div>
+              </div>
+              <button onClick={() => markWinner(g.name)} style={correctBtnStyle}>
+                ¡Correcto! 🏆
+              </button>
+            </div>
+          ))}
+        </Card>
+        <BigButton onClick={nobodyGuessed} color="#5B4B8A">
+          Nadie acertó, doy otra pista 🔁
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- WINNER ----------
+  if (screen === "winner") {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <div style={{ fontSize: 70, marginBottom: 6 }}>🎉</div>
+        <Title size={30}>¡{lastWinner} acertó!</Title>
+        <Sub>
+          Con {clues.length} {clues.length === 1 ? "pista" : "pistas"} de {clueGiver}
+        </Sub>
+        <Card style={{ marginBottom: 20 }}>
+          <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 15, color: "#FFD23F", marginBottom: 8 }}>
+            Puntajes
+          </div>
+          {Object.entries(scores)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, pts]) => (
+              <div
+                key={name}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  padding: "6px 2px",
+                  fontSize: 15,
+                }}
+              >
+                <span>{name}</span>
+                <span style={{ color: "#FFD23F", fontWeight: 800 }}>{pts} ⭐</span>
+              </div>
+            ))}
+        </Card>
+        <BigButton onClick={nextRound}>Siguiente ronda ➜</BigButton>
+        <BigButton onClick={goHome} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Terminar juego
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  return null;
+}
+
+const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.15)",
+  background: "rgba(0,0,0,0.25)",
+  color: "#F3EEFF",
+  fontSize: 16,
+  marginBottom: 10,
+  outline: "none",
+  fontFamily: "'Nunito', sans-serif",
+};
+
+const counterBtnStyle = {
+  width: 52,
+  height: 52,
+  borderRadius: "50%",
+  border: "none",
+  background: "#FF3E7F",
+  color: "#1B1035",
+  fontSize: 28,
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const correctBtnStyle = {
+  background: "#FFD23F",
+  color: "#1B1035",
+  border: "none",
+  borderRadius: 10,
+  padding: "8px 10px",
+  fontWeight: 800,
+  fontFamily: "'Baloo 2', sans-serif",
+  fontSize: 13,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
