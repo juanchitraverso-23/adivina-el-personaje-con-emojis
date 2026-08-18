@@ -828,11 +828,26 @@ function localNextPlayer() {
   render();
 }
 function localStartClueRound() {
+  const L = state.local;
   state.screen = "localClueRound";
-  state.local.clueStep = 0; state.local.clueText = null; state.local.clueError = null;
+  L.clueStep = 0; L.clueText = null; L.clueError = null;
+  localSkipHumanTurns();
   render();
 }
 function localIsBotName(name) { return botNamesPool.includes(name); }
+
+// Con un solo celular en mano de quien arrancó, nadie más lo toca durante
+// la ronda de palabras: cada humano dice la suya en voz alta, en el orden
+// que ya se mostró, sin tocar el teléfono. Por eso el celu solo se detiene
+// (y pide un toque) en los turnos de los bots, que sí necesitan que alguien
+// les pida la palabra. Si no hay bots, salta directo a la votación.
+function localSkipHumanTurns() {
+  const L = state.local;
+  while (L.clueStep < L.clueOrder.length && !localIsBotName(L.allPlayers[L.clueOrder[L.clueStep]])) {
+    L.clueStep += 1;
+  }
+  if (L.clueStep >= L.clueOrder.length) state.screen = "localDone";
+}
 
 async function localFetchBotClue(name) {
   const L = state.local;
@@ -852,7 +867,7 @@ async function localFetchBotClue(name) {
 function localNextClueStep() {
   const L = state.local;
   L.clueStep += 1; L.clueText = null; L.clueError = null;
-  if (L.clueStep >= L.clueOrder.length) state.screen = "localDone";
+  localSkipHumanTurns();
   render();
 }
 function localRevealAnswer() { state.local.showAnswer = true; render(); }
@@ -1119,44 +1134,40 @@ function renderLocal(card) {
   }
 
   if (state.screen === "localClueIntro") {
-    const starterName = L.allPlayers[L.starter];
+    const orderNames = L.clueOrder.map(i => L.allPlayers[i]);
+    const hasBots = orderNames.some(localIsBotName);
+    const orderLabel = orderNames.map(n => (localIsBotName(n) ? "🤖 " + n.toUpperCase() : n.toUpperCase())).join("  →  ");
     card.innerHTML = `
       <h1>🎬 ¡A jugar!</h1>
-      <div class="sub">Todos vieron su palabra (o su rol de impostor). Ahora, en orden, cada uno dice UNA sola palabra relacionada.</div>
-      <div class="roomCodeBox"><div class="roomCodeLabel">EMPIEZA LA RONDA</div><div class="roomCode" style="font-size:26px;letter-spacing:2px;">${starterName.toUpperCase()}</div></div>
-      <button class="btn btnPrimary" onclick="localStartClueRound()">Empezar ronda de palabras</button>
+      <div class="sub">Todos vieron su palabra (o su rol de impostor). Ahora, en este orden, cada uno dice en voz alta UNA sola palabra relacionada. No hace falta tocar el celu para eso — se van turnando hablando nomás, el teléfono se queda en tu mano.</div>
+      <div class="roomCodeBox"><div class="roomCodeLabel">ORDEN</div><div class="roomCode" style="font-size:18px;letter-spacing:0.5px;line-height:1.5;word-break:break-word;">${orderLabel}</div></div>
+      <button class="btn btnPrimary" onclick="localStartClueRound()">
+        ${hasBots ? "Empezar (los bots van a necesitar que les pidas la palabra)" : "Ya dijimos todos, a votar 🗳️"}
+      </button>
     `;
     return;
   }
 
   if (state.screen === "localClueRound") {
+    // Acá solo se cae en turnos de bots: los humanos se saltean solos
+    // (ver localSkipHumanTurns), porque el celu no se les pasa.
     const idx = L.clueOrder[L.clueStep];
     const name = L.allPlayers[idx];
-    const isBot = localIsBotName(name);
     const stepLabel = `Turno ${L.clueStep + 1} de ${L.clueOrder.length}`;
-    if (!isBot) {
-      card.innerHTML = `
-        <h1>🗣️ Ronda de palabras</h1>
-        <div class="sub">${stepLabel}</div>
-        <div class="turnBanner myTurn"><div class="turnName">${name.toUpperCase()}</div><div class="turnHint">Decí UNA sola palabra en voz alta</div></div>
-        <button class="btn btnPrimary" onclick="localNextClueStep()">Listo, siguiente</button>
-      `;
-    } else {
-      card.innerHTML = `
-        <h1>🗣️ Ronda de palabras</h1>
-        <div class="sub">${stepLabel}</div>
-        <div class="turnBanner">
-          <div class="turnName">🤖 ${name.toUpperCase()}</div>
-          ${L.clueLoading ? `<div class="loading">Pensando la palabra...</div>` : ""}
-          ${L.clueText ? `<div class="clueBubble">${L.clueText.toUpperCase()}</div>` : ""}
-          ${L.clueError ? `<div class="warn">${L.clueError}</div>` : ""}
-        </div>
-        ${!L.clueText && !L.clueLoading ? `<button class="btn btnLavender" onclick="localFetchBotClue('${name}')">Pedir la palabra de ${name} 🔊</button>` : ""}
-        ${L.clueText ? `<button class="btn btnSecondary" onclick="localNextClueStep()">Siguiente</button>` : ""}
-        ${L.clueError ? `<button class="btn btnSecondary" onclick="localFetchBotClue('${name}')">Reintentar</button>` : ""}
-        <div class="footerNote">Claude dice su palabra en voz alta por el parlante del teléfono.</div>
-      `;
-    }
+    card.innerHTML = `
+      <h1>🗣️ Ronda de palabras</h1>
+      <div class="sub">${stepLabel}</div>
+      <div class="turnBanner">
+        <div class="turnName">🤖 ${name.toUpperCase()}</div>
+        ${L.clueLoading ? `<div class="loading">Pensando la palabra...</div>` : ""}
+        ${L.clueText ? `<div class="clueBubble">${L.clueText.toUpperCase()}</div>` : ""}
+        ${L.clueError ? `<div class="warn">${L.clueError}</div>` : ""}
+      </div>
+      ${!L.clueText && !L.clueLoading ? `<button class="btn btnLavender" onclick="localFetchBotClue('${name}')">Pedir la palabra de ${name} 🔊</button>` : ""}
+      ${L.clueText ? `<button class="btn btnSecondary" onclick="localNextClueStep()">Siguiente</button>` : ""}
+      ${L.clueError ? `<button class="btn btnSecondary" onclick="localFetchBotClue('${name}')">Reintentar</button>` : ""}
+      <div class="footerNote">Claude dice su palabra en voz alta por el parlante del teléfono.</div>
+    `;
     return;
   }
 
