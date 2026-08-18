@@ -135,7 +135,7 @@ function HomeButton({ confirmMessage }) {
         color: "#fff",
         fontFamily: "'Nunito', sans-serif",
         fontWeight: 800,
-        fontSize: 14,
+        fontSize: 15,
         textDecoration: "none",
         boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
       }}
@@ -169,7 +169,7 @@ function Sub({ children, style }) {
     <p
       style={{
         color: "#C9B8F0",
-        fontSize: 15,
+        fontSize: 16,
         textAlign: "center",
         margin: "0 0 22px",
         lineHeight: 1.4,
@@ -281,7 +281,7 @@ function ClueTrail({ clues }) {
               position: "absolute",
               top: -8,
               right: -4,
-              fontSize: 10,
+              fontSize: 11,
               background: "#FFD23F",
               color: "#1B1035",
               borderRadius: 8,
@@ -695,8 +695,8 @@ function OfflineGame({ onBack }) {
                 }}
               >
                 <div>
-                  <div style={{ fontSize: 12, color: "#C9B8F0" }}>{g.name}</div>
-                  <div style={{ fontSize: 16, fontWeight: 700 }}>{g.text}</div>
+                  <div style={{ fontSize: 13, color: "#C9B8F0" }}>{g.name}</div>
+                  <div style={{ fontSize: 17, fontWeight: 700 }}>{g.text}</div>
                 </div>
                 <button
                   onClick={() => toggleWinner(g.name)}
@@ -737,7 +737,7 @@ function OfflineGame({ onBack }) {
           Ronda de {lastPool} {lastPool === 1 ? "punto" : "puntos"} repartidos: +{lastShare} para cada ganador ({clueGiver} incluido)
         </Sub>
         <Card style={{ marginBottom: 20 }}>
-          <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 15, color: "#FFD23F", marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 16, color: "#FFD23F", marginBottom: 8 }}>
             Puntajes
           </div>
           {Object.entries(scores)
@@ -749,7 +749,7 @@ function OfflineGame({ onBack }) {
                   display: "flex",
                   justifyContent: "space-between",
                   padding: "6px 2px",
-                  fontSize: 15,
+                  fontSize: 16,
                 }}
               >
                 <span>{name}</span>
@@ -1092,10 +1092,10 @@ function OnlineGame({ onBack }) {
               fontFamily: "'Nunito', sans-serif",
             }}
           >
-            <div style={{ fontFamily: "'Baloo 2', sans-serif", fontWeight: 800, color: "#FFD23F", fontSize: 15 }}>
+            <div style={{ fontFamily: "'Baloo 2', sans-serif", fontWeight: 800, color: "#FFD23F", fontSize: 16 }}>
               ↩️ Volver a tu sala ({resumable.code})
             </div>
-            <div style={{ fontSize: 12.5, color: "#C9B8F0", marginTop: 2 }}>
+            <div style={{ fontSize: 13.5, color: "#C9B8F0", marginTop: 2 }}>
               Eran {joinNames(resumable.names)} — siguen ahí adentro
             </div>
           </button>
@@ -1105,7 +1105,7 @@ function OnlineGame({ onBack }) {
           <div
             style={{
               fontFamily: "'Baloo 2', sans-serif",
-              fontSize: 12,
+              fontSize: 13,
               color: "#FFD23F",
               marginBottom: 8,
               textTransform: "uppercase",
@@ -1133,7 +1133,7 @@ function OnlineGame({ onBack }) {
                   <span style={{ fontWeight: 700 }}>{n}</span>
                   <button
                     onClick={() => removeLocalName(i)}
-                    style={{ background: "none", border: "none", color: "#FF6B9D", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                    style={{ background: "none", border: "none", color: "#FF6B9D", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
                   >
                     Quitar
                   </button>
@@ -1176,7 +1176,7 @@ function OnlineGame({ onBack }) {
             style={{ ...inputStyle, marginBottom: 0, letterSpacing: 3, textTransform: "uppercase" }}
             maxLength={4}
           />
-          {joinError && <div style={{ color: "#FF6B9D", fontSize: 13, marginTop: 8 }}>{joinError}</div>}
+          {joinError && <div style={{ color: "#FF6B9D", fontSize: 14, marginTop: 8 }}>{joinError}</div>}
         </Card>
         <BigButton onClick={() => doJoin()} disabled={joining}>
           {joining ? "Entrando..." : codeInput.trim() ? "Unirme a la sala" : "Crear sala y jugar"}
@@ -1187,7 +1187,7 @@ function OnlineGame({ onBack }) {
             <div
               style={{
                 fontFamily: "'Baloo 2', sans-serif",
-                fontSize: 12,
+                fontSize: 13,
                 color: "#FFD23F",
                 marginBottom: 8,
                 textTransform: "uppercase",
@@ -1215,11 +1215,11 @@ function OnlineGame({ onBack }) {
                   color: "#F3EEFF",
                   fontFamily: "'Nunito', sans-serif",
                   fontWeight: 700,
-                  fontSize: 14,
+                  fontSize: 15,
                 }}
               >
                 <span>{r.players.map((p) => p.name).join(", ")}</span>
-                <span style={{ color: "#FFD23F", fontWeight: 800, fontSize: 12, letterSpacing: 2 }}>{r.code}</span>
+                <span style={{ color: "#FFD23F", fontWeight: 800, fontSize: 13, letterSpacing: 2 }}>{r.code}</span>
               </button>
             ))}
           </Card>
@@ -1250,7 +1250,7 @@ function OnlineGame({ onBack }) {
     return (
       <Screen style={{ justifyContent: "center" }}>
         <div style={{ display: "flex", justifyContent: "space-between", width: "100%", maxWidth: 420, marginBottom: 10 }}>
-          <span style={{ color: "#C9B8F0", fontSize: 13 }}>
+          <span style={{ color: "#C9B8F0", fontSize: 14 }}>
             Este celu: <b style={{ color: "#F3EEFF" }}>{joinNames(myPlayers.map((p) => p.name))}</b>
           </span>
           <button
@@ -1263,7 +1263,7 @@ function OnlineGame({ onBack }) {
               color: "#FFD23F",
               fontWeight: 800,
               letterSpacing: 2,
-              fontSize: 13,
+              fontSize: 14,
               cursor: "pointer",
             }}
           >
@@ -1273,10 +1273,10 @@ function OnlineGame({ onBack }) {
         <Title size={26}>Sala {roomCode}</Title>
         <Card style={{ marginBottom: 20 }}>
           {sorted.map((p) => (
-            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 2px", fontSize: 15 }}>
+            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 2px", fontSize: 16 }}>
               <span>
                 {p.name}
-                {myPlayerIds.includes(p.id) && <span style={{ color: "#8b7fa8", fontSize: 11 }}> (vos)</span>}
+                {myPlayerIds.includes(p.id) && <span style={{ color: "#8b7fa8", fontSize: 12 }}> (vos)</span>}
               </span>
               <span style={{ color: "#FFD23F", fontWeight: 800 }}>{p.score || 0} ⭐</span>
             </div>
@@ -1403,7 +1403,7 @@ function OnlineGame({ onBack }) {
           <Card style={{ marginBottom: 16 }}>
             {guessesList.length === 0 && <Sub style={{ margin: 0 }}>Todavía nadie contestó...</Sub>}
             {guessesList.map((g) => (
-              <div key={g.id} style={{ padding: "6px 2px", fontSize: 14, color: "#C9B8F0" }}>
+              <div key={g.id} style={{ padding: "6px 2px", fontSize: 15, color: "#C9B8F0" }}>
                 {g.name} ya respondió
               </div>
             ))}
@@ -1460,8 +1460,8 @@ function OnlineGame({ onBack }) {
                 }}
               >
                 <div>
-                  <div style={{ fontSize: 12, color: "#C9B8F0" }}>{g.name}</div>
-                  <div style={{ fontSize: 16, fontWeight: 700 }}>{g.text}</div>
+                  <div style={{ fontSize: 13, color: "#C9B8F0" }}>{g.name}</div>
+                  <div style={{ fontSize: 17, fontWeight: 700 }}>{g.text}</div>
                 </div>
                 <button onClick={() => toggleSelected(g.id)} style={isSelected ? correctBtnStyleActive : correctBtnStyle}>
                   {isSelected ? "✅ Acertó" : "¡Correcto! 🏆"}
@@ -1501,11 +1501,11 @@ function OnlineGame({ onBack }) {
           Ronda de {lr.pool} {lr.pool === 1 ? "punto" : "puntos"}: +{lr.share} para cada ganador
         </Sub>
         <Card style={{ marginBottom: 20 }}>
-          <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 15, color: "#FFD23F", marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 16, color: "#FFD23F", marginBottom: 8 }}>
             Puntajes
           </div>
           {sorted.map((p) => (
-            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 2px", fontSize: 15 }}>
+            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 2px", fontSize: 16 }}>
               <span>{p.name}</span>
               <span style={{ color: "#FFD23F", fontWeight: 800 }}>{p.score || 0} ⭐</span>
             </div>
@@ -1530,7 +1530,7 @@ const inputStyle = {
   border: "1px solid rgba(255,255,255,0.15)",
   background: "rgba(0,0,0,0.25)",
   color: "#F3EEFF",
-  fontSize: 16,
+  fontSize: 17,
   marginBottom: 10,
   outline: "none",
   fontFamily: "'Nunito', sans-serif",
@@ -1556,7 +1556,7 @@ const correctBtnStyle = {
   padding: "8px 10px",
   fontWeight: 800,
   fontFamily: "'Baloo 2', sans-serif",
-  fontSize: 13,
+  fontSize: 14,
   cursor: "pointer",
   whiteSpace: "nowrap",
 };

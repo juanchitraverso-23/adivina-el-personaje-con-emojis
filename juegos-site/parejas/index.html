@@ -375,7 +375,7 @@ function HomeButton({ confirmMessage }) {
         display: "flex", alignItems: "center", gap: 6,
         padding: "9px 16px 9px 11px", borderRadius: 30,
         background: "rgba(0,0,0,0.6)", border: "1.5px solid rgba(255,255,255,0.4)",
-        color: "#fff", fontWeight: 800, fontSize: 14,
+        color: "#fff", fontWeight: 800, fontSize: 15,
         textDecoration: "none", boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
       }}
     >
@@ -414,7 +414,7 @@ function Title({ children, size = 28 }) {
 }
 function Sub({ children, style }) {
   return (
-    <p style={{ color: C.textMuted, fontSize: 15, textAlign: "center", margin: "0 0 22px", lineHeight: 1.5, ...style }}>
+    <p style={{ color: C.textMuted, fontSize: 16, textAlign: "center", margin: "0 0 22px", lineHeight: 1.5, ...style }}>
       {children}
     </p>
   );
@@ -450,7 +450,7 @@ function Card({ children, style }) {
 const inputStyle = {
   width: "100%", boxSizing: "border-box", padding: "12px 14px", borderRadius: 12,
   border: "1px solid rgba(255,255,255,0.18)", background: "rgba(0,0,0,0.28)", color: "#FBEEF0",
-  fontSize: 16, marginBottom: 10, outline: "none", fontFamily: "'Nunito', sans-serif",
+  fontSize: 17, marginBottom: 10, outline: "none", fontFamily: "'Nunito', sans-serif",
 };
 
 // ==================== PANTALLA DE ENTRAR / CREAR ====================
@@ -563,7 +563,7 @@ function JoinScreen({ mode, gameMode, onBack, onEntered }) {
           />
         )}
         <input value={myName} onChange={(e) => setMyName(e.target.value)} placeholder="Tu nombre" style={{ ...inputStyle, marginBottom: 0 }} maxLength={16} />
-        {error && <div style={{ color: C.roseSoft, fontSize: 13, marginTop: 10 }}>{error}</div>}
+        {error && <div style={{ color: C.roseSoft, fontSize: 14, marginTop: 10 }}>{error}</div>}
       </Card>
 
       <BigButton onClick={() => doEnter(mode === "join" ? codeInput.trim().toUpperCase() : undefined)} disabled={busy}>
@@ -572,7 +572,7 @@ function JoinScreen({ mode, gameMode, onBack, onEntered }) {
 
       {mode === "join" && openRooms.length > 0 && (
         <Card style={{ marginTop: 4 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontSize: 13, color: C.gold, marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontSize: 14, color: C.gold, marginBottom: 8 }}>
             Salas abiertas ahora
           </div>
           {openRooms.map((r) => {
@@ -585,11 +585,11 @@ function JoinScreen({ mode, gameMode, onBack, onEntered }) {
                   width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
                   background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
                   borderRadius: 12, padding: "10px 12px", marginBottom: 8, cursor: "pointer",
-                  color: "#FBEEF0", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 13,
+                  color: "#FBEEF0", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 14,
                 }}
               >
                 <span>{rc.emoji} {r.name} — {(r.players || []).map((p) => p.name).join(", ")}</span>
-                <span style={{ color: C.gold, fontWeight: 800, fontSize: 12, letterSpacing: 2 }}>{r.code}</span>
+                <span style={{ color: C.gold, fontWeight: 800, fontSize: 13, letterSpacing: 2 }}>{r.code}</span>
               </button>
             );
           })}
@@ -721,8 +721,8 @@ function Lobby({ room, myId, onRoomUpdated, onStarted }) {
   return (
     <Screen style={{ justifyContent: "center" }}>
       <div style={{ display: "flex", justifyContent: "space-between", width: "100%", maxWidth: 420, marginBottom: 10 }}>
-        <span style={{ color: C.textMuted, fontSize: 13 }}>{cfg.emoji} {cfg.label} · Sala</span>
-        <span style={{ color: C.gold, fontWeight: 800, letterSpacing: 2, fontSize: 13 }}>{room.code}</span>
+        <span style={{ color: C.textMuted, fontSize: 14 }}>{cfg.emoji} {cfg.label} · Sala</span>
+        <span style={{ color: C.gold, fontWeight: 800, letterSpacing: 2, fontSize: 14 }}>{room.code}</span>
       </div>
       <Title size={26}>{room.name}</Title>
 
@@ -733,14 +733,14 @@ function Lobby({ room, myId, onRoomUpdated, onStarted }) {
               key={c[0].coupleId}
               style={{
                 display: "flex", justifyContent: "space-between", alignItems: "center",
-                padding: "8px 2px", fontSize: 15,
+                padding: "8px 2px", fontSize: 16,
                 borderBottom: i < couples.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none",
               }}
             >
               <span>{cfg.duoEmoji} {c[0].name} + {c[1].name}</span>
               <button
                 onClick={() => unpair(c[0].coupleId)}
-                style={{ background: "none", border: "none", color: C.textFaint, fontSize: 12, cursor: "pointer", textDecoration: "underline" }}
+                style={{ background: "none", border: "none", color: C.textFaint, fontSize: 13, cursor: "pointer", textDecoration: "underline" }}
               >
                 Desarmar
               </button>
@@ -751,7 +751,7 @@ function Lobby({ room, myId, onRoomUpdated, onStarted }) {
 
       {solo.length > 0 && (
         <Card style={{ marginBottom: 14 }}>
-          <Sub style={{ margin: "0 0 10px", fontSize: 13 }}>
+          <Sub style={{ margin: "0 0 10px", fontSize: 14 }}>
             {selectedId ? "Tocá con quién va 👇" : `Tocá dos nombres para armar una ${cfg.duoNoun}`}
           </Sub>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -763,7 +763,7 @@ function Lobby({ room, myId, onRoomUpdated, onStarted }) {
                     background: selectedId === p.id ? C.gold : "rgba(255,255,255,0.08)",
                     color: selectedId === p.id ? "#2B0F1E" : "#FBEEF0",
                     border: "1px solid rgba(255,255,255,0.16)", borderRadius: 20,
-                    padding: "8px 14px", fontWeight: 700, fontSize: 14, cursor: "pointer",
+                    padding: "8px 14px", fontWeight: 700, fontSize: 15, cursor: "pointer",
                   }}
                 >
                   {p.name}
@@ -772,7 +772,7 @@ function Lobby({ room, myId, onRoomUpdated, onStarted }) {
                   <button
                     onClick={() => removeSolo(p.id)}
                     title="Quitar de la sala"
-                    style={{ background: "none", border: "none", color: C.textFaint, fontSize: 16, cursor: "pointer", padding: 4 }}
+                    style={{ background: "none", border: "none", color: C.textFaint, fontSize: 17, cursor: "pointer", padding: 4 }}
                   >
                     ✕
                   </button>
@@ -855,7 +855,7 @@ function CustomPromptsScreen({ existingPrompts, customPrompts, onAdd, onRemove, 
       <Sub>Se suman solo para esta partida — una consigna por renglón</Sub>
 
       <Card style={{ marginBottom: 16 }}>
-        <div style={{ fontFamily: "'Fraunces', serif", fontSize: 14, color: C.gold, marginBottom: 8 }}>✍️ Pegar texto</div>
+        <div style={{ fontFamily: "'Fraunces', serif", fontSize: 15, color: C.gold, marginBottom: 8 }}>✍️ Pegar texto</div>
         <textarea
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}
@@ -863,7 +863,7 @@ function CustomPromptsScreen({ existingPrompts, customPrompts, onAdd, onRemove, 
           style={{ ...inputStyle, minHeight: 110, resize: "vertical", fontFamily: "'Nunito', sans-serif" }}
         />
         {pasteText.trim() && (
-          <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 8 }}>
+          <div style={{ fontSize: 13.5, color: C.textFaint, marginBottom: 8 }}>
             {linesOf(pasteText).length} renglones — {pasteNew.length} nuevas (sin repetir)
           </div>
         )}
@@ -877,8 +877,8 @@ function CustomPromptsScreen({ existingPrompts, customPrompts, onAdd, onRemove, 
       </Card>
 
       <Card style={{ marginBottom: 16 }}>
-        <div style={{ fontFamily: "'Fraunces', serif", fontSize: 14, color: C.gold, marginBottom: 8 }}>📷 Subir foto</div>
-        <Sub style={{ margin: "0 0 10px", fontSize: 12.5 }}>
+        <div style={{ fontFamily: "'Fraunces', serif", fontSize: 15, color: C.gold, marginBottom: 8 }}>📷 Subir foto</div>
+        <Sub style={{ margin: "0 0 10px", fontSize: 13.5 }}>
           Sacale una foto a una lista escrita o impresa. El reconocimiento no es perfecto — revisá el texto antes de agregarlo.
         </Sub>
         <input
@@ -887,10 +887,10 @@ function CustomPromptsScreen({ existingPrompts, customPrompts, onAdd, onRemove, 
           accept="image/*"
           capture="environment"
           onChange={handleFile}
-          style={{ marginBottom: 10, color: C.textMuted, fontSize: 13, width: "100%" }}
+          style={{ marginBottom: 10, color: C.textMuted, fontSize: 14, width: "100%" }}
         />
         {ocrBusy && <Sub style={{ margin: "0 0 10px" }}>Leyendo la foto...</Sub>}
-        {ocrError && <div style={{ color: C.roseSoft, fontSize: 13, marginBottom: 10 }}>{ocrError}</div>}
+        {ocrError && <div style={{ color: C.roseSoft, fontSize: 14, marginBottom: 10 }}>{ocrError}</div>}
         {ocrText && (
           <React.Fragment>
             <textarea
@@ -898,7 +898,7 @@ function CustomPromptsScreen({ existingPrompts, customPrompts, onAdd, onRemove, 
               onChange={(e) => setOcrText(e.target.value)}
               style={{ ...inputStyle, minHeight: 110, resize: "vertical", fontFamily: "'Nunito', sans-serif" }}
             />
-            <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 8 }}>
+            <div style={{ fontSize: 13.5, color: C.textFaint, marginBottom: 8 }}>
               {linesOf(ocrText).length} renglones — {ocrNew.length} nuevas (sin repetir)
             </div>
             <BigButton
@@ -914,15 +914,15 @@ function CustomPromptsScreen({ existingPrompts, customPrompts, onAdd, onRemove, 
 
       {customPrompts.length > 0 && (
         <Card style={{ marginBottom: 16 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontSize: 14, color: C.gold, marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontSize: 15, color: C.gold, marginBottom: 8 }}>
             Sumadas para esta partida ({customPrompts.length})
           </div>
           {customPrompts.map((p) => (
             <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-              <span style={{ fontSize: 13.5 }}>{p.text}</span>
+              <span style={{ fontSize: 14.5 }}>{p.text}</span>
               <button
                 onClick={() => onRemove(p.id)}
-                style={{ background: "none", border: "none", color: C.roseSoft, fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+                style={{ background: "none", border: "none", color: C.roseSoft, fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
               >
                 Quitar
               </button>
@@ -991,9 +991,9 @@ function PlayScreen({ room, myId, progressMap, onAnswered }) {
       <Title size={20}>Consigna {myProgress + 1} / {totalPrompts}</Title>
       <Sub style={{ marginTop: -8, fontSize: 17, color: "#FBEEF0", fontWeight: 700 }}>{prompt.text}</Sub>
       <Card style={{ marginBottom: 16 }}>
-        <label style={{ fontSize: 12, color: C.gold, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>Yo</label>
+        <label style={{ fontSize: 13, color: C.gold, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>Yo</label>
         <input value={yo} onChange={(e) => setYo(e.target.value)} placeholder="Tu respuesta" style={inputStyle} />
-        <label style={{ fontSize: 12, color: C.gold, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>
+        <label style={{ fontSize: 13, color: C.gold, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>
           Creo que {partner?.name || "la otra persona"}
         </label>
         <input value={pareja} onChange={(e) => setPareja(e.target.value)} placeholder="Qué creés que respondería" style={{ ...inputStyle, marginBottom: 0 }} />
@@ -1001,7 +1001,7 @@ function PlayScreen({ room, myId, progressMap, onAnswered }) {
       <BigButton onClick={confirm} disabled={saving}>
         {saving ? "Guardando..." : "Confirmar ➜"}
       </BigButton>
-      <Sub style={{ fontSize: 12.5, color: C.textFaint }}>Podés dejar algo en blanco y seguir — se puede completar al final.</Sub>
+      <Sub style={{ fontSize: 13.5, color: C.textFaint }}>Podés dejar algo en blanco y seguir — se puede completar al final.</Sub>
     </Screen>
   );
 }
@@ -1064,7 +1064,7 @@ function ReviewScreen({ room, myId, progressMap, onDone }) {
             const prompt = room.prompts[b.i] || {};
             return (
               <div key={b.i} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 6 }}>
+                <div style={{ fontSize: 14, color: C.textMuted, marginBottom: 6 }}>
                   Consigna {b.i + 1}: {prompt.text}
                 </div>
                 {!b.yo.trim() && (
@@ -1154,34 +1154,34 @@ function RevealBrowser({ room, frontier, progressMap, judgmentsMap, onClose }) {
             const j = judgments[i] || {};
             return (
               <div key={i} style={{ marginBottom: 18, paddingBottom: 18, borderBottom: i < frontier - 1 ? "1px solid rgba(255,255,255,0.1)" : "none" }}>
-                <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 8 }}>#{i + 1} — {prompt.text}</div>
+                <div style={{ fontSize: 13.5, color: C.textMuted, marginBottom: 8 }}>#{i + 1} — {prompt.text}</div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                  <div style={{ fontSize: 14 }}>
+                  <div style={{ fontSize: 15 }}>
                     <b>{A.name}</b>: {aAns.yo || <i style={{ color: C.textFaint }}>(en blanco)</i>}
-                    <div style={{ fontSize: 12.5, color: C.textFaint }}>Creía que {B.name}: {aAns.partner || "—"}</div>
+                    <div style={{ fontSize: 13.5, color: C.textFaint }}>Creía que {B.name}: {aAns.partner || "—"}</div>
                   </div>
                   <button
                     onClick={() => toggleJudgment(openCoupleId, i, "aCorrect", true)}
                     style={{
                       background: j.aCorrect === true ? C.green : "rgba(255,255,255,0.08)",
                       color: j.aCorrect === true ? "#0c2e1c" : "#FBEEF0",
-                      border: "none", borderRadius: 10, padding: "6px 10px", fontWeight: 800, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap",
+                      border: "none", borderRadius: 10, padding: "6px 10px", fontWeight: 800, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap",
                     }}
                   >
                     {j.aCorrect === true ? "✅ Acertó" : "¿Acertó?"}
                   </button>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ fontSize: 14 }}>
+                  <div style={{ fontSize: 15 }}>
                     <b>{B.name}</b>: {bAns.yo || <i style={{ color: C.textFaint }}>(en blanco)</i>}
-                    <div style={{ fontSize: 12.5, color: C.textFaint }}>Creía que {A.name}: {bAns.partner || "—"}</div>
+                    <div style={{ fontSize: 13.5, color: C.textFaint }}>Creía que {A.name}: {bAns.partner || "—"}</div>
                   </div>
                   <button
                     onClick={() => toggleJudgment(openCoupleId, i, "bCorrect", true)}
                     style={{
                       background: j.bCorrect === true ? C.green : "rgba(255,255,255,0.08)",
                       color: j.bCorrect === true ? "#0c2e1c" : "#FBEEF0",
-                      border: "none", borderRadius: 10, padding: "6px 10px", fontWeight: 800, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap",
+                      border: "none", borderRadius: 10, padding: "6px 10px", fontWeight: 800, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap",
                     }}
                   >
                     {j.bCorrect === true ? "✅ Acertó" : "¿Acertó?"}
@@ -1215,7 +1215,7 @@ function RevealBrowser({ room, frontier, progressMap, judgmentsMap, onClose }) {
                 width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
                 background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
                 borderRadius: 12, padding: "12px 14px", marginBottom: 8, cursor: "pointer",
-                color: "#FBEEF0", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 14,
+                color: "#FBEEF0", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 15,
               }}
             >
               <span>{cfg.duoEmoji} {A.name} + {B.name}</span>
@@ -1249,12 +1249,12 @@ function ResultsScreen({ room, judgmentsMap, allJudged }) {
       <div style={{ fontSize: 60, marginBottom: 6 }}>🏆</div>
       <Title size={26}>Resultado final</Title>
       {!allJudged && (
-        <Sub style={{ fontSize: 12.5 }}>El puntaje se sigue actualizando a medida que se van juzgando las rondas.</Sub>
+        <Sub style={{ fontSize: 13.5 }}>El puntaje se sigue actualizando a medida que se van juzgando las rondas.</Sub>
       )}
       <Card style={{ marginBottom: 20 }}>
         {ranked.map((r, i) => (
           <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 2px", borderBottom: i < ranked.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
-            <span style={{ fontSize: 15 }}>{medals[i] || `${i + 1}°`} {r.names}</span>
+            <span style={{ fontSize: 16 }}>{medals[i] || `${i + 1}°`} {r.names}</span>
             <span style={{ color: C.gold, fontWeight: 800 }}>{r.score} / {maxScore}</span>
           </div>
         ))}
@@ -1308,7 +1308,7 @@ function RoomView({ code, myId, onBack }) {
         <HomeButton />
         <Lobby room={room} myId={myId} onRoomUpdated={setRoom} onStarted={setRoom} />
         <div style={{ textAlign: "center", marginTop: -20, paddingBottom: 20 }}>
-          <button onClick={leaveRoom} style={{ background: "none", border: "none", color: C.textMuted, fontSize: 13, fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>
+          <button onClick={leaveRoom} style={{ background: "none", border: "none", color: C.textMuted, fontSize: 14, fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>
             Salir de la sala
           </button>
         </div>
@@ -1334,7 +1334,7 @@ function RoomView({ code, myId, onBack }) {
       style={{
         position: "fixed", bottom: 18, left: "50%", transform: "translateX(-50%)", zIndex: 40,
         background: C.gold, color: "#2B0F1E", border: "none", borderRadius: 30, padding: "12px 22px",
-        fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 14, cursor: "pointer",
+        fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 15, cursor: "pointer",
         boxShadow: "0 6px 20px rgba(0,0,0,0.4)",
       }}
     >
@@ -1472,7 +1472,7 @@ function App() {
                 background: active ? C.gold : "rgba(255,255,255,0.08)",
                 color: active ? "#2B0F1E" : C.textMuted,
                 border: `1px solid ${active ? C.gold : "rgba(255,255,255,0.16)"}`,
-                fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 13,
+                fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 14,
               }}
             >
               {m.emoji} {m.label}
@@ -1494,10 +1494,10 @@ function App() {
             color: "#FBEEF0", fontFamily: "'Nunito', sans-serif",
           }}
         >
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, color: C.gold, fontSize: 15 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, color: C.gold, fontSize: 16 }}>
             ↩️ Volver a tu sala ({resumable.code})
           </div>
-          <div style={{ fontSize: 12.5, color: C.textMuted, marginTop: 2 }}>{resumable.roomName}</div>
+          <div style={{ fontSize: 13.5, color: C.textMuted, marginTop: 2 }}>{resumable.roomName}</div>
         </button>
       )}
       <BigButton onClick={() => setScreen("create")}>💌 Crear sala</BigButton>
