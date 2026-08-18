@@ -85,7 +85,7 @@ function Title({ children, size = 30 }) {
   );
 }
 
-function Sub({ children }) {
+function Sub({ children, style }) {
   return (
     <p
       style={{
@@ -94,11 +94,18 @@ function Sub({ children }) {
         textAlign: "center",
         margin: "0 0 22px",
         lineHeight: 1.4,
+        ...style,
       }}
     >
       {children}
     </p>
   );
+}
+
+function joinNames(names) {
+  if (names.length === 0) return "";
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}`;
 }
 
 function BigButton({ children, onClick, color = "#FF3E7F", disabled, style }) {
@@ -227,7 +234,11 @@ function App() {
   const [guessIdx, setGuessIdx] = useState(0);
   const [guessDraft, setGuessDraft] = useState("");
   const [guesses, setGuesses] = useState([]);
-  const [lastWinner, setLastWinner] = useState(null);
+  const [secretCharacter, setSecretCharacter] = useState("");
+  const [selectedWinners, setSelectedWinners] = useState([]);
+  const [lastWinners, setLastWinners] = useState([]);
+  const [lastPool, setLastPool] = useState(0);
+  const [lastShare, setLastShare] = useState(0);
   const [round, setRound] = useState(1);
   const inputRef = useRef(null);
 
@@ -239,6 +250,9 @@ function App() {
     setScores({});
     setClues([]);
     setGuesses([]);
+    setSecretCharacter("");
+    setSelectedWinners([]);
+    setLastWinners([]);
     setRound(1);
     setClueGiverIdx(0);
   }
@@ -270,6 +284,8 @@ function App() {
   function beginClueInput() {
     setClues([]);
     setEmojiDraft("");
+    setSecretCharacter("");
+    setSelectedWinners([]);
     setScreen("clueInput");
   }
 
@@ -298,9 +314,29 @@ function App() {
     }
   }
 
-  function markWinner(name) {
-    setScores((prev) => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
-    setLastWinner(name);
+  function toggleWinner(name) {
+    setSelectedWinners((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    );
+  }
+
+  function confirmRoundResults() {
+    if (selectedWinners.length === 0) return;
+    // El pool arranca en 10 y baja 1 punto por cada pista extra que hizo falta, piso 0.
+    const pool = Math.max(0, 10 - (clues.length - 1));
+    // Se reparte parejo entre quien pensó el personaje y todos los que acertaron.
+    const winners = [clueGiver, ...selectedWinners];
+    const share = Math.round(pool / winners.length);
+    setScores((prev) => {
+      const next = { ...prev };
+      winners.forEach((name) => {
+        next[name] = (next[name] || 0) + share;
+      });
+      return next;
+    });
+    setLastWinners(selectedWinners);
+    setLastPool(pool);
+    setLastShare(share);
     setScreen("winner");
   }
 
@@ -313,7 +349,9 @@ function App() {
     setRound((r) => r + 1);
     setClues([]);
     setGuesses([]);
-    setLastWinner(null);
+    setSecretCharacter("");
+    setSelectedWinners([]);
+    setLastWinners([]);
     setScreen("passToClue");
   }
 
@@ -438,6 +476,14 @@ function App() {
         </Sub>
         <ClueTrail clues={clues} />
         <Card style={{ marginBottom: 16 }}>
+          {!isAgain && (
+            <input
+              value={secretCharacter}
+              onChange={(e) => setSecretCharacter(e.target.value)}
+              placeholder="¿Quién es? (queda guardado, nadie más lo ve)"
+              style={inputStyle}
+            />
+          )}
           <div
             style={{
               display: "grid",
@@ -482,7 +528,7 @@ function App() {
             setGuessDraft("");
             setScreen("passToGuess");
           } : addClueAndPass}
-          disabled={!emojiDraft.trim()}
+          disabled={!emojiDraft.trim() || (!isAgain && !secretCharacter.trim())}
         >
           Pasar el celu para adivinar ➜
         </BigButton>
@@ -545,34 +591,48 @@ function App() {
 
   // ---------- REVIEW ----------
   if (screen === "review") {
+    const pool = Math.max(0, 10 - (clues.length - 1));
     return (
       <Screen>
         <Title size={22}>Respuestas — {clueGiver} decide</Title>
+        <Sub>Tocá a todos los que acertaron (puede ser más de uno)</Sub>
         <ClueTrail clues={clues} />
         <Card style={{ marginBottom: 16 }}>
-          {guesses.map((g, i) => (
-            <div
-              key={i}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 10,
-                padding: "10px 6px",
-                borderBottom:
-                  i < guesses.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none",
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 12, color: "#C9B8F0" }}>{g.name}</div>
-                <div style={{ fontSize: 16, fontWeight: 700 }}>{g.text}</div>
+          {guesses.map((g, i) => {
+            const isSelected = selectedWinners.includes(g.name);
+            return (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "10px 6px",
+                  borderBottom:
+                    i < guesses.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 12, color: "#C9B8F0" }}>{g.name}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700 }}>{g.text}</div>
+                </div>
+                <button
+                  onClick={() => toggleWinner(g.name)}
+                  style={isSelected ? correctBtnStyleActive : correctBtnStyle}
+                >
+                  {isSelected ? "✅ Acertó" : "¡Correcto! 🏆"}
+                </button>
               </div>
-              <button onClick={() => markWinner(g.name)} style={correctBtnStyle}>
-                ¡Correcto! 🏆
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </Card>
+        <Sub style={{ marginTop: -10 }}>
+          Esta ronda vale {pool} {pool === 1 ? "punto" : "puntos"}, repartidos entre {clueGiver} y quienes acertaron
+        </Sub>
+        <BigButton onClick={confirmRoundResults} disabled={selectedWinners.length === 0}>
+          Confirmar ganadores ✅
+        </BigButton>
         <BigButton onClick={nobodyGuessed} color="#5B4B8A">
           Nadie acertó, doy otra pista 🔁
         </BigButton>
@@ -582,12 +642,18 @@ function App() {
 
   // ---------- WINNER ----------
   if (screen === "winner") {
+    const winnersLabel = joinNames(lastWinners);
     return (
       <Screen style={{ justifyContent: "center" }}>
         <div style={{ fontSize: 70, marginBottom: 6 }}>🎉</div>
-        <Title size={30}>¡{lastWinner} acertó!</Title>
+        <Title size={30}>
+          {lastWinners.length > 1 ? `¡${winnersLabel} acertaron!` : `¡${winnersLabel} acertó!`}
+        </Title>
         <Sub>
-          Con {clues.length} {clues.length === 1 ? "pista" : "pistas"} de {clueGiver}
+          Era <b style={{ color: "#FFD23F" }}>{secretCharacter}</b> — {clueGiver} dio {clues.length} {clues.length === 1 ? "pista" : "pistas"}
+        </Sub>
+        <Sub style={{ marginTop: -14 }}>
+          Ronda de {lastPool} {lastPool === 1 ? "punto" : "puntos"} repartidos: +{lastShare} para cada ganador ({clueGiver} incluido)
         </Sub>
         <Card style={{ marginBottom: 20 }}>
           <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 15, color: "#FFD23F", marginBottom: 8 }}>
@@ -658,6 +724,12 @@ const correctBtnStyle = {
   fontSize: 13,
   cursor: "pointer",
   whiteSpace: "nowrap",
+};
+
+const correctBtnStyleActive = {
+  ...correctBtnStyle,
+  background: "#3DDC84",
+  color: "#0c2e1c",
 };
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
