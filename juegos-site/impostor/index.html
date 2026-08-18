@@ -138,10 +138,24 @@
   .openRoomRow:active { background: #EFE9FF; }
   .openRoomNames { font-size: 14px; font-weight: 700; color: #3A3A4A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .openRoomCode { font-size: 12px; font-weight: 800; letter-spacing: 2px; color: #7A5FC2; flex-shrink: 0; margin-left: 10px; }
+  .homeBtn {
+    position: fixed; top: 14px; left: 14px; z-index: 10;
+    width: 40px; height: 40px; border-radius: 50%;
+    background: rgba(255,255,255,0.85); border: 1px solid rgba(0,0,0,0.06);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; text-decoration: none; box-shadow: 0 4px 14px rgba(120,120,160,0.18);
+  }
+  .resumeBanner {
+    width: 100%; background: linear-gradient(180deg, #EAD9FF, #D8BFFC); border-radius: 16px;
+    padding: 14px 16px; margin-bottom: 16px; text-align: center; cursor: pointer; border: none; font-family: inherit;
+  }
+  .resumeBanner .t { font-weight: 800; color: #3F2470; font-size: 15px; }
+  .resumeBanner .s { font-size: 12.5px; color: #6A4FA0; margin-top: 2px; }
 </style>
 </head>
 <body>
 <script src="../storage.js"></script>
+<a href="../" class="homeBtn" onclick="return confirmLeaveIfNeeded()" title="Volver al menú de juegos">🏠</a>
 <div class="card" id="card"></div>
 
 <script>
@@ -372,7 +386,21 @@ function genRoomCode() {
 }
 
 /* ================= ESTADO GLOBAL ================= */
-const myId = genId(10);
+// myId estable entre recargas de página: así, si volvés a tu sala después
+// de haber tocado "Volver" o cerrado la pestaña por error, el servidor te
+// reconoce como el mismo jugador (no como uno nuevo).
+const myId = (() => {
+  let id = localStorage.getItem("impostor:myId");
+  if (!id) { id = genId(10); localStorage.setItem("impostor:myId", id); }
+  return id;
+})();
+
+function confirmLeaveIfNeeded() {
+  if (state.mode === "local" && state.screen !== "modeSelect" && state.screen !== "localSetup") {
+    return confirm("¿Salir al menú? Se pierde el progreso de esta partida (pasamanos).");
+  }
+  return true;
+}
 
 let state = {
   screen: "modeSelect", // modeSelect
@@ -388,6 +416,7 @@ let state = {
   joinError: "",
   openRooms: [],
   openRoomsPollHandle: null,
+  resumableRoom: null,
 
   // --- local (pasamanos) ---
   local: {
@@ -418,8 +447,47 @@ let state = {
 /* ================= NAVEGACIÓN RAÍZ ================= */
 function chooseMode(mode) {
   state.mode = mode;
-  if (mode === "online") { state.screen = "onlineHome"; startOpenRoomsPolling(); }
-  else state.screen = "localSetup";
+  if (mode === "online") {
+    state.screen = "onlineHome";
+    checkResumableSession();
+    startOpenRoomsPolling();
+  } else state.screen = "localSetup";
+  render();
+}
+
+/* ---- Sesión guardada: "Volver a tu sala" si tocaste Volver por error ---- */
+const SESSION_KEY = "impostor:session";
+function saveSession(code, name) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify({ code, name }));
+}
+function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
+async function checkResumableSession() {
+  state.resumableRoom = null;
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch { saved = null; }
+  if (!saved || !saved.code) return;
+  const existing = await loadRoom(saved.code);
+  if (existing && existing.players.some(p => p.id === myId)) {
+    state.resumableRoom = { code: saved.code, name: saved.name };
+    render();
+  } else {
+    clearSession();
+  }
+}
+async function resumeSession() {
+  if (!state.resumableRoom) return;
+  const { code, name } = state.resumableRoom;
+  const existing = await loadRoom(code);
+  if (!existing) { clearSession(); state.resumableRoom = null; render(); return; }
+  stopOpenRoomsPolling();
+  state.room = existing;
+  state.roomCode = code;
+  state.myName = name;
+  state.joinError = "";
+  syncScreenFromRoom();
+  startPolling();
   render();
 }
 
@@ -494,6 +562,7 @@ async function quickJoinRoom(code) {
   existing.players.push({ id: myId, name, isBot: false });
   await saveRoom(existing);
   stopOpenRoomsPolling();
+  saveSession(code, name);
   state.room = existing;
   state.roomCode = code;
   state.myName = name;
@@ -551,6 +620,7 @@ async function createRoom() {
   };
   await saveRoom(state.room);
   stopOpenRoomsPolling();
+  saveSession(code, name);
   state.screen = "lobby";
   startPolling();
   render();
@@ -572,6 +642,7 @@ async function joinRoom() {
   existing.players.push({ id: myId, name, isBot: false });
   await saveRoom(existing);
   stopOpenRoomsPolling();
+  saveSession(code, name);
   state.room = existing;
   state.roomCode = code;
   state.myName = name;
@@ -681,6 +752,7 @@ async function newRoundOnline() {
 function leaveRoom() {
   if (state.pollHandle) clearInterval(state.pollHandle);
   state.pollHandle = null; state.room = null; state.roomCode = null;
+  clearSession();
   state.screen = "onlineHome"; state.joinError = ""; render();
   startOpenRoomsPolling();
 }
@@ -822,6 +894,12 @@ function renderOnline(card) {
     card.innerHTML = `
       <h1>🌐 Online</h1>
       <div class="sub">Jugá con quien quieras, estén donde estén</div>
+      ${state.resumableRoom ? `
+        <button class="resumeBanner" onclick="resumeSession()">
+          <div class="t">↩️ Volver a tu sala (${state.resumableRoom.code})</div>
+          <div class="s">Eras ${state.resumableRoom.name} — seguís ahí adentro</div>
+        </button>
+      ` : ""}
       <input id="nameInput" type="text" placeholder="Tu nombre" value="${prevNameVal}">
       <button class="btn btnPrimary" onclick="createRoom()">Crear sala nueva</button>
       <div class="divider">— o —</div>

@@ -85,6 +85,7 @@ const AVATARS = ["🐶", "🐱", "🐭", "🐹", "🦊", "🐻", "🐼", "🐨",
 
 const STORAGE_PREFIX = "emoji-charadas:sala:";
 const POLL_MS = 1200;
+const SESSION_KEY = "emoji-charadas:session";
 
 function randomId() {
   return Math.random().toString(36).slice(2, 10);
@@ -160,10 +161,13 @@ function TimerBar({ pct, remaining }) {
   );
 }
 
-function TopBar({ title, onBack }) {
+function TopBar({ title, onBack, confirmMessage }) {
+  const handleBack = () => {
+    if (!confirmMessage || window.confirm(confirmMessage)) onBack();
+  };
   return (
     <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
-      <button onClick={onBack} className="flex items-center gap-1.5 font-bold text-sm" style={{ color: C.textMuted }}>
+      <button onClick={handleBack} className="flex items-center gap-1.5 font-bold text-sm" style={{ color: C.textMuted }}>
         <Icon name="ArrowLeft" size={16} /> Volver
       </button>
       <span className="font-black text-white">{title}</span>
@@ -186,6 +190,41 @@ function PrimaryButton({ children, onClick, disabled, style, ...rest }) {
   );
 }
 
+// Botón fijo para volver al menú de juegos desde cualquier pantalla. Si
+// confirmMessage viene seteado, pide confirmación antes de salir (para no
+// perder progreso local por un toque de más); si no, navega directo (para
+// modo online, donde siempre podés volver a tu sala después).
+function HomeButton({ confirmMessage }) {
+  return (
+    <a
+      href="../"
+      onClick={(e) => {
+        if (confirmMessage && !window.confirm(confirmMessage)) e.preventDefault();
+      }}
+      title="Volver al menú de juegos"
+      style={{
+        position: "fixed",
+        top: 14,
+        left: 14,
+        zIndex: 50,
+        width: 40,
+        height: 40,
+        borderRadius: "50%",
+        background: "rgba(0,0,0,0.35)",
+        border: "1px solid rgba(255,255,255,0.18)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 18,
+        textDecoration: "none",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.3)",
+      }}
+    >
+      🏠
+    </a>
+  );
+}
+
 // ==================== HOME ====================
 
 function Home({ onSelect }) {
@@ -195,6 +234,7 @@ function Home({ onSelect }) {
   ];
   return (
     <div className="min-h-screen w-full flex items-center justify-center p-6" style={bgStyle}>
+      <HomeButton />
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-6xl mb-2">🎭</div>
@@ -372,10 +412,13 @@ function OfflineGame({ onBack }) {
     return AVATARS[i % AVATARS.length];
   };
   const pct = remaining / ROUND_SECONDS;
+  const inProgress = step !== "setup" && step !== "lobby";
+  const confirmMsg = inProgress ? "¿Salir? Se pierde el progreso de esta partida (pasando el celu)." : undefined;
 
   return (
     <div className="min-h-screen w-full flex flex-col" style={bgStyle}>
-      <TopBar title="Un solo celu" onBack={onBack} />
+      <HomeButton confirmMessage={confirmMsg} />
+      <TopBar title="Un solo celu" onBack={onBack} confirmMessage={confirmMsg} />
       <div className="flex-1 flex flex-col p-5">
         {step === "setup" && (
           <div className="flex-1 flex flex-col">
@@ -611,6 +654,7 @@ function OnlineGame({ onBack }) {
       const avatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
       existing.players.push({ id, name: trimmedName, avatar, score: 0 });
       await writeRoom(code, existing);
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: id, name: trimmedName }));
       setRoom(existing);
       setRoomCode(code);
       setPlayerId(id);
@@ -620,6 +664,56 @@ function OnlineGame({ onBack }) {
     } finally {
       setJoining(false);
     }
+  };
+
+  // Sesión guardada: si volviste al menú por error (o cerraste la pestaña),
+  // acá se ofrece retomar la sala en la que estabas sin volver a unirte.
+  const [resumable, setResumable] = useState(null);
+  useEffect(() => {
+    if (screen !== "join") return;
+    let cancelled = false;
+    (async () => {
+      let saved;
+      try {
+        saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+      } catch {
+        saved = null;
+      }
+      if (!saved || !saved.code || !saved.playerId) {
+        setResumable(null);
+        return;
+      }
+      const existing = await readRoom(saved.code);
+      if (cancelled) return;
+      if (existing && existing.players.some((p) => p.id === saved.playerId)) {
+        setResumable(saved);
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+        setResumable(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [screen]);
+
+  const resumeSession = async () => {
+    if (!resumable) return;
+    const existing = await readRoom(resumable.code);
+    if (!existing) {
+      localStorage.removeItem(SESSION_KEY);
+      setResumable(null);
+      return;
+    }
+    setRoom(existing);
+    setRoomCode(resumable.code);
+    setPlayerId(resumable.playerId);
+    setScreen("game");
+  };
+
+  const leaveRoom = () => {
+    localStorage.removeItem(SESSION_KEY);
+    onBack();
   };
 
   useEffect(() => {
@@ -702,6 +796,7 @@ function OnlineGame({ onBack }) {
         existing.players.push({ id, name: trimmedName, avatar, score: 0 });
       }
       await writeRoom(code, existing);
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: id, name: trimmedName }));
       setRoom(existing);
       setRoomCode(code);
       setPlayerId(id);
@@ -787,6 +882,7 @@ function OnlineGame({ onBack }) {
   if (screen === "join") {
     return (
       <div className="min-h-screen w-full flex items-center justify-center p-6" style={bgStyle}>
+        <HomeButton />
         <div className="w-full max-w-sm">
           <button onClick={onBack} className="flex items-center gap-1.5 font-bold text-sm mb-6" style={{ color: C.textMuted }}>
             <Icon name="ArrowLeft" size={16} /> Volver
@@ -798,6 +894,21 @@ function OnlineGame({ onBack }) {
               Actuá el emoji gigante antes de que se acabe el tiempo
             </p>
           </div>
+
+          {resumable && (
+            <button
+              onClick={resumeSession}
+              className="w-full text-left rounded-2xl p-4 mb-4 transition active:scale-95"
+              style={{ backgroundColor: "rgba(255,183,3,0.18)", border: `1px solid ${C.gold}` }}
+            >
+              <div className="font-black text-sm" style={{ color: C.gold }}>
+                ↩️ Volver a tu sala ({resumable.code})
+              </div>
+              <div className="text-xs mt-0.5" style={{ color: C.textMuted }}>
+                Eras {resumable.name} — seguís ahí adentro
+              </div>
+            </button>
+          )}
 
           <div className="rounded-3xl p-6" style={{ backgroundColor: C.card, border: `1px solid ${C.cardBorder}` }}>
             <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>
@@ -877,6 +988,7 @@ function OnlineGame({ onBack }) {
   if (!room) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={bgStyle}>
+        <HomeButton />
         <p className="text-white">Cargando sala...</p>
       </div>
     );
@@ -887,13 +999,19 @@ function OnlineGame({ onBack }) {
 
   return (
     <div className="min-h-screen w-full flex flex-col" style={bgStyle}>
+      <HomeButton />
       <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 pl-11">
           <span className="text-2xl">{me?.avatar}</span>
           <span className="font-bold text-white">{me?.name}</span>
         </div>
         <button onClick={copyCode} className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-bold tracking-widest text-white" style={{ backgroundColor: C.card }}>
           {roomCode} {copied ? <Icon name="Check" size={14} /> : <Icon name="Copy" size={14} />}
+        </button>
+      </div>
+      <div className="px-5 pt-2">
+        <button onClick={leaveRoom} className="text-xs font-bold" style={{ color: C.textMuted }}>
+          Salir de la sala
         </button>
       </div>
 

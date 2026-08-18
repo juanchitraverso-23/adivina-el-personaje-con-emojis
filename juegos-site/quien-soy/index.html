@@ -43,7 +43,7 @@ function useInjectFont() {
   }, []);
 }
 
-function Screen({ children, style }) {
+function Screen({ children, style, homeConfirm }) {
   return (
     <div
       style={{
@@ -61,8 +61,43 @@ function Screen({ children, style }) {
         ...style,
       }}
     >
+      {homeConfirm !== null && <HomeButton confirmMessage={homeConfirm} />}
       {children}
     </div>
+  );
+}
+
+// Botón fijo para volver al menú de juegos desde cualquier pantalla. Si
+// confirmMessage viene seteado, pide confirmación antes de salir (para no
+// perder progreso de la partida por un toque de más).
+function HomeButton({ confirmMessage }) {
+  return (
+    <a
+      href="../"
+      onClick={(e) => {
+        if (confirmMessage && !window.confirm(confirmMessage)) e.preventDefault();
+      }}
+      title="Volver al menú de juegos"
+      style={{
+        position: "fixed",
+        top: 14,
+        left: 14,
+        zIndex: 50,
+        width: 40,
+        height: 40,
+        borderRadius: "50%",
+        background: "rgba(0,0,0,0.3)",
+        border: "1px solid rgba(255,255,255,0.18)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 18,
+        textDecoration: "none",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.3)",
+      }}
+    >
+      🏠
+    </a>
   );
 }
 
@@ -358,7 +393,7 @@ function App() {
   // ---------- HOME ----------
   if (screen === "home") {
     return (
-      <Screen style={{ justifyContent: "center" }}>
+      <Screen style={{ justifyContent: "center" }} homeConfirm={null}>
         <div style={{ fontSize: 64, marginBottom: 6 }}>🕵️‍♂️</div>
         <Title size={36}>¿Quién Soy?</Title>
         <Sub>
@@ -425,7 +460,7 @@ function App() {
   if (screen === "names") {
     const allFilled = true; // names optional, defaults applied
     return (
-      <Screen>
+      <Screen homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
         <Title size={26}>Nombres de los jugadores</Title>
         <Sub>Se van a ir pasando el celu en este orden</Sub>
         <Card style={{ marginBottom: 20 }}>
@@ -447,7 +482,7 @@ function App() {
   // ---------- PASS TO CLUE GIVER ----------
   if (screen === "passToClue") {
     return (
-      <Screen style={{ justifyContent: "center" }}>
+      <Screen style={{ justifyContent: "center" }} homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
         <div style={{ fontSize: 56, marginBottom: 10 }}>🤫</div>
         <Title size={24}>Ronda {round}</Title>
         <Sub>
@@ -465,7 +500,7 @@ function App() {
   if (screen === "clueInput" || screen === "clueInputAgain") {
     const isAgain = screen === "clueInputAgain";
     return (
-      <Screen>
+      <Screen homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
         <Title size={24}>
           {isAgain ? "Nadie adivinó 😬" : `Pensá a alguien, ${clueGiver}`}
         </Title>
@@ -540,7 +575,7 @@ function App() {
   if (screen === "passToGuess") {
     const current = guessers[guessIdx];
     return (
-      <Screen style={{ justifyContent: "center" }}>
+      <Screen style={{ justifyContent: "center" }} homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
         <div style={{ fontSize: 56, marginBottom: 10 }}>📲</div>
         <Sub>
           Jugador {guessIdx + 1} de {guessers.length}
@@ -557,7 +592,7 @@ function App() {
   if (screen === "guessing") {
     const current = guessers[guessIdx];
     return (
-      <Screen>
+      <Screen homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
         <Title size={22}>¿Quién es, {current}?</Title>
         <ClueTrail clues={clues} />
         <Card style={{ marginBottom: 16 }}>
@@ -578,7 +613,7 @@ function App() {
   // ---------- PASS TO REVIEW ----------
   if (screen === "passToReview") {
     return (
-      <Screen style={{ justifyContent: "center" }}>
+      <Screen style={{ justifyContent: "center" }} homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
         <div style={{ fontSize: 56, marginBottom: 10 }}>🎯</div>
         <Sub>Ya respondieron todos</Sub>
         <Title size={24}>Pasale el celu a {clueGiver}</Title>
@@ -593,7 +628,7 @@ function App() {
   if (screen === "review") {
     const pool = Math.max(0, 10 - (clues.length - 1));
     return (
-      <Screen>
+      <Screen homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
         <Title size={22}>Respuestas — {clueGiver} decide</Title>
         <Sub>Tocá a todos los que acertaron (puede ser más de uno)</Sub>
         <ClueTrail clues={clues} />
@@ -644,7 +679,7 @@ function App() {
   if (screen === "winner") {
     const winnersLabel = joinNames(lastWinners);
     return (
-      <Screen style={{ justifyContent: "center" }}>
+      <Screen style={{ justifyContent: "center" }} homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
         <div style={{ fontSize: 70, marginBottom: 6 }}>🎉</div>
         <Title size={30}>
           {lastWinners.length > 1 ? `¡${winnersLabel} acertaron!` : `¡${winnersLabel} acertó!`}
