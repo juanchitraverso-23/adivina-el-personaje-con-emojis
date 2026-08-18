@@ -204,7 +204,7 @@ function HomeButton({ confirmMessage }) {
       title="Volver al menú de juegos"
       style={{
         position: "fixed",
-        top: 14,
+        top: "calc(env(safe-area-inset-top, 0px) + 14px)",
         left: 14,
         zIndex: 50,
         display: "flex",

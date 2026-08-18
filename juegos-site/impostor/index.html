@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>El Impostor</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -139,7 +139,7 @@
   .openRoomNames { font-size: 14px; font-weight: 700; color: #3A3A4A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .openRoomCode { font-size: 12px; font-weight: 800; letter-spacing: 2px; color: #7A5FC2; flex-shrink: 0; margin-left: 10px; }
   .homeBtn {
-    position: fixed; top: 14px; left: 14px; z-index: 10;
+    position: fixed; top: calc(env(safe-area-inset-top, 0px) + 14px); left: 14px; z-index: 10;
     display: flex; align-items: center; gap: 6px;
     padding: 9px 16px 9px 11px; border-radius: 30px;
     background: #FFFFFF; border: 1.5px solid rgba(0,0,0,0.14);

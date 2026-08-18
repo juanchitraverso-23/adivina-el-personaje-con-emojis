@@ -122,7 +122,7 @@ function HomeButton({ confirmMessage }) {
       title="Volver al menú de juegos"
       style={{
         position: "fixed",
-        top: 14,
+        top: "calc(env(safe-area-inset-top, 0px) + 14px)",
         left: 14,
         zIndex: 50,
         display: "flex",
@@ -300,7 +300,7 @@ function ClueTrail({ clues }) {
 
 function Home({ onSelect }) {
   return (
-    <Screen style={{ justifyContent: "center" }} homeConfirm={null}>
+    <Screen style={{ justifyContent: "center" }}>
       <div style={{ fontSize: 64, marginBottom: 6 }}>🕵️‍♂️</div>
       <Title size={36}>¿Quién Soy?</Title>
       <Sub>
