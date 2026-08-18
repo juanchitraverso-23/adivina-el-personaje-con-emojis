@@ -18,8 +18,36 @@
 </head>
 <body>
 <div id="root"></div>
+<script src="../storage.js"></script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef } = React;
+
+// ---- Salas online: mismo patrón de KV vía storage.js que los otros juegos ----
+const STORAGE_PREFIX = "quien-soy:sala:";
+const POLL_MS = 1200;
+const SESSION_KEY = "quien-soy:session";
+
+function randomId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+function randomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+async function readRoom(code) {
+  try {
+    const res = await window.storage.get(STORAGE_PREFIX + code, true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writeRoom(code, room) {
+  await window.storage.set(STORAGE_PREFIX + code, JSON.stringify(room), true);
+}
 
 
 const QUICK_EMOJIS = [
@@ -254,10 +282,35 @@ function ClueTrail({ clues }) {
   );
 }
 
+function Home({ onSelect }) {
+  return (
+    <Screen style={{ justifyContent: "center" }} homeConfirm={null}>
+      <div style={{ fontSize: 64, marginBottom: 6 }}>🕵️‍♂️</div>
+      <Title size={36}>¿Quién Soy?</Title>
+      <Sub>
+        Uno piensa una persona o personaje famoso y lo describe con emojis.
+        Los demás intentan adivinar. ¡Sin hablar!
+      </Sub>
+      <BigButton onClick={() => onSelect("offline")} color="#FF3E7F">
+        📴 Jugar Offline (pasando el celu)
+      </BigButton>
+      <BigButton onClick={() => onSelect("online")} color="#5B4B8A">
+        🌐 Jugar Online
+      </BigButton>
+    </Screen>
+  );
+}
+
 function App() {
   useInjectFont();
+  const [mode, setMode] = useState("home");
+  if (mode === "home") return <Home onSelect={setMode} />;
+  if (mode === "online") return <OnlineGame onBack={() => setMode("home")} />;
+  return <OfflineGame onBack={() => setMode("home")} />;
+}
 
-  const [screen, setScreen] = useState("home");
+function OfflineGame({ onBack }) {
+  const [screen, setScreen] = useState("count");
   const [players, setPlayers] = useState([]);
   const [nameDraft, setNameDraft] = useState("");
   const [playerCount, setPlayerCount] = useState(4);
@@ -280,7 +333,6 @@ function App() {
   const clueGiver = players[clueGiverIdx];
 
   function goHome() {
-    setScreen("home");
     setPlayers([]);
     setScores({});
     setClues([]);
@@ -290,10 +342,8 @@ function App() {
     setLastWinners([]);
     setRound(1);
     setClueGiverIdx(0);
-  }
-
-  function startOnline() {
-    alert("El modo Online todavía no está listo 🚧 ¡Pronto! Por ahora jugá offline pasando el celu.");
+    setScreen("count");
+    onBack();
   }
 
   function confirmCount() {
@@ -388,26 +438,6 @@ function App() {
     setSelectedWinners([]);
     setLastWinners([]);
     setScreen("passToClue");
-  }
-
-  // ---------- HOME ----------
-  if (screen === "home") {
-    return (
-      <Screen style={{ justifyContent: "center" }} homeConfirm={null}>
-        <div style={{ fontSize: 64, marginBottom: 6 }}>🕵️‍♂️</div>
-        <Title size={36}>¿Quién Soy?</Title>
-        <Sub>
-          Uno piensa una persona o personaje famoso y lo describe con emojis.
-          Los demás intentan adivinar. ¡Sin hablar!
-        </Sub>
-        <BigButton onClick={() => setScreen("count")} color="#FF3E7F">
-          📴 Jugar Offline (pasando el celu)
-        </BigButton>
-        <BigButton onClick={startOnline} color="#5B4B8A" style={{ opacity: 0.85 }}>
-          🌐 Jugar Online (próximamente)
-        </BigButton>
-      </Screen>
-    );
   }
 
   // ---------- COUNT ----------
@@ -714,6 +744,664 @@ function App() {
         <BigButton onClick={nextRound}>Siguiente ronda ➜</BigButton>
         <BigButton onClick={goHome} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
           Terminar juego
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  return null;
+}
+
+// ==================== ONLINE: SALA COMPARTIDA ====================
+
+function OnlineGame({ onBack }) {
+  const [screen, setScreen] = useState("join"); // "join" | "game"
+  const [name, setName] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [openRooms, setOpenRooms] = useState([]);
+  const [resumable, setResumable] = useState(null);
+
+  const [roomCode, setRoomCode] = useState(null);
+  const [playerId, setPlayerId] = useState(null);
+  const [room, setRoom] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const [emojiDraft, setEmojiDraft] = useState("");
+  const [secretDraft, setSecretDraft] = useState("");
+  const [guessDraft, setGuessDraft] = useState("");
+  const [selected, setSelected] = useState([]);
+
+  // Salas abiertas: solo mientras estamos eligiendo a cuál unirnos.
+  useEffect(() => {
+    if (screen !== "join") return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const entries = await window.storage.list(STORAGE_PREFIX);
+        if (cancelled) return;
+        const rooms = entries
+          .map((e) => {
+            try {
+              return JSON.parse(e.value);
+            } catch {
+              return null;
+            }
+          })
+          .filter((r) => r && r.phase === "lobby" && Date.now() - (r.createdAt || 0) < 3 * 60 * 60 * 1000)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setOpenRooms(rooms);
+      } catch {
+        // sin salas visibles, no molesta con un error
+      }
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [screen]);
+
+  // Sesión guardada: por si volviste al menú por error.
+  useEffect(() => {
+    if (screen !== "join") return;
+    let cancelled = false;
+    (async () => {
+      let saved;
+      try {
+        saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+      } catch {
+        saved = null;
+      }
+      if (!saved || !saved.code || !saved.playerId) {
+        setResumable(null);
+        return;
+      }
+      const existing = await readRoom(saved.code);
+      if (cancelled) return;
+      if (existing && existing.players.some((p) => p.id === saved.playerId)) {
+        setResumable(saved);
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+        setResumable(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [screen]);
+
+  const resumeSession = async () => {
+    if (!resumable) return;
+    const existing = await readRoom(resumable.code);
+    if (!existing) {
+      localStorage.removeItem(SESSION_KEY);
+      setResumable(null);
+      return;
+    }
+    setRoom(existing);
+    setRoomCode(resumable.code);
+    setPlayerId(resumable.playerId);
+    setScreen("game");
+  };
+
+  const doJoin = async (codeMaybe) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setJoinError("Poné tu nombre.");
+      return;
+    }
+    setJoining(true);
+    setJoinError("");
+    try {
+      const code = codeMaybe || (codeInput.trim() ? codeInput.trim().toUpperCase() : randomCode());
+      let existing = await readRoom(code);
+      const id = randomId();
+      if (!existing) {
+        existing = {
+          code,
+          players: [{ id, name: trimmedName, score: 0 }],
+          phase: "lobby",
+          clueGiverIdx: -1,
+          clueGiverId: null,
+          secretCharacter: null,
+          clues: [],
+          guesses: {},
+          round: 0,
+          createdAt: Date.now(),
+        };
+      } else {
+        if (existing.players.some((p) => p.name.toLowerCase() === trimmedName.toLowerCase())) {
+          setJoinError("Ese nombre ya está en uso en esta sala. Probá otro.");
+          setJoining(false);
+          return;
+        }
+        existing.players.push({ id, name: trimmedName, score: 0 });
+      }
+      await writeRoom(code, existing);
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: id, name: trimmedName }));
+      setRoom(existing);
+      setRoomCode(code);
+      setPlayerId(id);
+      setScreen("game");
+    } catch (e) {
+      setJoinError("No se pudo conectar a la sala. Probá de nuevo.");
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const quickJoin = (code) => {
+    setCodeInput(code);
+    doJoin(code);
+  };
+
+  const leaveRoom = () => {
+    localStorage.removeItem(SESSION_KEY);
+    onBack();
+  };
+
+  // Polling del estado de la sala una vez adentro.
+  useEffect(() => {
+    if (!roomCode) return;
+    let cancelled = false;
+    const tick = async () => {
+      const r = await readRoom(roomCode);
+      if (!cancelled && r) setRoom(r);
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [roomCode]);
+
+  const me = room?.players?.find((p) => p.id === playerId) || null;
+  const clueGiver = room?.players?.find((p) => p.id === room?.clueGiverId) || null;
+  const isClueGiver = room?.clueGiverId === playerId;
+  const myGuess = room?.guesses ? room.guesses[playerId] : null;
+
+  const copyCode = () => {
+    if (!roomCode) return;
+    navigator.clipboard?.writeText(roomCode).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const startRound = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh || fresh.players.length < 3) return;
+    const nextIdx = ((fresh.clueGiverIdx ?? -1) + 1) % fresh.players.length;
+    fresh.clueGiverIdx = nextIdx;
+    fresh.clueGiverId = fresh.players[nextIdx].id;
+    fresh.secretCharacter = null;
+    fresh.clues = [];
+    fresh.guesses = {};
+    fresh.phase = "clueInput";
+    fresh.round = (fresh.round || 0) + 1;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+    setEmojiDraft("");
+    setSecretDraft("");
+  };
+
+  const submitFirstClue = async () => {
+    const emoji = emojiDraft.trim();
+    const secret = secretDraft.trim();
+    if (!emoji || !secret) return;
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.secretCharacter = secret;
+    fresh.clues = [emoji];
+    fresh.guesses = {};
+    fresh.phase = "guessing";
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+    setEmojiDraft("");
+  };
+
+  const submitAnotherClue = async () => {
+    const emoji = emojiDraft.trim();
+    if (!emoji) return;
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.clues = [...(fresh.clues || []), emoji];
+    fresh.guesses = {};
+    fresh.phase = "guessing";
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+    setEmojiDraft("");
+  };
+
+  const submitGuess = async () => {
+    const text = guessDraft.trim() || "(sin respuesta)";
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.guesses = { ...(fresh.guesses || {}), [playerId]: { name: me?.name || name, text } };
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+    setGuessDraft("");
+  };
+
+  const goToReview = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.phase = "review";
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+    setSelected([]);
+  };
+
+  const nobodyGuessedOnline = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.phase = "clueInputAgain";
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+    setEmojiDraft("");
+  };
+
+  const toggleSelected = (id) => {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const confirmWinners = async () => {
+    if (selected.length === 0) return;
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    const pool = Math.max(0, 10 - ((fresh.clues || []).length - 1));
+    const winnerIds = [fresh.clueGiverId, ...selected];
+    const share = Math.round(pool / winnerIds.length);
+    fresh.players = fresh.players.map((p) =>
+      winnerIds.includes(p.id) ? { ...p, score: (p.score || 0) + share } : p
+    );
+    const winnerNames = selected
+      .map((id) => (fresh.players.find((p) => p.id === id) || {}).name)
+      .filter(Boolean);
+    fresh.lastRound = {
+      winnerNames,
+      pool,
+      share,
+      secretCharacter: fresh.secretCharacter,
+      clueGiverName: (fresh.players.find((p) => p.id === fresh.clueGiverId) || {}).name,
+      cluesCount: (fresh.clues || []).length,
+    };
+    fresh.phase = "roundEnd";
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  // ---------- PANTALLA DE UNIRSE ----------
+  if (screen === "join") {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <div style={{ fontSize: 56, marginBottom: 6 }}>🌐</div>
+        <Title size={28}>Jugar Online</Title>
+        <Sub>Cada uno desde su celular, estén donde estén</Sub>
+
+        {resumable && (
+          <button
+            onClick={resumeSession}
+            style={{
+              width: "100%",
+              maxWidth: 380,
+              textAlign: "left",
+              borderRadius: 18,
+              padding: 16,
+              marginBottom: 14,
+              cursor: "pointer",
+              background: "rgba(255,210,63,0.18)",
+              border: "1px solid #FFD23F",
+              color: "#F3EEFF",
+              fontFamily: "'Nunito', sans-serif",
+            }}
+          >
+            <div style={{ fontFamily: "'Baloo 2', sans-serif", fontWeight: 800, color: "#FFD23F", fontSize: 15 }}>
+              ↩️ Volver a tu sala ({resumable.code})
+            </div>
+            <div style={{ fontSize: 12.5, color: "#C9B8F0", marginTop: 2 }}>
+              Eras {resumable.name} — seguís ahí adentro
+            </div>
+          </button>
+        )}
+
+        <Card style={{ marginBottom: 16 }}>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Tu nombre"
+            style={inputStyle}
+            maxLength={16}
+          />
+          <input
+            value={codeInput}
+            onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+            placeholder="Código de sala (dejalo vacío para crear)"
+            style={{ ...inputStyle, letterSpacing: 3, textTransform: "uppercase" }}
+            maxLength={4}
+          />
+          {joinError && <div style={{ color: "#FF6B9D", fontSize: 13, marginBottom: 4 }}>{joinError}</div>}
+        </Card>
+        <BigButton onClick={() => doJoin()} disabled={joining}>
+          {joining ? "Entrando..." : codeInput.trim() ? "Unirme a la sala" : "Crear sala y jugar"}
+        </BigButton>
+
+        {openRooms.length > 0 && (
+          <Card style={{ marginTop: 4 }}>
+            <div
+              style={{
+                fontFamily: "'Baloo 2', sans-serif",
+                fontSize: 12,
+                color: "#FFD23F",
+                marginBottom: 8,
+                textTransform: "uppercase",
+                letterSpacing: 1,
+              }}
+            >
+              Salas abiertas ahora
+            </div>
+            {openRooms.map((r) => (
+              <button
+                key={r.code}
+                onClick={() => quickJoin(r.code)}
+                disabled={joining}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  marginBottom: 8,
+                  cursor: "pointer",
+                  color: "#F3EEFF",
+                  fontFamily: "'Nunito', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 14,
+                }}
+              >
+                <span>{r.players.map((p) => p.name).join(", ")}</span>
+                <span style={{ color: "#FFD23F", fontWeight: 800, fontSize: 12, letterSpacing: 2 }}>{r.code}</span>
+              </button>
+            ))}
+          </Card>
+        )}
+
+        <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          ← Volver
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  if (!room) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <Sub>Cargando sala...</Sub>
+      </Screen>
+    );
+  }
+
+  const players = room.players || [];
+  const sorted = [...players].sort((a, b) => (b.score || 0) - (a.score || 0));
+  const guessesList = Object.entries(room.guesses || {}).map(([id, g]) => ({ id, ...g }));
+
+  // ---------- LOBBY ----------
+  if (room.phase === "lobby") {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", width: "100%", maxWidth: 420, marginBottom: 10 }}>
+          <span style={{ color: "#C9B8F0", fontSize: 13 }}>
+            Vos: <b style={{ color: "#F3EEFF" }}>{me?.name}</b>
+          </span>
+          <button
+            onClick={copyCode}
+            style={{
+              background: "rgba(255,255,255,0.08)",
+              border: "none",
+              borderRadius: 20,
+              padding: "4px 12px",
+              color: "#FFD23F",
+              fontWeight: 800,
+              letterSpacing: 2,
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            {roomCode} {copied ? "✓" : "📋"}
+          </button>
+        </div>
+        <Title size={26}>Sala {roomCode}</Title>
+        <Card style={{ marginBottom: 20 }}>
+          {sorted.map((p) => (
+            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 2px", fontSize: 15 }}>
+              <span>{p.name}</span>
+              <span style={{ color: "#FFD23F", fontWeight: 800 }}>{p.score || 0} ⭐</span>
+            </div>
+          ))}
+        </Card>
+        {players.length < 3 && <Sub>Necesitás al menos 3 jugadores. Compartí el código.</Sub>}
+        <BigButton onClick={startRound} disabled={players.length < 3}>
+          Siguiente ronda ➜
+        </BigButton>
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- CLUE INPUT / CLUE INPUT AGAIN ----------
+  if (room.phase === "clueInput" || room.phase === "clueInputAgain") {
+    const isAgain = room.phase === "clueInputAgain";
+    if (!isClueGiver) {
+      return (
+        <Screen style={{ justifyContent: "center" }}>
+          <div style={{ fontSize: 56, marginBottom: 10 }}>🤫</div>
+          <Title size={22}>{isAgain ? "Nadie adivinó..." : `${clueGiver?.name || "..."} está pensando`}</Title>
+          <Sub>
+            Esperá a que {clueGiver?.name} {isAgain ? "dé otra pista" : "piense a alguien"}...
+          </Sub>
+          <ClueTrail clues={room.clues || []} />
+        </Screen>
+      );
+    }
+    return (
+      <Screen>
+        <Title size={24}>{isAgain ? "Pistas extra" : "Pensá a alguien"}</Title>
+        <Sub>{isAgain ? "Agregá otro emoji como pista" : "Elegí una persona famosa y escribila (queda guardada)"}</Sub>
+        <ClueTrail clues={room.clues || []} />
+        <Card style={{ marginBottom: 16 }}>
+          {!isAgain && (
+            <input
+              value={secretDraft}
+              onChange={(e) => setSecretDraft(e.target.value)}
+              placeholder="¿Quién es? (nadie más lo ve)"
+              style={inputStyle}
+            />
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6, marginBottom: 14 }}>
+            {QUICK_EMOJIS.map((e) => (
+              <button
+                key={e}
+                onClick={() => setEmojiDraft(e)}
+                style={{
+                  fontSize: 22,
+                  background: emojiDraft === e ? "rgba(255,210,63,0.3)" : "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 10,
+                  padding: "6px 0",
+                  cursor: "pointer",
+                }}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+          <input
+            value={emojiDraft}
+            onChange={(e) => setEmojiDraft(e.target.value)}
+            placeholder="o escribí tu propio emoji"
+            style={inputStyle}
+          />
+        </Card>
+        <BigButton
+          onClick={isAgain ? submitAnotherClue : submitFirstClue}
+          disabled={!emojiDraft.trim() || (!isAgain && !secretDraft.trim())}
+        >
+          Mandar pista a todos ➜
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- GUESSING ----------
+  if (room.phase === "guessing") {
+    const answered = guessesList.length;
+    const total = players.length - 1;
+    if (isClueGiver) {
+      return (
+        <Screen>
+          <Title size={22}>Esperando respuestas</Title>
+          <Sub>
+            {answered} de {total} ya contestaron
+          </Sub>
+          <ClueTrail clues={room.clues || []} />
+          <Card style={{ marginBottom: 16 }}>
+            {guessesList.length === 0 && <Sub style={{ margin: 0 }}>Todavía nadie contestó...</Sub>}
+            {guessesList.map((g) => (
+              <div key={g.id} style={{ padding: "6px 2px", fontSize: 14, color: "#C9B8F0" }}>
+                {g.name} ya respondió
+              </div>
+            ))}
+          </Card>
+          <BigButton onClick={goToReview} disabled={guessesList.length === 0}>
+            Ver respuestas 👁️
+          </BigButton>
+        </Screen>
+      );
+    }
+    if (myGuess) {
+      return (
+        <Screen style={{ justifyContent: "center" }}>
+          <div style={{ fontSize: 56, marginBottom: 10 }}>✅</div>
+          <Title size={22}>¡Mandaste tu respuesta!</Title>
+          <Sub>Esperando a los demás...</Sub>
+          <ClueTrail clues={room.clues || []} />
+        </Screen>
+      );
+    }
+    return (
+      <Screen>
+        <Title size={22}>¿Quién es?</Title>
+        <ClueTrail clues={room.clues || []} />
+        <Card style={{ marginBottom: 16 }}>
+          <input
+            autoFocus
+            value={guessDraft}
+            onChange={(e) => setGuessDraft(e.target.value)}
+            placeholder="Escribí tu respuesta..."
+            style={inputStyle}
+            onKeyDown={(e) => e.key === "Enter" && submitGuess()}
+          />
+        </Card>
+        <BigButton onClick={submitGuess}>Confirmar respuesta ✅</BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- REVIEW ----------
+  if (room.phase === "review") {
+    if (!isClueGiver) {
+      return (
+        <Screen style={{ justifyContent: "center" }}>
+          <div style={{ fontSize: 56, marginBottom: 10 }}>🎯</div>
+          <Title size={22}>{clueGiver?.name} está revisando</Title>
+          <Sub>Ya se mandaron las respuestas, esperá el resultado...</Sub>
+        </Screen>
+      );
+    }
+    const pool = Math.max(0, 10 - ((room.clues || []).length - 1));
+    return (
+      <Screen>
+        <Title size={22}>Respuestas — vos decidís</Title>
+        <Sub>Tocá a todos los que acertaron (puede ser más de uno)</Sub>
+        <ClueTrail clues={room.clues || []} />
+        <Card style={{ marginBottom: 16 }}>
+          {guessesList.map((g, i) => {
+            const isSelected = selected.includes(g.id);
+            return (
+              <div
+                key={g.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "10px 6px",
+                  borderBottom: i < guessesList.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 12, color: "#C9B8F0" }}>{g.name}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700 }}>{g.text}</div>
+                </div>
+                <button onClick={() => toggleSelected(g.id)} style={isSelected ? correctBtnStyleActive : correctBtnStyle}>
+                  {isSelected ? "✅ Acertó" : "¡Correcto! 🏆"}
+                </button>
+              </div>
+            );
+          })}
+        </Card>
+        <Sub style={{ marginTop: -10 }}>
+          Esta ronda vale {pool} {pool === 1 ? "punto" : "puntos"}, repartidos entre vos y quienes acertaron
+        </Sub>
+        <BigButton onClick={confirmWinners} disabled={selected.length === 0}>
+          Confirmar ganadores ✅
+        </BigButton>
+        <BigButton onClick={nobodyGuessedOnline} color="#5B4B8A">
+          Nadie acertó, doy otra pista 🔁
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- ROUND END ----------
+  if (room.phase === "roundEnd") {
+    const lr = room.lastRound || {};
+    const winnersLabel = joinNames(lr.winnerNames || []);
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <div style={{ fontSize: 70, marginBottom: 6 }}>🎉</div>
+        <Title size={28}>
+          {(lr.winnerNames || []).length > 1 ? `¡${winnersLabel} acertaron!` : `¡${winnersLabel} acertó!`}
+        </Title>
+        <Sub>
+          Era <b style={{ color: "#FFD23F" }}>{lr.secretCharacter}</b> — {lr.clueGiverName} dio {lr.cluesCount}{" "}
+          {lr.cluesCount === 1 ? "pista" : "pistas"}
+        </Sub>
+        <Sub style={{ marginTop: -14 }}>
+          Ronda de {lr.pool} {lr.pool === 1 ? "punto" : "puntos"}: +{lr.share} para cada ganador
+        </Sub>
+        <Card style={{ marginBottom: 20 }}>
+          <div style={{ fontFamily: "'Baloo 2', sans-serif", fontSize: 15, color: "#FFD23F", marginBottom: 8 }}>
+            Puntajes
+          </div>
+          {sorted.map((p) => (
+            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 2px", fontSize: 15 }}>
+              <span>{p.name}</span>
+              <span style={{ color: "#FFD23F", fontWeight: 800 }}>{p.score || 0} ⭐</span>
+            </div>
+          ))}
+        </Card>
+        <BigButton onClick={startRound}>Siguiente ronda ➜</BigButton>
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
         </BigButton>
       </Screen>
     );
