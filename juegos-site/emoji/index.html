@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Adiviná el Emoji — Charadas</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Adiviná el Emoji" />
+<meta name="theme-color" content="#1b0f2e" />
+<style>
+  html, body { margin:0; padding:0; background:#1b0f2e; }
+  #root { min-height: 100vh; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+const ROUND_SECONDS = 15;
+
+// ---- Colores (siempre inline: las clases Tailwind con hex arbitrario no compilan en este entorno) ----
+const C = {
+  bg: "#1b0f2e",
+  card: "rgba(255,255,255,0.08)",
+  cardBorder: "rgba(255,255,255,0.12)",
+  inputBg: "rgba(255,255,255,0.95)",
+  textDark: "#1b0f2e",
+  textMuted: "#c9b8e8",
+  textFaint: "#8a7ba3",
+  gold: "#ffb703",
+  goldHover: "#ffc933",
+  pink: "#ff2e88",
+  pinkSoft: "#ff6b9d",
+  teal: "#00d4b8",
+};
+
+const bgStyle = {
+  backgroundColor: C.bg,
+  backgroundImage:
+    "radial-gradient(circle at 15% 10%, rgba(255,46,136,0.25) 0%, transparent 45%), radial-gradient(circle at 90% 90%, rgba(0,212,184,0.2) 0%, transparent 45%)",
+};
+
+// ---- Categorías de emojis (varios cientos, agrupados) ----
+const EMOJI_CATEGORIES = [
+  {
+    label: "Caras y gestos",
+    items: "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😗 😚 😙 😋 😛 😜 🤪 😝 🤑 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🤧 🥵 🥶 🥴 😵 🤯 🤠 🥳 🥸 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 👻 👽 🤖 🎃 😺 😹 😻 😼 😽 🙀 😿 😾 👍 👎 👏 🙌 🙏 👋 🤝 💪 🫡 🤙 ✌️ 🤞 🤟 🤘 👌 🖐️ ✋ 👊 🤛 🤛 🖖".split(" "),
+  },
+  {
+    label: "Personas y roles",
+    items: "🧑 👶 🧒 👦 👧 🧑‍🦱 🧓 👴 👵 🙎 🙍 🙅 🙆 💁 🙋 🧏 🙇 🤦 🤷 🧑‍⚕️ 🧑‍🎓 🧑‍🏫 🧑‍⚖️ 🧑‍🌾 🧑‍🍳 🧑‍🔧 🧑‍🏭 🧑‍💼 🧑‍🔬 🧑‍🎨 🧑‍🚒 🧑‍✈️ 🧑‍🚀 🧑‍🎤 👮 🕵️ 💂 🥷 👷 🤴 👸 🥵 🤶 🎅 🧙 🧝 🧛 🧟 🧞 🧜 🧚 👼 🤰 🤱 🧎 🧍 🚶 🏃 💃 🕺 👯 🧖 🧗 🏇 🏂 🏌️ 🏄 🚣 🏊 ⛹️ 🏋️ 🚴 🤸 🤼 🤽 🤾 🤹 🧘 🛌 🧑‍🤝‍🧑 👫 👬 👭".split(" "),
+  },
+  {
+    label: "Animales y naturaleza",
+    items: "🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐽 🐸 🐵 🙈 🙉 🙊 🐒 🐔 🐧 🐦 🐤 🐣 🐥 🦆 🦅 🦉 🦇 🐺 🐗 🐴 🦄 🐝 🐛 🦋 🐌 🐞 🐜 🪰 🪱 🦗 🕷️ 🦂 🐢 🐍 🦎 🦖 🦕 🐙 🦑 🦐 🦞 🦀 🐡 🐠 🐟 🐬 🐳 🐋 🦈 🐊 🐅 🐆 🦓 🦍 🦧 🐘 🦣 🦛 🦏 🐪 🐫 🦒 🦘 🦬 🐃 🐂 🐄 🐎 🐖 🐏 🐑 🦙 🐐 🦌 🐕 🐩 🦮 🐈 🐓 🦃 🦤 🦚 🦜 🦢 🦩 🕊️ 🐇 🦝 🦨 🦡 🦫 🦦 🦥 🐁 🐀 🐿️ 🦔 🐾 🐉 🐲 🌵 🎄 🌲 🌳 🌴 🪵 🌱 🌿 ☘️ 🍀 🎍 🪴 🎋 🍃 🍂 🍁 🍄 🐚 🪨 🌾 💐 🌷 🌹 🥀 🌺 🌸 🌼 🌻 🌞 🌝 🌛 🌜 🌚 🌕 ⭐ 🌟 ✨ ⚡ ☄️ 💥 🔥 🌈 ☀️ ⛅ ☁️ 🌧️ ⛈️ ❄️ ☃️ ⛄ 🌊 💧 💦".split(" "),
+  },
+  {
+    label: "Comida y bebida",
+    items: "🍏 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈 🍒 🍑 🥭 🍍 🥥 🥝 🍅 🍆 🥑 🥦 🥬 🥒 🌶️ 🫑 🌽 🥕 🫒 🧄 🧅 🥔 🍠 🥐 🥯 🍞 🥖 🥨 🧀 🥚 🍳 🧈 🥞 🧇 🥓 🥩 🍗 🍖 🌭 🍔 🍟 🍕 🫓 🥪 🥙 🧆 🌮 🌯 🫔 🥗 🥘 🫕 🥫 🍝 🍜 🍲 🍛 🍣 🍱 🥟 🦪 🍤 🍙 🍚 🍘 🍥 🥠 🥮 🍢 🍡 🍧 🍨 🍦 🥧 🧁 🍰 🎂 🍮 🍭 🍬 🍫 🍿 🍩 🍪 🌰 🥜 🍯 🥛 🍼 ☕ 🍵 🧃 🥤 🍶 🍺 🍻 🥂 🍷 🥃 🍸 🍹 🧉 🍾 🧊 🥄 🍴 🍽️ 🥢".split(" "),
+  },
+  {
+    label: "Viajes y lugares",
+    items: "🚗 🚕 🚙 🚌 🚎 🏎️ 🚓 🚑 🚒 🚐 🛻 🚚 🚛 🚜 🛵 🏍️ 🛺 🚲 🛴 🛹 🚁 ✈️ 🛩️ 🛫 🛬 🪂 💺 🚀 🛸 🚉 🚂 🚆 🚇 🚊 🚝 🚞 🚋 🚃 🚋 🛳️ ⛴️ 🚤 ⛵ 🛶 🚢 ⚓ ⛽ 🚦 🚧 🗺️ 🗿 🗽 🗼 🏰 🏯 🏟️ 🎡 🎢 🎠 ⛲ ⛱️ 🏖️ 🏝️ 🏜️ 🌋 ⛰️ 🏔️ 🗻 🏕️ ⛺ 🏠 🏡 🏘️ 🏚️ 🏢 🏬 🏭 🏥 🏦 🏨 🏪 🏫 🏩 💒 🏛️ ⛪ 🕌 🛕 🕍 🕋 🌉 🌁 🎪 🚏 🛤️ 🛣️".split(" "),
+  },
+  {
+    label: "Actividades y deportes",
+    items: "⚽ 🏀 🏈 ⚾ 🥎 🎾 🏐 🏉 🥏 🎱 🪀 🏓 🏸 🥊 🥋 🥅 ⛳ ⛸️ 🎣 🤿 🎽 🎿 🛷 🥌 🎯 🪁 🔫 🎳 🎮 🎰 🧩 🎲 🎭 🎨 🎬 🎤 🎧 🎼 🎹 🥁 🎷 🎺 🎸 🪕 🎻 🪗 🎪 🩰 🖼️ 🎳 🏹 🛼 🏆 🥇 🥈 🥉 🏅 🎖️ 🎗️ 🎫 🎟️ 🪄 🧨 🎉 🎊 🎈 🎁 🪅 🎀 🪩 🕹️ 🧵 🪡 🧶 🪢".split(" "),
+  },
+  {
+    label: "Objetos y símbolos",
+    items: "⌚ 📱 💻 ⌨️ 🖥️ 🖨️ 🖱️ 💽 💾 💿 📀 📷 📹 🎥 📞 ☎️ 📺 📻 🎙️ ⏰ ⏱️ ⏲️ 🕰️ 🔋 🔌 💡 🔦 🕯️ 🪔 🧯 🛢️ 💸 💵 💰 💳 💎 ⚖️ 🧰 🪛 🔧 🔨 ⚒️ 🛠️ ⛏️ 🪓 🔩 ⚙️ 🧱 ⛓️ 🧲 🔫 💣 🔪 🗡️ ⚔️ 🛡️ 🚬 ⚰️ 🪦 ⚱️ 🏺 🔮 📿 🧿 💈 ⚗️ 🔭 🔬 🕳️ 💊 💉 🩸 🧬 🦠 🧫 🩹 🩺 🚪 🪑 🛏️ 🛋️ 🚽 🚿 🛁 🪒 🧴 🧷 🧹 🧺 🧻 🪣 🧼 🪥 🧽 🪤 🧯 🛎️ 🔑 🗝️ 🚪 🪟 🖼️ 🛍️ 🎒 👑 👒 🎩 🎓 🧢 ⛑️ 📿 💄 💍 👓 🕶️ 🥽 🌂 ☂️ 🧳 👛 👜 👝 🎁 🔮 📦 📫 ✉️ 📧 📨 📩 📜 📃 📄 📑 🧾 📊 📈 📉 📋 📌 📍 📎 🖇️ 📏 📐 ✂️ 🗑️ 🔒 🔓 🔏 🔐 🗝️ ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💟".split(" "),
+  },
+];
+
+const ALL_EMOJIS = EMOJI_CATEGORIES.flatMap((c) => c.items);
+
+const AVATARS = ["🐶", "🐱", "🐭", "🐹", "🦊", "🐻", "🐼", "🐨", "🐯", "🦁", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🐤", "🦄", "🐝", "🐢"];
+
+function randomId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+function pickRandom(arr, exclude = []) {
+  const pool = arr.filter((x) => !exclude.includes(x));
+  const source = pool.length > 0 ? pool : arr;
+  return source[Math.floor(Math.random() * source.length)];
+}
+
+// ---- Iconos (SVG inline, mismo trazo que lucide-react, sin depender de un CDN de íconos) ----
+const ICON_PATHS = {
+  ArrowLeft: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  Check: '<path d="M20 6 9 17l-5-5"/>',
+  RefreshCw: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+  Sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
+  Timer: '<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>',
+  Trophy: '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
+  Shuffle: '<path d="m18 14 4 4-4 4"/><path d="m18 2 4 4-4 4"/><path d="M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-8.6a4 4 0 0 1 3.3-1.7H22"/><path d="M2 6h1.972a4 4 0 0 1 3.6 2.2"/><path d="M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45"/>',
+};
+
+function Icon({ name, size = 20, style }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0, ...style }}
+      dangerouslySetInnerHTML={{ __html: ICON_PATHS[name] }}
+    />
+  );
+}
+
+function TimerBar({ pct, remaining }) {
+  const color = remaining <= 4 ? C.pink : C.teal;
+  return (
+    <div className="w-full max-w-xs">
+      <div className="flex items-center justify-center gap-2 mb-2">
+        <Icon name="Timer" size={20} style={{ color }} />
+        <span className="text-3xl font-black tabular-nums" style={{ color }}>
+          {Math.ceil(remaining)}s
+        </span>
+      </div>
+      <div className="w-full h-3 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(255,255,255,0.12)" }}>
+        <div className="h-full rounded-full transition-all duration-150 ease-linear" style={{ width: `${pct * 100}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  );
+}
+
+function TopBar({ title, onBack }) {
+  return (
+    <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
+      <button onClick={onBack} className="flex items-center gap-1.5 font-bold text-sm" style={{ color: C.textMuted }}>
+        <Icon name="ArrowLeft" size={16} /> Volver
+      </button>
+      <span className="font-black text-white">{title}</span>
+      <div className="w-16" />
+    </div>
+  );
+}
+
+function PrimaryButton({ children, onClick, disabled, style, ...rest }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="w-full rounded-2xl py-4 font-black text-lg transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-40"
+      style={{ backgroundColor: C.gold, color: C.textDark, ...style }}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ==================== HOME ====================
+
+function Home({ onSelect }) {
+  const cards = [
+    { mode: "online", icon: "🌐", title: "Jugar en varios celus", desc: "Cada uno se conecta a la misma sala. El emoji gigante le aparece solo a quien actúa; los demás ven la cuenta regresiva." },
+    { mode: "offline", icon: "📱", title: "Sin conexión: un solo celu", desc: "Se van pasando el mismo celular. Vos actuás el emoji, y cuando termina el tiempo cada uno lo agarra y elige su respuesta." },
+  ];
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center p-6" style={bgStyle}>
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="text-6xl mb-2">🎭</div>
+          <h1 className="text-4xl font-black tracking-tight text-white">
+            Adiviná el <span style={{ color: C.gold }}>Emoji</span>
+          </h1>
+          <p className="mt-2 text-sm" style={{ color: C.textMuted }}>
+            Elegí cómo quieren jugar
+          </p>
+        </div>
+        <div className="space-y-3">
+          {cards.map((c) => (
+            <button
+              key={c.mode}
+              onClick={() => onSelect(c.mode)}
+              className="w-full text-left rounded-3xl p-5 transition"
+              style={{
+                backgroundColor: C.card,
+                border: `1px solid ${C.cardBorder}`,
+                opacity: c.mode === "online" ? 0.6 : 1,
+              }}
+            >
+              <div className="flex items-center gap-3 mb-1">
+                <span className="text-3xl">{c.icon}</span>
+                <span className="font-black text-lg text-white">{c.title}</span>
+              </div>
+              <p className="text-sm" style={{ color: C.textMuted }}>
+                {c.mode === "online" ? "Próximamente 🚧 — por ahora jugá pasando el celu." : c.desc}
+              </p>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== OFFLINE: UN SOLO CELULAR (SE VA PASANDO) ====================
+
+function EmojiGrid({ onPick }) {
+  return (
+    <div className="flex-1 p-4 overflow-y-auto">
+      {EMOJI_CATEGORIES.map((cat) => (
+        <div key={cat.label} className="mb-5">
+          <h3 className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: C.textMuted }}>
+            {cat.label}
+          </h3>
+          <div className="grid grid-cols-4 gap-2">
+            {cat.items.map((e, i) => (
+              <button
+                key={cat.label + i}
+                onClick={() => onPick(e)}
+                className="aspect-square flex items-center justify-center rounded-xl transition active:scale-90"
+                style={{ backgroundColor: C.card, border: `1px solid ${C.cardBorder}`, fontSize: "2.75rem" }}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HandoffScreen({ playerName, subtitle, onReady }) {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center text-center gap-6 p-6">
+      <div className="text-6xl">📲</div>
+      <div>
+        <p className="text-sm mb-1" style={{ color: C.textMuted }}>
+          Pasale el celular a
+        </p>
+        <h2 className="text-3xl font-black text-white">{playerName}</h2>
+        {subtitle && (
+          <p className="text-sm mt-2" style={{ color: C.textMuted }}>
+            {subtitle}
+          </p>
+        )}
+      </div>
+      <button onClick={onReady} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.gold, color: C.textDark }}>
+        Listo, soy yo
+      </button>
+    </div>
+  );
+}
+
+function OfflineGame({ onBack }) {
+  const [step, setStep] = useState("setup"); // setup | lobby | handoff-actor | preview | acting | handoff-guesser | answering | reveal
+  const [nameInput, setNameInput] = useState("");
+  const [players, setPlayers] = useState([]);
+  const [actorId, setActorId] = useState(null);
+  const [emoji, setEmoji] = useState(null);
+  const [used, setUsed] = useState([]);
+  const [startTime, setStartTime] = useState(null);
+  const [now, setNow] = useState(Date.now());
+  const [queue, setQueue] = useState([]); // ids de los que faltan adivinar
+  const [answers, setAnswers] = useState({}); // playerId -> emoji elegido
+  const guardRef = useRef(false);
+
+  useEffect(() => {
+    if (step !== "acting") return;
+    const id = setInterval(() => setNow(Date.now()), 100);
+    return () => clearInterval(id);
+  }, [step]);
+
+  const elapsed = startTime ? (now - startTime) / 1000 : 0;
+  const remaining = Math.max(0, ROUND_SECONDS - elapsed);
+
+  useEffect(() => {
+    if (step !== "acting") {
+      guardRef.current = false;
+      return;
+    }
+    if (remaining <= 0 && !guardRef.current) {
+      guardRef.current = true;
+      setStep(queue.length > 0 ? "handoff-guesser" : "reveal");
+    }
+  }, [remaining, step, queue.length]);
+
+  const addPlayer = () => {
+    const trimmed = nameInput.trim();
+    if (!trimmed) return;
+    setPlayers((p) => [...p, { id: randomId(), name: trimmed, score: 0 }]);
+    setNameInput("");
+  };
+
+  const beginGame = () => setStep("lobby");
+
+  const nextRound = () => {
+    const nextActor = pickRandom(players.map((p) => p.id), actorId ? [actorId] : []);
+    setActorId(nextActor);
+    setQueue(players.filter((p) => p.id !== nextActor).map((p) => p.id));
+    setAnswers({});
+    setStep("handoff-actor");
+  };
+
+  const actorReady = () => {
+    let pool = used;
+    if (pool.length >= ALL_EMOJIS.length) pool = [];
+    const e = pickRandom(ALL_EMOJIS, pool);
+    setUsed([...pool, e]);
+    setEmoji(e);
+    setStep("preview");
+  };
+
+  const startTimer = () => {
+    setStartTime(Date.now());
+    setStep("acting");
+  };
+
+  const guesserReady = () => setStep("answering");
+
+  const submitAnswer = (chosenEmoji) => {
+    const currentGuesserId = queue[0];
+    setAnswers((a) => ({ ...a, [currentGuesserId]: chosenEmoji }));
+    const rest = queue.slice(1);
+    setQueue(rest);
+    setStep(rest.length > 0 ? "handoff-guesser" : "reveal");
+  };
+
+  const confirmRound = () => {
+    const correctIds = Object.keys(answers).filter((id) => answers[id] === emoji);
+    setPlayers((ps) =>
+      ps.map((p) => {
+        if (correctIds.includes(p.id)) return { ...p, score: p.score + 1 };
+        if (p.id === actorId) return { ...p, score: p.score + correctIds.length };
+        return p;
+      })
+    );
+    setStep("lobby");
+  };
+
+  const resetScores = () => setPlayers((ps) => ps.map((p) => ({ ...p, score: 0 })));
+
+  const nameOf = (id) => players.find((p) => p.id === id)?.name || "";
+  const avatarOf = (id) => {
+    const i = players.findIndex((p) => p.id === id);
+    return AVATARS[i % AVATARS.length];
+  };
+  const pct = remaining / ROUND_SECONDS;
+
+  return (
+    <div className="min-h-screen w-full flex flex-col" style={bgStyle}>
+      <TopBar title="Un solo celu" onBack={onBack} />
+      <div className="flex-1 flex flex-col p-5">
+        {step === "setup" && (
+          <div className="flex-1 flex flex-col">
+            <h2 className="font-black text-lg mb-1 text-white">¿Quiénes juegan?</h2>
+            <p className="text-sm mb-4" style={{ color: C.textMuted }}>
+              Sumá a todos los jugadores. Cada ronda uno actúa y el resto va pasando el celu para responder.
+            </p>
+            <div className="flex gap-2 mb-3">
+              <input
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addPlayer()}
+                placeholder="Nombre del jugador"
+                className="flex-1 rounded-xl px-4 py-3 font-semibold outline-none"
+                style={{ backgroundColor: C.inputBg, color: C.textDark }}
+                maxLength={16}
+              />
+              <button onClick={addPlayer} className="rounded-xl px-4 font-black" style={{ backgroundColor: C.gold, color: C.textDark }}>
+                +
+              </button>
+            </div>
+            <div className="flex-1 space-y-2 overflow-y-auto mb-4">
+              {players.map((p, i) => (
+                <div key={p.id} className="flex items-center justify-between rounded-2xl px-4 py-3" style={{ backgroundColor: C.card, border: `1px solid ${C.cardBorder}` }}>
+                  <span className="font-bold text-white">
+                    {AVATARS[i % AVATARS.length]} {p.name}
+                  </span>
+                  <button onClick={() => setPlayers((ps) => ps.filter((x) => x.id !== p.id))} className="text-sm font-bold" style={{ color: C.pinkSoft }}>
+                    Quitar
+                  </button>
+                </div>
+              ))}
+            </div>
+            {players.length < 2 && (
+              <p className="text-center text-sm mb-3" style={{ color: C.textMuted }}>
+                Necesitás al menos 2 jugadores.
+              </p>
+            )}
+            <PrimaryButton onClick={beginGame} disabled={players.length < 2}>
+              <Icon name="Sparkles" size={20} /> Empezar
+            </PrimaryButton>
+          </div>
+        )}
+
+        {step === "lobby" && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center gap-6">
+            {players.some((p) => p.score > 0) && (
+              <div className="w-full max-w-xs space-y-1.5 mb-2">
+                {[...players].sort((a, b) => b.score - a.score).map((p, i) => (
+                  <div key={p.id} className="flex items-center justify-between rounded-xl px-3 py-2 text-sm" style={{ backgroundColor: C.card }}>
+                    <span className="font-bold flex items-center gap-1.5 text-white">
+                      {avatarOf(p.id)} {p.name} {i === 0 && p.score > 0 && <Icon name="Trophy" size={13} style={{ color: C.gold }} />}
+                    </span>
+                    <span className="font-black" style={{ color: C.gold }}>
+                      {p.score}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="text-6xl">🎲</div>
+            <h2 className="text-2xl font-black text-white">¿Listos para la ronda?</h2>
+            <button
+              onClick={nextRound}
+              className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95 flex items-center gap-2"
+              style={{ backgroundColor: C.gold, color: C.textDark }}
+            >
+              <Icon name="Shuffle" size={20} /> Siguiente ronda
+            </button>
+            {players.some((p) => p.score > 0) && (
+              <button onClick={resetScores} className="rounded-2xl px-6 py-2.5 font-bold text-sm flex items-center justify-center gap-2" style={{ backgroundColor: "rgba(255,255,255,0.05)", color: C.textMuted }}>
+                <Icon name="RefreshCw" size={14} /> Reiniciar puntajes
+              </button>
+            )}
+          </div>
+        )}
+
+        {step === "handoff-actor" && (
+          <HandoffScreen playerName={nameOf(actorId)} subtitle="Te toca actuar. Cuando lo tengas en tus manos, tocá listo." onReady={actorReady} />
+        )}
+
+        {step === "preview" && (
+          <div className="flex-1 flex flex-col items-center justify-center gap-6 text-center">
+            <p className="text-sm" style={{ color: C.textMuted }}>
+              Solo vos lo ves. Cuando estés listo, arrancá el cronómetro.
+            </p>
+            <div className="leading-none select-none" style={{ fontSize: "min(45vw, 220px)" }}>
+              {emoji}
+            </div>
+            <button onClick={startTimer} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.gold, color: C.textDark }}>
+              OK, ¡empezar!
+            </button>
+          </div>
+        )}
+
+        {step === "acting" && (
+          <div className="flex-1 flex flex-col items-center justify-center gap-8 text-center">
+            <div className="text-6xl">🤫</div>
+            <p className="text-sm" style={{ color: C.textMuted }}>
+              Ya no se muestra el emoji: mostrale esta pantalla a todos para que vean el tiempo
+            </p>
+            <TimerBar pct={pct} remaining={remaining} />
+          </div>
+        )}
+
+        {step === "handoff-guesser" && (
+          <HandoffScreen
+            playerName={nameOf(queue[0])}
+            subtitle={`¿Qué actuó ${nameOf(actorId)}? Elegí tu respuesta.`}
+            onReady={guesserReady}
+          />
+        )}
+
+        {step === "answering" && (
+          <div className="flex flex-col h-full -mx-5">
+            <div className="px-5 pb-2">
+              <p className="text-center text-sm" style={{ color: C.textMuted }}>
+                <span className="font-bold text-white">{nameOf(queue[0])}</span>, tocá el emoji que actuó {nameOf(actorId)}
+              </p>
+            </div>
+            <EmojiGrid onPick={submitAnswer} />
+          </div>
+        )}
+
+        {step === "reveal" && (
+          <div className="flex flex-col h-full">
+            <h2 className="text-2xl font-black text-center mb-1 text-white">¡Era esto!</h2>
+            <div className="text-center leading-none select-none mb-4" style={{ fontSize: "5rem" }}>
+              {emoji}
+            </div>
+            <div className="flex-1 space-y-2 overflow-y-auto mb-4">
+              <div className="flex items-center justify-between rounded-2xl px-4 py-3" style={{ backgroundColor: C.card, border: `1px solid ${C.cardBorder}` }}>
+                <span className="font-bold text-white">{avatarOf(actorId)} {nameOf(actorId)} (actuó)</span>
+              </div>
+              {Object.keys(answers).map((id) => {
+                const correct = answers[id] === emoji;
+                return (
+                  <div
+                    key={id}
+                    className="flex items-center justify-between rounded-2xl px-4 py-3"
+                    style={{ backgroundColor: correct ? "rgba(0,212,184,0.2)" : "rgba(255,46,136,0.12)", border: `1px solid ${correct ? C.teal : "rgba(255,46,136,0.4)"}` }}
+                  >
+                    <span className="font-bold text-white">
+                      {avatarOf(id)} {nameOf(id)}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-xl">{answers[id]}</span>
+                      {correct ? <Icon name="Check" size={18} style={{ color: C.teal }} /> : <span style={{ color: C.pinkSoft }}>✕</span>}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <PrimaryButton onClick={confirmRound}>Continuar</PrimaryButton>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==================== APP ====================
+
+function App() {
+  const [mode, setMode] = useState("home");
+
+  const handleSelect = (m) => {
+    if (m === "online") {
+      alert("El modo Online todavía no está listo 🚧 ¡Pronto! Por ahora jugá pasando el celu.");
+      return;
+    }
+    setMode(m);
+  };
+
+  if (mode === "home") return <Home onSelect={handleSelect} />;
+  if (mode === "offline") return <OfflineGame onBack={() => setMode("home")} />;
+  return null;
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
