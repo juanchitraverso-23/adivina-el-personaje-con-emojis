@@ -129,6 +129,15 @@
   .footerNote { text-align: center; font-size: 12px; color: #AEB3C7; margin-top: 16px; line-height: 1.5; }
   .linkBtn { background: none; border: none; color: #AEB3C7; font-size: 13px; text-decoration: underline; cursor: pointer; display: block; margin: 12px auto 0; }
   .footNamesBox { text-align: center; margin-bottom: 6px; font-size: 13px; color: #8A8FA3; }
+  .openRoomsList { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+  .openRoomRow {
+    width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: #F7F8FD; border: 1px solid rgba(0,0,0,0.06); border-radius: 14px;
+    padding: 12px 14px; cursor: pointer; text-align: left; font-family: inherit;
+  }
+  .openRoomRow:active { background: #EFE9FF; }
+  .openRoomNames { font-size: 14px; font-weight: 700; color: #3A3A4A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .openRoomCode { font-size: 12px; font-weight: 800; letter-spacing: 2px; color: #7A5FC2; flex-shrink: 0; margin-left: 10px; }
 </style>
 </head>
 <body>
@@ -377,6 +386,8 @@ let state = {
   revealedRole: false,
   clueLoading: false,
   joinError: "",
+  openRooms: [],
+  openRoomsPollHandle: null,
 
   // --- local (pasamanos) ---
   local: {
@@ -407,7 +418,7 @@ let state = {
 /* ================= NAVEGACIÓN RAÍZ ================= */
 function chooseMode(mode) {
   state.mode = mode;
-  if (mode === "online") state.screen = "onlineHome";
+  if (mode === "online") { state.screen = "onlineHome"; startOpenRoomsPolling(); }
   else state.screen = "localSetup";
   render();
 }
@@ -415,10 +426,80 @@ function chooseMode(mode) {
 function backToModeSelect() {
   if (state.pollHandle) clearInterval(state.pollHandle);
   state.pollHandle = null;
+  stopOpenRoomsPolling();
   state.room = null;
   state.roomCode = null;
   state.mode = null;
   state.screen = "modeSelect";
+  render();
+}
+
+/* ---- Salas abiertas: listado para no depender de pasarse el código ---- */
+const ROOM_PREFIX = "room:";
+
+function stopOpenRoomsPolling() {
+  if (state.openRoomsPollHandle) clearInterval(state.openRoomsPollHandle);
+  state.openRoomsPollHandle = null;
+  state.openRooms = [];
+}
+
+function renderOpenRoomsBlock() {
+  if (state.openRooms.length === 0) return "";
+  return `
+    <div class="divider">— o elegí una sala abierta —</div>
+    <div class="openRoomsList">
+      ${state.openRooms.map(r => `
+        <button class="openRoomRow" onclick="quickJoinRoom('${r.code}')">
+          <span class="openRoomNames">${r.players.map(p => p.name).join(", ")}</span>
+          <span class="openRoomCode">${r.code}</span>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function startOpenRoomsPolling() {
+  stopOpenRoomsPolling();
+  const tick = async () => {
+    if (state.screen !== "onlineHome") { stopOpenRoomsPolling(); return; }
+    try {
+      const entries = await window.storage.list(ROOM_PREFIX);
+      const rooms = entries
+        .map(e => { try { return JSON.parse(e.value); } catch { return null; } })
+        .filter(r => r && r.phase === "lobby" && Date.now() - (r.createdAt || 0) < 3 * 60 * 60 * 1000)
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      state.openRooms = rooms;
+      // Actualiza SOLO este bloque, nunca la tarjeta entera: un render()
+      // completo acá reemplazaría los inputs de nombre/código y le haría
+      // perder el foco (y lo tipeado) a quien está escribiendo su nombre.
+      const container = document.getElementById("openRoomsBlock");
+      if (container) container.innerHTML = renderOpenRoomsBlock();
+      else render();
+    } catch (e) { /* sin salas visibles, no molesta al jugador con un error */ }
+  };
+  tick();
+  state.openRoomsPollHandle = setInterval(tick, 1800);
+}
+
+async function quickJoinRoom(code) {
+  const nameInput = document.getElementById("nameInput") || document.getElementById("nameInputJoin");
+  const name = (nameInput ? nameInput.value : "").trim();
+  if (!name) { state.joinError = "Poné tu nombre primero (arriba o abajo)."; render(); return; }
+  const existing = await loadRoom(code);
+  if (!existing) { state.joinError = "Esa sala ya no está disponible."; render(); return; }
+  if (existing.phase !== "lobby") { state.joinError = "Esa partida ya empezó. Esperá a la próxima ronda."; render(); return; }
+  if (existing.players.some(p => p.name.toLowerCase() === name.toLowerCase())) {
+    state.joinError = "Ya hay alguien con ese nombre, probá otro."; render(); return;
+  }
+  existing.players.push({ id: myId, name, isBot: false });
+  await saveRoom(existing);
+  stopOpenRoomsPolling();
+  state.room = existing;
+  state.roomCode = code;
+  state.myName = name;
+  state.screen = "lobby";
+  state.joinError = "";
+  startPolling();
   render();
 }
 
@@ -465,9 +546,11 @@ async function createRoom() {
     code, hostId: myId,
     players: [{ id: myId, name, isBot: false }],
     botCount: 0, readingOk: true, kidsUnder12: false, impostorHelp: false,
-    phase: "lobby", recentImpostorIds: [], recentStarterIds: [], recentWords: [], round: 0
+    phase: "lobby", recentImpostorIds: [], recentStarterIds: [], recentWords: [], round: 0,
+    createdAt: Date.now()
   };
   await saveRoom(state.room);
+  stopOpenRoomsPolling();
   state.screen = "lobby";
   startPolling();
   render();
@@ -488,6 +571,7 @@ async function joinRoom() {
   }
   existing.players.push({ id: myId, name, isBot: false });
   await saveRoom(existing);
+  stopOpenRoomsPolling();
   state.room = existing;
   state.roomCode = code;
   state.myName = name;
@@ -598,6 +682,7 @@ function leaveRoom() {
   if (state.pollHandle) clearInterval(state.pollHandle);
   state.pollHandle = null; state.room = null; state.roomCode = null;
   state.screen = "onlineHome"; state.joinError = ""; render();
+  startOpenRoomsPolling();
 }
 
 /* ================= MODO LOCAL (PASAMANOS) ================= */
@@ -744,6 +829,7 @@ function renderOnline(card) {
       <input id="codeInput" class="codeInput" type="text" maxlength="4" placeholder="CÓDIGO" value="${prevCodeVal}">
       <button class="btn btnSecondary" onclick="joinRoom()">Unirme a una sala</button>
       ${state.joinError ? `<div class="err">${state.joinError}</div>` : ""}
+      <div id="openRoomsBlock">${renderOpenRoomsBlock()}</div>
       <button class="linkBtn" onclick="backToModeSelect()">← Volver</button>
     `;
     return;

@@ -24,5 +24,14 @@
     if (!res.ok) throw new Error("storage.set falló: " + res.status);
   }
 
-  window.storage = { get, set };
+  // Lista todas las claves guardadas bajo un prefijo (p. ej. todas las salas
+  // de un juego), con su valor ya resuelto. Sirve para mostrar "salas
+  // abiertas ahora" sin necesitar el código de memoria.
+  async function list(prefix) {
+    const res = await fetch("/api/kv-list/" + encodeURIComponent(prefix));
+    if (!res.ok) throw new Error("storage.list falló: " + res.status);
+    return res.json(); // [{ key, value }]
+  }
+
+  window.storage = { get, set, list };
 })();

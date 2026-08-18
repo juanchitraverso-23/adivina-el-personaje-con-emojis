@@ -22,6 +22,32 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // Lista las salas abiertas: todas las claves que empiezan con el prefijo
+    // dado, con su valor ya resuelto (para que el cliente pueda filtrar por
+    // fase "lobby" sin tener que pedir sala por sala). Uso: navegar salas sin
+    // necesitar el código de memoria — sigue habiendo códigos para compartir,
+    // esto es solo una forma más fácil de encontrar una sala familiar.
+    if (url.pathname.startsWith("/api/kv-list/")) {
+      if (request.method === "OPTIONS") return withCors(new Response(null, { status: 204 }));
+      if (request.method !== "GET") return withCors(new Response("Method not allowed", { status: 405 }));
+
+      const prefix = decodeURIComponent(url.pathname.slice("/api/kv-list/".length));
+      if (!prefix) return withCors(new Response("Falta el prefijo", { status: 400 }));
+
+      const listed = await env.ROOMS.list({ prefix, limit: 50 });
+      const entries = await Promise.all(
+        listed.keys.map(async (k) => {
+          const value = await env.ROOMS.get(k.name);
+          return value === null ? null : { key: k.name, value };
+        })
+      );
+      return withCors(
+        new Response(JSON.stringify(entries.filter(Boolean)), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+        })
+      );
+    }
+
     if (url.pathname.startsWith("/api/kv/")) {
       const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
       if (!key) return withCors(new Response("Falta la clave", { status: 400 }));

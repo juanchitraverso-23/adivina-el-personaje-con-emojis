@@ -553,7 +553,74 @@ function OnlineGame({ onBack }) {
 
   const [now, setNow] = useState(Date.now());
   const [checked, setChecked] = useState({});
+  const [openRooms, setOpenRooms] = useState([]);
   const transitionGuard = useRef(false);
+
+  // Salas abiertas: se listan solo mientras estamos en la pantalla de unirse,
+  // para no seguir gastando pedidos una vez adentro de una sala.
+  useEffect(() => {
+    if (screen !== "join") return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const entries = await window.storage.list(STORAGE_PREFIX);
+        if (cancelled) return;
+        const rooms = entries
+          .map((e) => {
+            try {
+              return JSON.parse(e.value);
+            } catch {
+              return null;
+            }
+          })
+          .filter((r) => r && r.phase === "lobby" && Date.now() - (r.createdAt || 0) < 3 * 60 * 60 * 1000)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setOpenRooms(rooms);
+      } catch {
+        // sin salas visibles, no molesta al jugador con un error acá
+      }
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [screen]);
+
+  const quickJoin = async (code) => {
+    setCodeInput(code);
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setJoinError("Poné tu nombre primero.");
+      return;
+    }
+    setJoining(true);
+    setJoinError("");
+    try {
+      let existing = await readRoom(code);
+      if (!existing) {
+        setJoinError("Esa sala ya no está disponible.");
+        return;
+      }
+      if (existing.players.some((p) => p.name.toLowerCase() === trimmedName.toLowerCase())) {
+        setJoinError("Ese nombre ya está en uso en esta sala. Probá otro.");
+        return;
+      }
+      const id = randomId();
+      const avatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
+      existing.players.push({ id, name: trimmedName, avatar, score: 0 });
+      await writeRoom(code, existing);
+      setRoom(existing);
+      setRoomCode(code);
+      setPlayerId(id);
+      setScreen("game");
+    } catch (e) {
+      setJoinError("No se pudo conectar a la sala. Probá de nuevo.");
+    } finally {
+      setJoining(false);
+    }
+  };
 
   useEffect(() => {
     if (!roomCode) return;
@@ -769,6 +836,39 @@ function OnlineGame({ onBack }) {
               {joining ? "Entrando..." : codeInput.trim() ? "Unirme a la sala" : "Crear sala y jugar"}
             </PrimaryButton>
           </div>
+
+          {openRooms.length > 0 && (
+            <div className="mt-6">
+              <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: C.textMuted }}>
+                Salas abiertas ahora
+              </p>
+              <div className="space-y-2">
+                {openRooms.map((r) => (
+                  <button
+                    key={r.code}
+                    onClick={() => quickJoin(r.code)}
+                    disabled={joining}
+                    className="w-full flex items-center justify-between rounded-2xl px-4 py-3 text-left transition active:scale-95 disabled:opacity-40"
+                    style={{ backgroundColor: C.card, border: `1px solid ${C.cardBorder}` }}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="flex -space-x-1 text-xl shrink-0">
+                        {r.players.slice(0, 4).map((p, i) => (
+                          <span key={i}>{p.avatar}</span>
+                        ))}
+                      </span>
+                      <span className="font-semibold text-sm text-white truncate">
+                        {r.players.map((p) => p.name).join(", ")}
+                      </span>
+                    </span>
+                    <span className="font-black text-xs tracking-widest shrink-0 ml-2" style={{ color: C.gold }}>
+                      {r.code}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
