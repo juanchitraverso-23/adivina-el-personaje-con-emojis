@@ -49,6 +49,20 @@ async function writeRoom(code, room) {
   await window.storage.set(STORAGE_PREFIX + code, JSON.stringify(room), true);
 }
 
+// Identidad del CELU (no de una persona): estable entre recargas, para que
+// un mismo teléfono con varios jugadores de la misma casa se reconozca como
+// tal al volver a entrar. Cada jugador de esa casa es una entrada aparte en
+// room.players, todas con este mismo deviceId.
+const MY_DEVICE_ID = (() => {
+  const KEY = "quien-soy:deviceId";
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id = randomId();
+    localStorage.setItem(KEY, id);
+  }
+  return id;
+})();
+
 
 const QUICK_EMOJIS = [
   "😀","😎","🤴","👑","🎤","⚽","🏎️","🎬","🎸","🥊",
@@ -756,7 +770,8 @@ function OfflineGame({ onBack }) {
 
 function OnlineGame({ onBack }) {
   const [screen, setScreen] = useState("join"); // "join" | "game"
-  const [name, setName] = useState("");
+  const [localNames, setLocalNames] = useState([]);
+  const [nameDraft, setNameDraft] = useState("");
   const [codeInput, setCodeInput] = useState("");
   const [joinError, setJoinError] = useState("");
   const [joining, setJoining] = useState(false);
@@ -764,7 +779,6 @@ function OnlineGame({ onBack }) {
   const [resumable, setResumable] = useState(null);
 
   const [roomCode, setRoomCode] = useState(null);
-  const [playerId, setPlayerId] = useState(null);
   const [room, setRoom] = useState(null);
   const [copied, setCopied] = useState(false);
 
@@ -772,6 +786,21 @@ function OnlineGame({ onBack }) {
   const [secretDraft, setSecretDraft] = useState("");
   const [guessDraft, setGuessDraft] = useState("");
   const [selected, setSelected] = useState([]);
+
+  // Nombres de las personas que juegan desde ESTE celu (puede ser más de una).
+  const addLocalName = () => {
+    const val = nameDraft.trim();
+    if (!val) return;
+    if (localNames.some((n) => n.toLowerCase() === val.toLowerCase())) {
+      setNameDraft("");
+      return;
+    }
+    setLocalNames((prev) => [...prev, val]);
+    setNameDraft("");
+  };
+  const removeLocalName = (i) => {
+    setLocalNames((prev) => prev.filter((_, idx) => idx !== i));
+  };
 
   // Salas abiertas: solo mientras estamos eligiendo a cuál unirnos.
   useEffect(() => {
@@ -804,7 +833,9 @@ function OnlineGame({ onBack }) {
     };
   }, [screen]);
 
-  // Sesión guardada: por si volviste al menú por error.
+  // Sesión guardada: por si volviste al menú por error. Se identifica por
+  // este CELU (MY_DEVICE_ID), no por una persona puntual — así vuelven
+  // todos los de esta casa juntos.
   useEffect(() => {
     if (screen !== "join") return;
     let cancelled = false;
@@ -815,14 +846,15 @@ function OnlineGame({ onBack }) {
       } catch {
         saved = null;
       }
-      if (!saved || !saved.code || !saved.playerId) {
+      if (!saved || !saved.code) {
         setResumable(null);
         return;
       }
       const existing = await readRoom(saved.code);
       if (cancelled) return;
-      if (existing && existing.players.some((p) => p.id === saved.playerId)) {
-        setResumable(saved);
+      const mine = existing ? existing.players.filter((p) => p.deviceId === MY_DEVICE_ID) : [];
+      if (mine.length > 0) {
+        setResumable({ code: saved.code, names: mine.map((p) => p.name) });
       } else {
         localStorage.removeItem(SESSION_KEY);
         setResumable(null);
@@ -843,14 +875,12 @@ function OnlineGame({ onBack }) {
     }
     setRoom(existing);
     setRoomCode(resumable.code);
-    setPlayerId(resumable.playerId);
     setScreen("game");
   };
 
   const doJoin = async (codeMaybe) => {
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      setJoinError("Poné tu nombre.");
+    if (localNames.length === 0) {
+      setJoinError("Sumá al menos una persona de este celu.");
       return;
     }
     setJoining(true);
@@ -858,11 +888,11 @@ function OnlineGame({ onBack }) {
     try {
       const code = codeMaybe || (codeInput.trim() ? codeInput.trim().toUpperCase() : randomCode());
       let existing = await readRoom(code);
-      const id = randomId();
+      const newPlayers = localNames.map((n) => ({ id: randomId(), name: n, deviceId: MY_DEVICE_ID, score: 0 }));
       if (!existing) {
         existing = {
           code,
-          players: [{ id, name: trimmedName, score: 0 }],
+          players: newPlayers,
           phase: "lobby",
           clueGiverIdx: -1,
           clueGiverId: null,
@@ -873,18 +903,20 @@ function OnlineGame({ onBack }) {
           createdAt: Date.now(),
         };
       } else {
-        if (existing.players.some((p) => p.name.toLowerCase() === trimmedName.toLowerCase())) {
-          setJoinError("Ese nombre ya está en uso en esta sala. Probá otro.");
+        const clash = newPlayers.find((np) =>
+          existing.players.some((p) => p.name.toLowerCase() === np.name.toLowerCase())
+        );
+        if (clash) {
+          setJoinError(`Ya hay alguien llamado "${clash.name}" en esa sala. Cambiá el nombre.`);
           setJoining(false);
           return;
         }
-        existing.players.push({ id, name: trimmedName, score: 0 });
+        existing.players = [...existing.players, ...newPlayers];
       }
       await writeRoom(code, existing);
-      localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: id, name: trimmedName }));
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ code }));
       setRoom(existing);
       setRoomCode(code);
-      setPlayerId(id);
       setScreen("game");
     } catch (e) {
       setJoinError("No se pudo conectar a la sala. Probá de nuevo.");
@@ -919,10 +951,9 @@ function OnlineGame({ onBack }) {
     };
   }, [roomCode]);
 
-  const me = room?.players?.find((p) => p.id === playerId) || null;
+  const myPlayers = (room?.players || []).filter((p) => p.deviceId === MY_DEVICE_ID);
   const clueGiver = room?.players?.find((p) => p.id === room?.clueGiverId) || null;
-  const isClueGiver = room?.clueGiverId === playerId;
-  const myGuess = room?.guesses ? room.guesses[playerId] : null;
+  const isMyDeviceClueGiver = !!clueGiver && clueGiver.deviceId === MY_DEVICE_ID;
 
   const copyCode = () => {
     if (!roomCode) return;
@@ -976,11 +1007,11 @@ function OnlineGame({ onBack }) {
     setEmojiDraft("");
   };
 
-  const submitGuess = async () => {
+  const submitGuessFor = async (forId, forName) => {
     const text = guessDraft.trim() || "(sin respuesta)";
     const fresh = await readRoom(roomCode);
     if (!fresh) return;
-    fresh.guesses = { ...(fresh.guesses || {}), [playerId]: { name: me?.name || name, text } };
+    fresh.guesses = { ...(fresh.guesses || {}), [forId]: { name: forName, text } };
     await writeRoom(roomCode, fresh);
     setRoom(fresh);
     setGuessDraft("");
@@ -1040,7 +1071,7 @@ function OnlineGame({ onBack }) {
       <Screen style={{ justifyContent: "center" }}>
         <div style={{ fontSize: 56, marginBottom: 6 }}>🌐</div>
         <Title size={28}>Jugar Online</Title>
-        <Sub>Cada uno desde su celular, estén donde estén</Sub>
+        <Sub>Una sala por familia/casa. Si en tu casa juegan varios con el mismo celu, sumalos a todos abajo.</Sub>
 
         {resumable && (
           <button
@@ -1063,27 +1094,87 @@ function OnlineGame({ onBack }) {
               ↩️ Volver a tu sala ({resumable.code})
             </div>
             <div style={{ fontSize: 12.5, color: "#C9B8F0", marginTop: 2 }}>
-              Eras {resumable.name} — seguís ahí adentro
+              Eran {joinNames(resumable.names)} — siguen ahí adentro
             </div>
           </button>
         )}
 
         <Card style={{ marginBottom: 16 }}>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Tu nombre"
-            style={inputStyle}
-            maxLength={16}
-          />
+          <div
+            style={{
+              fontFamily: "'Baloo 2', sans-serif",
+              fontSize: 12,
+              color: "#FFD23F",
+              marginBottom: 8,
+              textTransform: "uppercase",
+              letterSpacing: 1,
+            }}
+          >
+            ¿Quiénes juegan desde este celu?
+          </div>
+          {localNames.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              {localNames.map((n, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    background: "rgba(255,255,255,0.06)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 10,
+                    padding: "8px 12px",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span style={{ fontWeight: 700 }}>{n}</span>
+                  <button
+                    onClick={() => removeLocalName(i)}
+                    style={{ background: "none", border: "none", color: "#FF6B9D", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                  >
+                    Quitar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
+            <input
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addLocalName()}
+              placeholder="Nombre de la persona"
+              style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
+              maxLength={16}
+            />
+            <button
+              onClick={addLocalName}
+              style={{
+                width: 44,
+                borderRadius: 12,
+                border: "none",
+                background: "#FF3E7F",
+                color: "#1B1035",
+                fontSize: 22,
+                fontWeight: 800,
+                cursor: "pointer",
+              }}
+            >
+              +
+            </button>
+          </div>
+        </Card>
+
+        <Card style={{ marginBottom: 16 }}>
           <input
             value={codeInput}
             onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
             placeholder="Código de sala (dejalo vacío para crear)"
-            style={{ ...inputStyle, letterSpacing: 3, textTransform: "uppercase" }}
+            style={{ ...inputStyle, marginBottom: 0, letterSpacing: 3, textTransform: "uppercase" }}
             maxLength={4}
           />
-          {joinError && <div style={{ color: "#FF6B9D", fontSize: 13, marginBottom: 4 }}>{joinError}</div>}
+          {joinError && <div style={{ color: "#FF6B9D", fontSize: 13, marginTop: 8 }}>{joinError}</div>}
         </Card>
         <BigButton onClick={() => doJoin()} disabled={joining}>
           {joining ? "Entrando..." : codeInput.trim() ? "Unirme a la sala" : "Crear sala y jugar"}
@@ -1150,6 +1241,7 @@ function OnlineGame({ onBack }) {
   const players = room.players || [];
   const sorted = [...players].sort((a, b) => (b.score || 0) - (a.score || 0));
   const guessesList = Object.entries(room.guesses || {}).map(([id, g]) => ({ id, ...g }));
+  const myPlayerIds = myPlayers.map((p) => p.id);
 
   // ---------- LOBBY ----------
   if (room.phase === "lobby") {
@@ -1157,7 +1249,7 @@ function OnlineGame({ onBack }) {
       <Screen style={{ justifyContent: "center" }}>
         <div style={{ display: "flex", justifyContent: "space-between", width: "100%", maxWidth: 420, marginBottom: 10 }}>
           <span style={{ color: "#C9B8F0", fontSize: 13 }}>
-            Vos: <b style={{ color: "#F3EEFF" }}>{me?.name}</b>
+            Este celu: <b style={{ color: "#F3EEFF" }}>{joinNames(myPlayers.map((p) => p.name))}</b>
           </span>
           <button
             onClick={copyCode}
@@ -1180,12 +1272,15 @@ function OnlineGame({ onBack }) {
         <Card style={{ marginBottom: 20 }}>
           {sorted.map((p) => (
             <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 2px", fontSize: 15 }}>
-              <span>{p.name}</span>
+              <span>
+                {p.name}
+                {myPlayerIds.includes(p.id) && <span style={{ color: "#8b7fa8", fontSize: 11 }}> (vos)</span>}
+              </span>
               <span style={{ color: "#FFD23F", fontWeight: 800 }}>{p.score || 0} ⭐</span>
             </div>
           ))}
         </Card>
-        {players.length < 3 && <Sub>Necesitás al menos 3 jugadores. Compartí el código.</Sub>}
+        {players.length < 3 && <Sub>Necesitás al menos 3 jugadores en total. Compartí el código.</Sub>}
         <BigButton onClick={startRound} disabled={players.length < 3}>
           Siguiente ronda ➜
         </BigButton>
@@ -1199,7 +1294,7 @@ function OnlineGame({ onBack }) {
   // ---------- CLUE INPUT / CLUE INPUT AGAIN ----------
   if (room.phase === "clueInput" || room.phase === "clueInputAgain") {
     const isAgain = room.phase === "clueInputAgain";
-    if (!isClueGiver) {
+    if (!isMyDeviceClueGiver) {
       return (
         <Screen style={{ justifyContent: "center" }}>
           <div style={{ fontSize: 56, marginBottom: 10 }}>🤫</div>
@@ -1213,7 +1308,7 @@ function OnlineGame({ onBack }) {
     }
     return (
       <Screen>
-        <Title size={24}>{isAgain ? "Pistas extra" : "Pensá a alguien"}</Title>
+        <Title size={24}>{isAgain ? "Pistas extra" : `Pensá a alguien, ${clueGiver?.name}`}</Title>
         <Sub>{isAgain ? "Agregá otro emoji como pista" : "Elegí una persona famosa y escribila (queda guardada)"}</Sub>
         <ClueTrail clues={room.clues || []} />
         <Card style={{ marginBottom: 16 }}>
@@ -1262,9 +1357,40 @@ function OnlineGame({ onBack }) {
 
   // ---------- GUESSING ----------
   if (room.phase === "guessing") {
-    const answered = guessesList.length;
-    const total = players.length - 1;
-    if (isClueGiver) {
+    // Jugadores de ESTE celu que todavía no mandaron respuesta (nunca incluye
+    // a quien piensa, esté en el celu que esté). Si hay más de uno, se van
+    // pasando el celu entre ellos, uno a la vez.
+    const pendingLocal = myPlayers.filter(
+      (p) => p.id !== room.clueGiverId && !(room.guesses || {})[p.id]
+    );
+
+    if (pendingLocal.length > 0) {
+      const current = pendingLocal[0];
+      return (
+        <Screen>
+          <Title size={22}>¿Quién es, {current.name}?</Title>
+          {myPlayers.length > 1 && (
+            <Sub style={{ marginTop: -12 }}>Pasale el celu a {current.name} si no lo tiene ya</Sub>
+          )}
+          <ClueTrail clues={room.clues || []} />
+          <Card style={{ marginBottom: 16 }}>
+            <input
+              autoFocus
+              value={guessDraft}
+              onChange={(e) => setGuessDraft(e.target.value)}
+              placeholder="Escribí tu respuesta..."
+              style={inputStyle}
+              onKeyDown={(e) => e.key === "Enter" && submitGuessFor(current.id, current.name)}
+            />
+          </Card>
+          <BigButton onClick={() => submitGuessFor(current.id, current.name)}>Confirmar respuesta ✅</BigButton>
+        </Screen>
+      );
+    }
+
+    if (isMyDeviceClueGiver) {
+      const answered = guessesList.length;
+      const total = players.length - 1;
       return (
         <Screen>
           <Title size={22}>Esperando respuestas</Title>
@@ -1286,38 +1412,22 @@ function OnlineGame({ onBack }) {
         </Screen>
       );
     }
-    if (myGuess) {
-      return (
-        <Screen style={{ justifyContent: "center" }}>
-          <div style={{ fontSize: 56, marginBottom: 10 }}>✅</div>
-          <Title size={22}>¡Mandaste tu respuesta!</Title>
-          <Sub>Esperando a los demás...</Sub>
-          <ClueTrail clues={room.clues || []} />
-        </Screen>
-      );
-    }
+
     return (
-      <Screen>
-        <Title size={22}>¿Quién es?</Title>
+      <Screen style={{ justifyContent: "center" }}>
+        <div style={{ fontSize: 56, marginBottom: 10 }}>✅</div>
+        <Title size={22}>
+          {myPlayers.length > 1 ? "¡Ya mandaron sus respuestas!" : "¡Mandaste tu respuesta!"}
+        </Title>
+        <Sub>Esperando a los demás...</Sub>
         <ClueTrail clues={room.clues || []} />
-        <Card style={{ marginBottom: 16 }}>
-          <input
-            autoFocus
-            value={guessDraft}
-            onChange={(e) => setGuessDraft(e.target.value)}
-            placeholder="Escribí tu respuesta..."
-            style={inputStyle}
-            onKeyDown={(e) => e.key === "Enter" && submitGuess()}
-          />
-        </Card>
-        <BigButton onClick={submitGuess}>Confirmar respuesta ✅</BigButton>
       </Screen>
     );
   }
 
   // ---------- REVIEW ----------
   if (room.phase === "review") {
-    if (!isClueGiver) {
+    if (!isMyDeviceClueGiver) {
       return (
         <Screen style={{ justifyContent: "center" }}>
           <div style={{ fontSize: 56, marginBottom: 10 }}>🎯</div>
