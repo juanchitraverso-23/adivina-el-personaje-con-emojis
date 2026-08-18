@@ -122,11 +122,9 @@ const MY_DEVICE_ID = (() => {
 })();
 
 // ==================== BANCO DE CONSIGNAS (OFICIALES) ====================
-// 62 consignas oficiales que mandó Juanchi. Se transcriben tal cual, sin
-// modificar la redacción. (Nota: contaba 61 pero el recuento de la lista
-// dio 62 una vez que "Pero va tu suegra" se combinó con la de los asientos
-// del auto — avisame si alguna quedó de más o de menos.)
-const PROMPTS = [
+// Consignas oficiales del modo Parejas que mandó Juanchi. Se transcriben tal
+// cual, sin modificar la redacción.
+const PROMPTS_PAREJAS = [
   { id: 1, text: "Vas a un hotel por primera vez y entrás al buffet de desayuno. ¿Qué buscás primero?", category: "comida" },
   { id: 2, text: "Viaje en auto con 5 personas. ¿Cómo van sentados?", category: "situaciones" },
   { id: 3, text: "Hay 1 conductor, 1 acompañante adelante y 3 lugares atrás. ¿En qué lugar te sentás? Pero va tu suegra.", category: "situaciones" },
@@ -291,6 +289,51 @@ function dedupePrompts(candidateTexts, existingPrompts) {
   return out;
 }
 
+// ==================== MODOS DE JUEGO ====================
+// Mismo mecanismo (yo / creo que la otra persona) para los tres. Lo único
+// que cambia es el texto de la interfaz y el banco de consignas.
+const MODES = {
+  parejas: {
+    key: "parejas",
+    label: "Parejas Actuales",
+    emoji: "💞",
+    tagline: "¿Qué haría mi pareja?",
+    subtitle: "Primero pensás como vos. Después intentás pensar como tu pareja.",
+    duoNoun: "pareja",
+    duoEmoji: "❤️",
+  },
+  padrehijo: {
+    key: "padrehijo",
+    label: "Padre / Hijo",
+    emoji: "👨‍👧",
+    tagline: "¿Qué haría mi papá, mi mamá, mi hijo o mi hija?",
+    subtitle: "Primero pensás como vos. Después intentás pensar como tu papá, mamá, hijo o hija.",
+    duoNoun: "dupla",
+    duoEmoji: "🤝",
+  },
+  amigos: {
+    key: "amigos",
+    label: "Amigos",
+    emoji: "🎉",
+    tagline: "¿Qué haría mi amigo/a?",
+    subtitle: "Primero pensás como vos. Después intentás pensar como tu compañero/a de juego.",
+    duoNoun: "dupla",
+    duoEmoji: "🤝",
+  },
+};
+const MODE_ORDER = ["parejas", "padrehijo", "amigos"];
+function modeOf(room) {
+  return MODES[(room && room.mode) || "parejas"] || MODES.parejas;
+}
+
+const PROMPTS_PADREHIJO = []; // todavía sin consignas oficiales — se cargan con "Consignas nuevas"
+const PROMPTS_AMIGOS = [];    // ídem
+const PROMPTS_BY_MODE = {
+  parejas: PROMPTS_PAREJAS,
+  padrehijo: PROMPTS_PADREHIJO,
+  amigos: PROMPTS_AMIGOS,
+};
+
 // ==================== UI COMPARTIDA ====================
 const C = {
   bg1: "#3a1023",
@@ -408,31 +451,15 @@ const inputStyle = {
   fontSize: 16, marginBottom: 10, outline: "none", fontFamily: "'Nunito', sans-serif",
 };
 
-// ==================== HOME (dentro del juego) ====================
-function GameHome({ onSelect, onBack }) {
-  return (
-    <Screen style={{ justifyContent: "center" }}>
-      <div style={{ fontSize: 60, marginBottom: 6 }}>💞</div>
-      <Title size={32}>Parejas Actuales</Title>
-      <Sub>
-        Primero pensás como vos. Después intentás pensar como tu pareja.
-        Un juego para jugar en mesa, cada uno con su celu.
-      </Sub>
-      <BigButton onClick={() => onSelect("create")}>💌 Crear sala</BigButton>
-      <BigButton onClick={() => onSelect("join")} color={C.gold}>🔗 Unirme a una sala</BigButton>
-      <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: C.textMuted }}>
-        ← Volver al menú de juegos
-      </BigButton>
-    </Screen>
-  );
-}
-
 // ==================== PANTALLA DE ENTRAR / CREAR ====================
-function JoinScreen({ mode, onBack, onEntered }) {
+// Nadie escribe el nombre de la otra persona acá: todos entran como
+// individuos (sin pareja todavía) y las duplas se arman a los toques
+// dentro del lobby, una vez que todos están conectados. Así no depende de
+// que dos personas escriban exactamente el mismo nombre.
+function JoinScreen({ mode, gameMode, onBack, onEntered }) {
   const [roomName, setRoomName] = useState("");
   const [codeInput, setCodeInput] = useState("");
   const [myName, setMyName] = useState("");
-  const [partnerName, setPartnerName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [openRooms, setOpenRooms] = useState([]);
@@ -467,13 +494,8 @@ function JoinScreen({ mode, onBack, onEntered }) {
 
   const doEnter = async (codeMaybe) => {
     const trimmedName = myName.trim();
-    const trimmedPartner = partnerName.trim();
-    if (!trimmedName || !trimmedPartner) {
-      setError("Completá tu nombre y el de tu pareja.");
-      return;
-    }
-    if (trimmedName.toLowerCase() === trimmedPartner.toLowerCase()) {
-      setError("Tu nombre y el de tu pareja no pueden ser iguales.");
+    if (!trimmedName) {
+      setError("Completá tu nombre.");
       return;
     }
     setBusy(true);
@@ -487,18 +509,10 @@ function JoinScreen({ mode, onBack, onEntered }) {
         setBusy(false);
         return;
       }
-      // Buscamos si alguien ya está esperando a esta persona (matcheo por nombre).
-      const counts = {};
-      players.forEach((p) => { counts[p.coupleId] = (counts[p.coupleId] || 0) + 1; });
-      const pendingMatch = players.find(
-        (p) => counts[p.coupleId] === 1 && p.name.trim().toLowerCase() === trimmedPartner.toLowerCase()
-      );
-      const coupleId = pendingMatch ? pendingMatch.coupleId : randomId();
       const me = {
         id: randomId(),
         name: trimmedName,
-        partnerName: trimmedPartner,
-        coupleId,
+        coupleId: null, // se empareja después, en el lobby
         deviceId: MY_DEVICE_ID,
         joinedAt: Date.now(),
       };
@@ -507,6 +521,7 @@ function JoinScreen({ mode, onBack, onEntered }) {
           code,
           name: roomName.trim() || `Sala de ${trimmedName}`,
           hostId: me.id,
+          mode: MODES[gameMode] ? gameMode : "parejas",
           players: [me],
           phase: "lobby",
           prompts: [], // se completa al empezar la partida: [{id, text}, ...] (oficiales y/o nuevas, embebidas en la sala)
@@ -525,11 +540,13 @@ function JoinScreen({ mode, onBack, onEntered }) {
     }
   };
 
+  const cfg = MODES[gameMode] || MODES.parejas;
+
   return (
     <Screen style={{ justifyContent: "center" }}>
-      <div style={{ fontSize: 52, marginBottom: 6 }}>{mode === "create" ? "💌" : "🔗"}</div>
-      <Title size={26}>{mode === "create" ? "Crear sala" : "Unirme a una sala"}</Title>
-      <Sub>Cada persona entra desde su propio celu</Sub>
+      <div style={{ fontSize: 52, marginBottom: 6 }}>{mode === "create" ? cfg.emoji : "🔗"}</div>
+      <Title size={26}>{mode === "create" ? `Crear sala — ${cfg.label}` : "Unirme a una sala"}</Title>
+      <Sub>Cada persona entra desde su propio celu, con su nombre. Las duplas se arman después, en la sala.</Sub>
 
       <Card style={{ marginBottom: 16 }}>
         {mode === "create" ? (
@@ -543,8 +560,7 @@ function JoinScreen({ mode, onBack, onEntered }) {
             maxLength={4}
           />
         )}
-        <input value={myName} onChange={(e) => setMyName(e.target.value)} placeholder="Tu nombre" style={inputStyle} maxLength={16} />
-        <input value={partnerName} onChange={(e) => setPartnerName(e.target.value)} placeholder="Nombre de tu pareja" style={{ ...inputStyle, marginBottom: 0 }} maxLength={16} />
+        <input value={myName} onChange={(e) => setMyName(e.target.value)} placeholder="Tu nombre" style={{ ...inputStyle, marginBottom: 0 }} maxLength={16} />
         {error && <div style={{ color: C.roseSoft, fontSize: 13, marginTop: 10 }}>{error}</div>}
       </Card>
 
@@ -558,15 +574,7 @@ function JoinScreen({ mode, onBack, onEntered }) {
             Salas abiertas ahora
           </div>
           {openRooms.map((r) => {
-            const counts = {};
-            (r.players || []).forEach((p) => { counts[p.coupleId] = (counts[p.coupleId] || 0) + 1; });
-            const couples = Object.values(
-              (r.players || []).reduce((acc, p) => {
-                acc[p.coupleId] = acc[p.coupleId] || [];
-                acc[p.coupleId].push(p.name);
-                return acc;
-              }, {})
-            );
+            const rc = modeOf(r);
             return (
               <button
                 key={r.code}
@@ -578,7 +586,7 @@ function JoinScreen({ mode, onBack, onEntered }) {
                   color: "#FBEEF0", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 13,
                 }}
               >
-                <span>{r.name} — {couples.map((c) => c.join("+")).join(", ")}</span>
+                <span>{rc.emoji} {r.name} — {(r.players || []).map((p) => p.name).join(", ")}</span>
                 <span style={{ color: C.gold, fontWeight: 800, fontSize: 12, letterSpacing: 2 }}>{r.code}</span>
               </button>
             );
@@ -603,16 +611,72 @@ function couplesFromPlayers(players) {
   return Object.values(map);
 }
 
-function Lobby({ room, myId, onStarted }) {
+function Lobby({ room, myId, onRoomUpdated, onStarted }) {
   const isHost = room.hostId === myId;
-  const couples = couplesFromPlayers(room.players || []);
-  const confirmedCount = couples.filter((c) => c.length === 2).length;
+  const cfg = modeOf(room);
+  const officialBank = PROMPTS_BY_MODE[room.mode || "parejas"] || [];
+  const players = room.players || [];
+  const solo = players.filter((p) => !p.coupleId);
+  const couples = couplesFromPlayers(players.filter((p) => p.coupleId));
+  const confirmedCount = couples.length;
   const [customPrompts, setCustomPrompts] = useState([]);
   const [showImport, setShowImport] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+
+  // El cuarto de sala es una sola clave compartida: si dos personas tocan
+  // para emparejar/desemparejar casi al mismo tiempo, encolamos las
+  // escrituras y siempre releemos lo más fresco antes de mezclar el cambio
+  // (mismo patrón que usamos para los juicios de "¿acertó?").
+  const roomWriteChainRef = useRef(Promise.resolve());
+  const mutateRoom = (mutator) => {
+    roomWriteChainRef.current = roomWriteChainRef.current
+      .then(async () => {
+        const fresh = await readRoom(room.code);
+        if (!fresh) return;
+        mutator(fresh);
+        await writeRoom(room.code, fresh);
+        onRoomUpdated(fresh);
+      })
+      .catch(() => {});
+  };
+
+  const tapSolo = (id) => {
+    if (!selectedId) {
+      setSelectedId(id);
+      return;
+    }
+    if (selectedId === id) {
+      setSelectedId(null);
+      return;
+    }
+    const idA = selectedId;
+    const idB = id;
+    setSelectedId(null);
+    mutateRoom((fresh) => {
+      const newCoupleId = randomId();
+      fresh.players = fresh.players.map((p) =>
+        p.id === idA || p.id === idB ? { ...p, coupleId: newCoupleId } : p
+      );
+    });
+  };
+
+  const unpair = (coupleId) => {
+    mutateRoom((fresh) => {
+      fresh.players = fresh.players.map((p) =>
+        p.coupleId === coupleId ? { ...p, coupleId: null } : p
+      );
+    });
+  };
+
+  const removeSolo = (id) => {
+    mutateRoom((fresh) => {
+      fresh.players = fresh.players.filter((p) => p.id !== id);
+    });
+  };
 
   const addCustomPrompts = (texts) => {
     setCustomPrompts((prev) => {
-      const toAdd = dedupePrompts(texts, [...PROMPTS, ...prev]);
+      const toAdd = dedupePrompts(texts, [...officialBank, ...prev]);
       return [...prev, ...toAdd.map((text) => ({ id: "nueva-" + randomId(), text }))];
     });
   };
@@ -620,10 +684,13 @@ function Lobby({ room, myId, onStarted }) {
     setCustomPrompts((prev) => prev.filter((p) => p.id !== id));
   };
 
+  const totalPromptsAvailable = officialBank.length + customPrompts.length;
+  const canStart = confirmedCount > 0 && solo.length === 0 && totalPromptsAvailable > 0;
+
   const startGame = async () => {
     const fresh = await readRoom(room.code);
     if (!fresh) return;
-    const bank = [...PROMPTS, ...customPrompts];
+    const bank = [...officialBank, ...customPrompts];
     for (let i = bank.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [bank[i], bank[j]] = [bank[j], bank[i]];
@@ -640,7 +707,7 @@ function Lobby({ room, myId, onStarted }) {
   if (showImport) {
     return (
       <CustomPromptsScreen
-        existingPrompts={[...PROMPTS, ...customPrompts]}
+        existingPrompts={[...officialBank, ...customPrompts]}
         customPrompts={customPrompts}
         onAdd={addCustomPrompts}
         onRemove={removeCustomPrompt}
@@ -652,33 +719,84 @@ function Lobby({ room, myId, onStarted }) {
   return (
     <Screen style={{ justifyContent: "center" }}>
       <div style={{ display: "flex", justifyContent: "space-between", width: "100%", maxWidth: 420, marginBottom: 10 }}>
-        <span style={{ color: C.textMuted, fontSize: 13 }}>Sala</span>
+        <span style={{ color: C.textMuted, fontSize: 13 }}>{cfg.emoji} {cfg.label} · Sala</span>
         <span style={{ color: C.gold, fontWeight: 800, letterSpacing: 2, fontSize: 13 }}>{room.code}</span>
       </div>
       <Title size={26}>{room.name}</Title>
-      <Card style={{ marginBottom: 20 }}>
-        {couples.map((c, i) => (
-          <div key={i} style={{ padding: "8px 2px", fontSize: 15, borderBottom: i < couples.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
-            {c.length === 2 ? (
-              <span>❤️ {c[0].name} + {c[1].name}</span>
-            ) : (
-              <span style={{ color: C.textFaint }}>⏳ {c[0].name} (esperando a {c[0].partnerName})</span>
-            )}
+
+      {couples.length > 0 && (
+        <Card style={{ marginBottom: 14 }}>
+          {couples.map((c, i) => (
+            <div
+              key={c[0].coupleId}
+              style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "8px 2px", fontSize: 15,
+                borderBottom: i < couples.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none",
+              }}
+            >
+              <span>{cfg.duoEmoji} {c[0].name} + {c[1].name}</span>
+              <button
+                onClick={() => unpair(c[0].coupleId)}
+                style={{ background: "none", border: "none", color: C.textFaint, fontSize: 12, cursor: "pointer", textDecoration: "underline" }}
+              >
+                Desarmar
+              </button>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {solo.length > 0 && (
+        <Card style={{ marginBottom: 14 }}>
+          <Sub style={{ margin: "0 0 10px", fontSize: 13 }}>
+            {selectedId ? "Tocá con quién va 👇" : `Tocá dos nombres para armar una ${cfg.duoNoun}`}
+          </Sub>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {solo.map((p) => (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <button
+                  onClick={() => tapSolo(p.id)}
+                  style={{
+                    background: selectedId === p.id ? C.gold : "rgba(255,255,255,0.08)",
+                    color: selectedId === p.id ? "#2B0F1E" : "#FBEEF0",
+                    border: "1px solid rgba(255,255,255,0.16)", borderRadius: 20,
+                    padding: "8px 14px", fontWeight: 700, fontSize: 14, cursor: "pointer",
+                  }}
+                >
+                  {p.name}
+                </button>
+                {isHost && (
+                  <button
+                    onClick={() => removeSolo(p.id)}
+                    title="Quitar de la sala"
+                    style={{ background: "none", border: "none", color: C.textFaint, fontSize: 16, cursor: "pointer", padding: 4 }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
-      </Card>
-      {confirmedCount === 0 && <Sub>Necesitás al menos una pareja confirmada (❤️) para empezar.</Sub>}
+        </Card>
+      )}
+
+      {confirmedCount === 0 && <Sub>Necesitás al menos una {cfg.duoNoun} armada para empezar.</Sub>}
+      {confirmedCount > 0 && solo.length > 0 && <Sub>Todavía hay gente sin pareja — armalas o quitalas antes de arrancar.</Sub>}
+      {confirmedCount > 0 && solo.length === 0 && totalPromptsAvailable === 0 && (
+        <Sub>Este modo todavía no tiene consignas. Sumá algunas con "Consignas nuevas" antes de arrancar.</Sub>
+      )}
       {isHost && (
         <BigButton
           onClick={() => setShowImport(true)}
           color="transparent"
           style={{ border: `1px solid ${C.gold}`, color: C.gold, boxShadow: "none" }}
         >
-          ➕ Consignas nuevas {customPrompts.length > 0 ? `(${customPrompts.length} sumadas)` : "(opcional)"}
+          ➕ Consignas nuevas {customPrompts.length > 0 ? `(${customPrompts.length} sumadas)` : officialBank.length === 0 ? "(necesarias para este modo)" : "(opcional)"}
         </BigButton>
       )}
       {isHost ? (
-        <BigButton onClick={startGame} disabled={confirmedCount === 0}>
+        <BigButton onClick={startGame} disabled={!canStart}>
           Comenzar partida ➜
         </BigButton>
       ) : (
@@ -821,6 +939,11 @@ function CustomPromptsScreen({ existingPrompts, customPrompts, onAdd, onRemove, 
 // ==================== JUEGO: RESPONDER ====================
 function PlayScreen({ room, myId, progressMap, onAnswered }) {
   const me = room.players.find((p) => p.id === myId);
+  const partner = room.players.find((p) => p.coupleId && p.coupleId === me?.coupleId && p.id !== myId);
+  // El total real de rondas de ESTA sala es room.prompts.length, no la
+  // constante TOTAL_PROMPTS (que es solo el tope máximo) — si el modo
+  // tiene menos consignas cargadas, la partida es más corta.
+  const totalPrompts = room.prompts.length;
   const myProgress = (progressMap[myId]?.answers || []).length;
   const allIds = room.players.map((p) => p.id);
   const frontier = Math.min(...allIds.map((id) => (progressMap[id]?.answers || []).length));
@@ -834,7 +957,7 @@ function PlayScreen({ room, myId, progressMap, onAnswered }) {
     setPareja("");
   }, [myProgress]);
 
-  if (myProgress >= TOTAL_PROMPTS) return null; // ya terminó, otro componente se encarga
+  if (myProgress >= totalPrompts) return null; // ya terminó, otro componente se encarga
 
   const waitingTooFarAhead = myProgress - frontier >= LEAD_CAP;
   if (waitingTooFarAhead) {
@@ -863,13 +986,13 @@ function PlayScreen({ room, myId, progressMap, onAnswered }) {
 
   return (
     <Screen>
-      <Title size={20}>Consigna {myProgress + 1} / {TOTAL_PROMPTS}</Title>
+      <Title size={20}>Consigna {myProgress + 1} / {totalPrompts}</Title>
       <Sub style={{ marginTop: -8, fontSize: 17, color: "#FBEEF0", fontWeight: 700 }}>{prompt.text}</Sub>
       <Card style={{ marginBottom: 16 }}>
         <label style={{ fontSize: 12, color: C.gold, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>Yo</label>
         <input value={yo} onChange={(e) => setYo(e.target.value)} placeholder="Tu respuesta" style={inputStyle} />
         <label style={{ fontSize: 12, color: C.gold, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>
-          Creo que {me?.partnerName}
+          Creo que {partner?.name || "la otra persona"}
         </label>
         <input value={pareja} onChange={(e) => setPareja(e.target.value)} placeholder="Qué creés que respondería" style={{ ...inputStyle, marginBottom: 0 }} />
       </Card>
@@ -883,6 +1006,8 @@ function PlayScreen({ room, myId, progressMap, onAnswered }) {
 
 // ==================== REVISIÓN FINAL ====================
 function ReviewScreen({ room, myId, progressMap, onDone }) {
+  const me = room.players.find((p) => p.id === myId);
+  const partner = room.players.find((p) => p.coupleId && p.coupleId === me?.coupleId && p.id !== myId);
   const mine = progressMap[myId] || { answers: [], reviewDone: false };
   const [answers, setAnswers] = useState(mine.answers);
   const [secondsLeft, setSecondsLeft] = useState(REVIEW_SECONDS);
@@ -952,7 +1077,7 @@ function ReviewScreen({ room, myId, progressMap, onDone }) {
                   <input
                     value={answers[b.i].partner}
                     onChange={(e) => updateAnswer(b.i, "partner", e.target.value)}
-                    placeholder="Creo que mi pareja..."
+                    placeholder={`Creo que ${partner?.name || "la otra persona"}...`}
                     style={{ ...inputStyle, marginBottom: 0 }}
                   />
                 )}
@@ -968,6 +1093,7 @@ function ReviewScreen({ room, myId, progressMap, onDone }) {
 
 // ==================== REVELACIONES (los celus circulan por la mesa) ====================
 function RevealBrowser({ room, frontier, progressMap, judgmentsMap, onClose }) {
+  const cfg = modeOf(room);
   const couples = couplesFromPlayers(room.players || []).filter((c) => c.length === 2);
   const [openCoupleId, setOpenCoupleId] = useState(null);
   const [localJudgments, setLocalJudgments] = useState(judgmentsMap);
@@ -1001,7 +1127,7 @@ function RevealBrowser({ room, frontier, progressMap, judgmentsMap, onClose }) {
     return (
       <Screen style={{ justifyContent: "center" }}>
         <Title size={22}>Todavía no hay nada para revelar</Title>
-        <Sub>Apenas ambos de una pareja (y todos los demás) contesten la primera consigna, aparece acá.</Sub>
+        <Sub>Apenas los dos de una {cfg.duoNoun} (y todos los demás) contesten la primera consigna, aparece acá.</Sub>
         <BigButton onClick={onClose} color="transparent" style={{ boxShadow: "none", color: C.textMuted }}>
           ← Volver
         </BigButton>
@@ -1016,8 +1142,8 @@ function RevealBrowser({ room, frontier, progressMap, judgmentsMap, onClose }) {
     const judgments = localJudgments[openCoupleId] || {};
     return (
       <Screen>
-        <Title size={20}>{A.name} ❤️ {B.name}</Title>
-        <Sub>Pasale el celu a otra pareja para que los juzguen 😄</Sub>
+        <Title size={20}>{A.name} {cfg.duoEmoji} {B.name}</Title>
+        <Sub>Pasale el celu a otra {cfg.duoNoun} para que los juzguen 😄</Sub>
         <Card style={{ marginBottom: 16, width: "100%", maxWidth: 420 }}>
           {Array.from({ length: frontier }).map((_, i) => {
             const prompt = room.prompts[i] || {};
@@ -1064,7 +1190,7 @@ function RevealBrowser({ room, frontier, progressMap, judgmentsMap, onClose }) {
           })}
         </Card>
         <BigButton onClick={() => setOpenCoupleId(null)} color="transparent" style={{ boxShadow: "none", color: C.textMuted }}>
-          ← Otra pareja
+          ← Otra {cfg.duoNoun}
         </BigButton>
       </Screen>
     );
@@ -1073,7 +1199,7 @@ function RevealBrowser({ room, frontier, progressMap, judgmentsMap, onClose }) {
   return (
     <Screen>
       <Title size={22}>Revelaciones</Title>
-      <Sub>Elegí una pareja para ver (y juzgar) sus respuestas</Sub>
+      <Sub>Elegí una {cfg.duoNoun} para ver (y juzgar) sus respuestas</Sub>
       <Card style={{ marginBottom: 16 }}>
         {couples.map((c) => {
           const [A, B] = c;
@@ -1090,7 +1216,7 @@ function RevealBrowser({ room, frontier, progressMap, judgmentsMap, onClose }) {
                 color: "#FBEEF0", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 14,
               }}
             >
-              <span>❤️ {A.name} + {B.name}</span>
+              <span>{cfg.duoEmoji} {A.name} + {B.name}</span>
               <span style={{ color: C.gold, fontWeight: 800 }}>{score} pts</span>
             </button>
           );
@@ -1113,7 +1239,7 @@ function ResultsScreen({ room, judgmentsMap, allJudged }) {
       return { names: `${c[0].name} + ${c[1].name}`, score };
     })
     .sort((a, b) => b.score - a.score);
-  const maxScore = TOTAL_PROMPTS * 2;
+  const maxScore = room.prompts.length * 2;
   const medals = ["🥇", "🥈", "🥉"];
 
   return (
@@ -1178,7 +1304,7 @@ function RoomView({ code, myId, onBack }) {
     return (
       <div>
         <HomeButton />
-        <Lobby room={room} myId={myId} onStarted={setRoom} />
+        <Lobby room={room} myId={myId} onRoomUpdated={setRoom} onStarted={setRoom} />
         <div style={{ textAlign: "center", marginTop: -20, paddingBottom: 20 }}>
           <button onClick={leaveRoom} style={{ background: "none", border: "none", color: C.textMuted, fontSize: 13, fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>
             Salir de la sala
@@ -1189,6 +1315,7 @@ function RoomView({ code, myId, onBack }) {
   }
 
   // phase === "playing"
+  const totalPrompts = room.prompts.length; // real de esta sala, no la constante TOTAL_PROMPTS
   const allIds = room.players.map((p) => p.id);
   const frontier = allIds.length ? Math.min(...allIds.map((id) => (progressMap[id]?.answers || []).length)) : 0;
   const myProgress = (progressMap[myId]?.answers || []).length;
@@ -1196,7 +1323,7 @@ function RoomView({ code, myId, onBack }) {
   const allJudged = Object.values(judgmentsMap).length > 0 &&
     couplesFromPlayers(room.players).filter((c) => c.length === 2).every((c) => {
       const j = judgmentsMap[c[0].coupleId] || {};
-      return Array.from({ length: TOTAL_PROMPTS }).every((_, i) => j[i] && j[i].aCorrect !== undefined && j[i].bCorrect !== undefined && j[i].aCorrect !== null && j[i].bCorrect !== null);
+      return Array.from({ length: totalPrompts }).every((_, i) => j[i] && j[i].aCorrect !== undefined && j[i].bCorrect !== undefined && j[i].aCorrect !== null && j[i].bCorrect !== null);
     });
 
   const revealButton = frontier > 0 && !showReveals && (
@@ -1222,7 +1349,7 @@ function RoomView({ code, myId, onBack }) {
     );
   }
 
-  if (frontier >= TOTAL_PROMPTS) {
+  if (frontier >= totalPrompts) {
     return (
       <div>
         <HomeButton />
@@ -1232,7 +1359,7 @@ function RoomView({ code, myId, onBack }) {
     );
   }
 
-  if (myProgress >= TOTAL_PROMPTS && !myReviewDone) {
+  if (myProgress >= totalPrompts && !myReviewDone) {
     return (
       <div>
         <HomeButton confirmMessage="¿Salir? Tus respuestas ya están guardadas, pero perdés la revisión de blancos." />
@@ -1241,7 +1368,7 @@ function RoomView({ code, myId, onBack }) {
     );
   }
 
-  if (myProgress >= TOTAL_PROMPTS && myReviewDone) {
+  if (myProgress >= totalPrompts && myReviewDone) {
     return (
       <div>
         <HomeButton />
@@ -1268,6 +1395,7 @@ function RoomView({ code, myId, onBack }) {
 function App() {
   useInjectFont();
   const [screen, setScreen] = useState("home"); // "home" | "create" | "join" | "room"
+  const [gameMode, setGameMode] = useState("parejas");
   const [roomCode, setRoomCode] = useState(null);
   const [myId, setMyId] = useState(null);
   const [resumable, setResumable] = useState(null);
@@ -1306,6 +1434,7 @@ function App() {
     return (
       <JoinScreen
         mode={screen}
+        gameMode={gameMode}
         onBack={() => setScreen("home")}
         onEntered={(code, id) => {
           setRoomCode(code);
@@ -1316,15 +1445,40 @@ function App() {
     );
   }
 
+  const cfg = MODES[gameMode] || MODES.parejas;
+
   return (
     <Screen style={{ justifyContent: "center" }}>
       <HomeButton />
-      <div style={{ fontSize: 60, marginBottom: 6 }}>💞</div>
-      <Title size={32}>Parejas Actuales</Title>
+      <div style={{ fontSize: 60, marginBottom: 6 }}>{cfg.emoji}</div>
+      <Title size={32}>{cfg.label}</Title>
       <Sub>
-        Primero pensás como vos. Después intentás pensar como tu pareja.
-        Un juego para jugar en mesa, cada uno con su celu.
+        {cfg.subtitle}
+        <br />Un juego para jugar en mesa, cada uno con su celu.
       </Sub>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap", justifyContent: "center" }}>
+        {MODE_ORDER.map((key) => {
+          const m = MODES[key];
+          const active = key === gameMode;
+          return (
+            <button
+              key={key}
+              onClick={() => setGameMode(key)}
+              style={{
+                padding: "8px 14px", borderRadius: 20, cursor: "pointer",
+                background: active ? C.gold : "rgba(255,255,255,0.08)",
+                color: active ? "#2B0F1E" : C.textMuted,
+                border: `1px solid ${active ? C.gold : "rgba(255,255,255,0.16)"}`,
+                fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 13,
+              }}
+            >
+              {m.emoji} {m.label}
+            </button>
+          );
+        })}
+      </div>
+
       {resumable && (
         <button
           onClick={() => {
