@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Parejas Actuales — ¿Qué haría mi pareja?</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Parejas Actuales" />
+<meta name="theme-color" content="#2B0F1E" />
+<style>
+  html, body { margin:0; padding:0; background:#1A0A11; }
+  #root { min-height: 100vh; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script src="../storage.js"></script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+// ==================== CONFIG DEL JUEGO ====================
+const TOTAL_PROMPTS = 20;      // consignas por partida (brief §19)
+const LEAD_CAP = 2;            // máximo de consignas de adelanto (brief §12)
+const REVIEW_SECONDS = 60;     // tiempo de revisión final (brief §15)
+
+// ---- Salas: mismo patrón de KV vía storage.js que los otros juegos, pero
+// con una clave POR JUGADOR para las respuestas (progress:{playerId}) y
+// una clave POR PAREJA para los juicios de "¿acertó?" (judgments:{coupleId}).
+// Así cada clave tiene un solo escritor natural (el dueño del celu, o los
+// dos miembros de la pareja para el juicio) y no hay pisadas de escritura
+// entre los muchos jugadores contestando al mismo tiempo.
+const STORAGE_PREFIX = "parejas:sala:";
+const POLL_MS = 1500;
+const SESSION_KEY = "parejas:session";
+
+function randomId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+function randomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+async function readRoom(code) {
+  try {
+    const res = await window.storage.get(STORAGE_PREFIX + code, true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writeRoom(code, room) {
+  await window.storage.set(STORAGE_PREFIX + code, JSON.stringify(room), true);
+}
+async function readProgress(code, playerId) {
+  try {
+    const res = await window.storage.get(STORAGE_PREFIX + code + ":progress:" + playerId, true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writeProgress(code, playerId, data) {
+  await window.storage.set(STORAGE_PREFIX + code + ":progress:" + playerId, JSON.stringify(data), true);
+}
+async function listProgress(code) {
+  const entries = await window.storage.list(STORAGE_PREFIX + code + ":progress:");
+  const map = {};
+  entries.forEach((e) => {
+    const playerId = e.key.slice((STORAGE_PREFIX + code + ":progress:").length);
+    try {
+      map[playerId] = JSON.parse(e.value);
+    } catch {
+      /* ignorar entradas corruptas */
+    }
+  });
+  return map;
+}
+async function readJudgments(code, coupleId) {
+  try {
+    const res = await window.storage.get(STORAGE_PREFIX + code + ":judgments:" + coupleId, true);
+    if (!res) return {};
+    return JSON.parse(res.value);
+  } catch {
+    return {};
+  }
+}
+async function writeJudgments(code, coupleId, data) {
+  await window.storage.set(STORAGE_PREFIX + code + ":judgments:" + coupleId, JSON.stringify(data), true);
+}
+async function listJudgments(code) {
+  const entries = await window.storage.list(STORAGE_PREFIX + code + ":judgments:");
+  const map = {};
+  entries.forEach((e) => {
+    const coupleId = e.key.slice((STORAGE_PREFIX + code + ":judgments:").length);
+    try {
+      map[coupleId] = JSON.parse(e.value);
+    } catch {
+      /* ignorar */
+    }
+  });
+  return map;
+}
+
+// Identidad estable del celu (acá, en este juego, un celu = una persona).
+const MY_DEVICE_ID = (() => {
+  const KEY = "parejas:deviceId";
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id = randomId();
+    localStorage.setItem(KEY, id);
+  }
+  return id;
+})();
+
+// ==================== BANCO DE CONSIGNAS (PLACEHOLDER) ====================
+// ⚠️ Estas son consignas de PRUEBA para poder armar y probar el motor del
+// juego. Las 75 oficiales las manda Juanchi y se cargan acá reemplazando
+// este array — no se generan ni se tocan las oficiales automáticamente.
+const PROMPTS = [
+  { id: 1, text: "Vas a un hotel por primera vez y entrás al buffet de desayuno. ¿Qué buscás primero?", category: "comida" },
+  { id: 2, text: "Ganás mucha plata y decidís regalársela a una persona que no sea de tu familia. Nunca sabrá que fuiste vos. ¿A quién se la das?", category: "imaginación" },
+  { id: 3, text: "Es domingo a la tarde y no tenés nada planeado. ¿Qué es lo primero que se te ocurre hacer?", category: "cotidianas" },
+  { id: 4, text: "Podés borrar un solo recuerdo vergonzoso de tu vida para siempre. ¿Cuál elegís?", category: "introspección" },
+  { id: 5, text: "En un asado, ¿qué es lo primero que agarrás del plato?", category: "comida" },
+  { id: 6, text: "Te regalan un pasaje a cualquier lugar del mundo, pero tenés que ir solo/a por una semana. ¿A dónde vas?", category: "viajes" },
+  { id: 7, text: "Completá la frase: 'Lo que más me hace reír es...'", category: "personalidad" },
+  { id: 8, text: "Estás en una fiesta y no conocés a nadie. ¿Qué hacés en los primeros 10 minutos?", category: "situaciones" },
+  { id: 9, text: "Si tuvieras que aprender un instrumento musical mañana mismo, ¿cuál elegirías?", category: "imaginación" },
+  { id: 10, text: "¿Cuál es el pedido que siempre hacés cuando pedís comida rápida?", category: "comida" },
+  { id: 11, text: "De chico/a, ¿qué querías ser de grande?", category: "infancia" },
+  { id: 12, text: "Tenés una hora libre inesperada en medio de un día de semana. ¿Qué hacés con ese tiempo?", category: "cotidianas" },
+  { id: 13, text: "¿Qué serie o película volverías a ver por décima vez sin dudarlo?", category: "personalidad" },
+  { id: 14, text: "Si mañana te tenés que mudar de ciudad para siempre, ¿qué es lo primero que metés en la valija (además de ropa)?", category: "imaginación" },
+  { id: 15, text: "Completá la frase: 'Si pudiera cambiar una cosa de mí, sería...'", category: "introspección" },
+];
+
+// ==================== UI COMPARTIDA ====================
+const C = {
+  bg1: "#3a1023",
+  bg2: "#1a0a11",
+  card: "rgba(255,255,255,0.07)",
+  cardBorder: "rgba(255,255,255,0.14)",
+  gold: "#FFB84D",
+  rose: "#FF5D7A",
+  roseSoft: "#FF8FA3",
+  textMuted: "#E8C4C9",
+  textFaint: "#B58A91",
+  green: "#3DDC84",
+};
+const bgStyle = {
+  background: `radial-gradient(circle at 20% -10%, ${C.bg1} 0%, ${C.bg2} 55%, #100609 100%)`,
+};
+
+function useInjectFont() {
+  useEffect(() => {
+    if (document.getElementById("pj-fonts")) return;
+    const link = document.createElement("link");
+    link.id = "pj-fonts";
+    link.rel = "stylesheet";
+    link.href = "https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Nunito:wght@400;600;700;800&display=swap";
+    document.head.appendChild(link);
+  }, []);
+}
+
+function HomeButton({ confirmMessage }) {
+  return (
+    <a
+      href="../"
+      onClick={(e) => {
+        if (confirmMessage && !window.confirm(confirmMessage)) e.preventDefault();
+      }}
+      title="Volver al menú de juegos"
+      style={{
+        position: "fixed", top: 14, left: 14, zIndex: 50, width: 40, height: 40, borderRadius: "50%",
+        background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.18)",
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
+        textDecoration: "none", boxShadow: "0 4px 14px rgba(0,0,0,0.3)",
+      }}
+    >
+      🏠
+    </a>
+  );
+}
+
+function Screen({ children, style, homeConfirm }) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh", width: "100%", ...bgStyle,
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start",
+        padding: "28px 18px 40px", fontFamily: "'Nunito', sans-serif", color: "#FBEEF0",
+        boxSizing: "border-box", ...style,
+      }}
+    >
+      {homeConfirm !== null && <HomeButton confirmMessage={homeConfirm} />}
+      {children}
+    </div>
+  );
+}
+
+function Title({ children, size = 28 }) {
+  return (
+    <h1
+      style={{
+        fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: size, color: C.gold,
+        margin: "0 0 6px", textAlign: "center", letterSpacing: 0.2,
+      }}
+    >
+      {children}
+    </h1>
+  );
+}
+function Sub({ children, style }) {
+  return (
+    <p style={{ color: C.textMuted, fontSize: 15, textAlign: "center", margin: "0 0 22px", lineHeight: 1.5, ...style }}>
+      {children}
+    </p>
+  );
+}
+function BigButton({ children, onClick, color = C.rose, disabled, style }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        width: "100%", maxWidth: 400, padding: "16px 20px", borderRadius: 18, border: "none",
+        background: disabled ? "#5a3a42" : color, color: disabled ? "#9a7d82" : "#2B0F1E",
+        fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17,
+        boxShadow: disabled ? "none" : "0 6px 0 rgba(0,0,0,0.28)", cursor: disabled ? "default" : "pointer",
+        marginBottom: 14, transition: "transform 0.08s ease", ...style,
+      }}
+      onMouseDown={(e) => { if (!disabled) e.currentTarget.style.transform = "translateY(4px)"; }}
+      onMouseUp={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
+      onTouchStart={(e) => { if (!disabled) e.currentTarget.style.transform = "translateY(4px)"; }}
+      onTouchEnd={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
+    >
+      {children}
+    </button>
+  );
+}
+function Card({ children, style }) {
+  return (
+    <div style={{ width: "100%", maxWidth: 420, background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 22, padding: 20, boxSizing: "border-box", ...style }}>
+      {children}
+    </div>
+  );
+}
+const inputStyle = {
+  width: "100%", boxSizing: "border-box", padding: "12px 14px", borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.18)", background: "rgba(0,0,0,0.28)", color: "#FBEEF0",
+  fontSize: 16, marginBottom: 10, outline: "none", fontFamily: "'Nunito', sans-serif",
+};
+
+// ==================== HOME (dentro del juego) ====================
+function GameHome({ onSelect, onBack }) {
+  return (
+    <Screen style={{ justifyContent: "center" }}>
+      <div style={{ fontSize: 60, marginBottom: 6 }}>💞</div>
+      <Title size={32}>Parejas Actuales</Title>
+      <Sub>
+        Primero pensás como vos. Después intentás pensar como tu pareja.
+        Un juego para jugar en mesa, cada uno con su celu.
+      </Sub>
+      <BigButton onClick={() => onSelect("create")}>💌 Crear sala</BigButton>
+      <BigButton onClick={() => onSelect("join")} color={C.gold}>🔗 Unirme a una sala</BigButton>
+      <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: C.textMuted }}>
+        ← Volver al menú de juegos
+      </BigButton>
+    </Screen>
+  );
+}
+
+// ==================== PANTALLA DE ENTRAR / CREAR ====================
+function JoinScreen({ mode, onBack, onEntered }) {
+  const [roomName, setRoomName] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [myName, setMyName] = useState("");
+  const [partnerName, setPartnerName] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [openRooms, setOpenRooms] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const entries = await window.storage.list(STORAGE_PREFIX);
+        if (cancelled) return;
+        const rooms = entries
+          .map((e) => {
+            // Solo nos interesan las claves de metadata de sala (sin :progress: ni :judgments:)
+            if (e.key.includes(":progress:") || e.key.includes(":judgments:")) return null;
+            try {
+              return JSON.parse(e.value);
+            } catch {
+              return null;
+            }
+          })
+          .filter((r) => r && r.phase === "lobby" && Date.now() - (r.createdAt || 0) < 5 * 60 * 60 * 1000)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setOpenRooms(rooms);
+      } catch {
+        /* sin salas visibles */
+      }
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  const doEnter = async (codeMaybe) => {
+    const trimmedName = myName.trim();
+    const trimmedPartner = partnerName.trim();
+    if (!trimmedName || !trimmedPartner) {
+      setError("Completá tu nombre y el de tu pareja.");
+      return;
+    }
+    if (trimmedName.toLowerCase() === trimmedPartner.toLowerCase()) {
+      setError("Tu nombre y el de tu pareja no pueden ser iguales.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const code = codeMaybe || (codeInput.trim() ? codeInput.trim().toUpperCase() : randomCode());
+      let existing = await readRoom(code);
+      const players = existing ? existing.players : [];
+      if (players.some((p) => p.name.toLowerCase() === trimmedName.toLowerCase())) {
+        setError(`Ya hay alguien llamado "${trimmedName}" en esa sala. Probá con otro nombre.`);
+        setBusy(false);
+        return;
+      }
+      // Buscamos si alguien ya está esperando a esta persona (matcheo por nombre).
+      const counts = {};
+      players.forEach((p) => { counts[p.coupleId] = (counts[p.coupleId] || 0) + 1; });
+      const pendingMatch = players.find(
+        (p) => counts[p.coupleId] === 1 && p.name.trim().toLowerCase() === trimmedPartner.toLowerCase()
+      );
+      const coupleId = pendingMatch ? pendingMatch.coupleId : randomId();
+      const me = {
+        id: randomId(),
+        name: trimmedName,
+        partnerName: trimmedPartner,
+        coupleId,
+        deviceId: MY_DEVICE_ID,
+        joinedAt: Date.now(),
+      };
+      if (!existing) {
+        existing = {
+          code,
+          name: roomName.trim() || `Sala de ${trimmedName}`,
+          hostId: me.id,
+          players: [me],
+          phase: "lobby",
+          promptIds: [],
+          createdAt: Date.now(),
+        };
+      } else {
+        existing.players = [...players, me];
+      }
+      await writeRoom(code, existing);
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: me.id }));
+      onEntered(code, me.id);
+    } catch (e) {
+      setError("No se pudo conectar a la sala. Probá de nuevo.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Screen style={{ justifyContent: "center" }}>
+      <div style={{ fontSize: 52, marginBottom: 6 }}>{mode === "create" ? "💌" : "🔗"}</div>
+      <Title size={26}>{mode === "create" ? "Crear sala" : "Unirme a una sala"}</Title>
+      <Sub>Cada persona entra desde su propio celu</Sub>
+
+      <Card style={{ marginBottom: 16 }}>
+        {mode === "create" ? (
+          <input value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="Nombre de la sala (ej: Los amigos)" style={inputStyle} maxLength={30} />
+        ) : (
+          <input
+            value={codeInput}
+            onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+            placeholder="Código de sala"
+            style={{ ...inputStyle, letterSpacing: 3, textTransform: "uppercase" }}
+            maxLength={4}
+          />
+        )}
+        <input value={myName} onChange={(e) => setMyName(e.target.value)} placeholder="Tu nombre" style={inputStyle} maxLength={16} />
+        <input value={partnerName} onChange={(e) => setPartnerName(e.target.value)} placeholder="Nombre de tu pareja" style={{ ...inputStyle, marginBottom: 0 }} maxLength={16} />
+        {error && <div style={{ color: C.roseSoft, fontSize: 13, marginTop: 10 }}>{error}</div>}
+      </Card>
+
+      <BigButton onClick={() => doEnter(mode === "join" ? codeInput.trim().toUpperCase() : undefined)} disabled={busy}>
+        {busy ? "Entrando..." : mode === "create" ? "Crear sala" : "Unirme"}
+      </BigButton>
+
+      {mode === "join" && openRooms.length > 0 && (
+        <Card style={{ marginTop: 4 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontSize: 13, color: C.gold, marginBottom: 8 }}>
+            Salas abiertas ahora
+          </div>
+          {openRooms.map((r) => {
+            const counts = {};
+            (r.players || []).forEach((p) => { counts[p.coupleId] = (counts[p.coupleId] || 0) + 1; });
+            const couples = Object.values(
+              (r.players || []).reduce((acc, p) => {
+                acc[p.coupleId] = acc[p.coupleId] || [];
+                acc[p.coupleId].push(p.name);
+                return acc;
+              }, {})
+            );
+            return (
+              <button
+                key={r.code}
+                onClick={() => setCodeInput(r.code)}
+                style={{
+                  width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                  background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 12, padding: "10px 12px", marginBottom: 8, cursor: "pointer",
+                  color: "#FBEEF0", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 13,
+                }}
+              >
+                <span>{r.name} — {couples.map((c) => c.join("+")).join(", ")}</span>
+                <span style={{ color: C.gold, fontWeight: 800, fontSize: 12, letterSpacing: 2 }}>{r.code}</span>
+              </button>
+            );
+          })}
+        </Card>
+      )}
+
+      <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: C.textMuted }}>
+        ← Volver
+      </BigButton>
+    </Screen>
+  );
+}
+
+// ==================== LOBBY ====================
+function couplesFromPlayers(players) {
+  const map = {};
+  players.forEach((p) => {
+    map[p.coupleId] = map[p.coupleId] || [];
+    map[p.coupleId].push(p);
+  });
+  return Object.values(map);
+}
+
+function Lobby({ room, myId, onStarted }) {
+  const isHost = room.hostId === myId;
+  const couples = couplesFromPlayers(room.players || []);
+  const confirmedCount = couples.filter((c) => c.length === 2).length;
+
+  const startGame = async () => {
+    const fresh = await readRoom(room.code);
+    if (!fresh) return;
+    const bank = [...PROMPTS];
+    for (let i = bank.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [bank[i], bank[j]] = [bank[j], bank[i]];
+    }
+    fresh.promptIds = bank.slice(0, Math.min(TOTAL_PROMPTS, bank.length)).map((p) => p.id);
+    fresh.phase = "playing";
+    await writeRoom(room.code, fresh);
+    onStarted(fresh);
+  };
+
+  return (
+    <Screen style={{ justifyContent: "center" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", width: "100%", maxWidth: 420, marginBottom: 10 }}>
+        <span style={{ color: C.textMuted, fontSize: 13 }}>Sala</span>
+        <span style={{ color: C.gold, fontWeight: 800, letterSpacing: 2, fontSize: 13 }}>{room.code}</span>
+      </div>
+      <Title size={26}>{room.name}</Title>
+      <Card style={{ marginBottom: 20 }}>
+        {couples.map((c, i) => (
+          <div key={i} style={{ padding: "8px 2px", fontSize: 15, borderBottom: i < couples.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
+            {c.length === 2 ? (
+              <span>❤️ {c[0].name} + {c[1].name}</span>
+            ) : (
+              <span style={{ color: C.textFaint }}>⏳ {c[0].name} (esperando a {c[0].partnerName})</span>
+            )}
+          </div>
+        ))}
+      </Card>
+      {confirmedCount === 0 && <Sub>Necesitás al menos una pareja confirmada (❤️) para empezar.</Sub>}
+      {isHost ? (
+        <BigButton onClick={startGame} disabled={confirmedCount === 0}>
+          Comenzar partida ➜
+        </BigButton>
+      ) : (
+        <Sub>Esperando a que el anfitrión/a empiece la partida...</Sub>
+      )}
+    </Screen>
+  );
+}
+
+// ==================== JUEGO: RESPONDER ====================
+function PlayScreen({ room, myId, progressMap, onAnswered }) {
+  const me = room.players.find((p) => p.id === myId);
+  const myProgress = (progressMap[myId]?.answers || []).length;
+  const allIds = room.players.map((p) => p.id);
+  const frontier = Math.min(...allIds.map((id) => (progressMap[id]?.answers || []).length));
+
+  const [yo, setYo] = useState("");
+  const [pareja, setPareja] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setYo("");
+    setPareja("");
+  }, [myProgress]);
+
+  if (myProgress >= TOTAL_PROMPTS) return null; // ya terminó, otro componente se encarga
+
+  const waitingTooFarAhead = myProgress - frontier >= LEAD_CAP;
+  if (waitingTooFarAhead) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <div style={{ fontSize: 52, marginBottom: 10 }}>⏳</div>
+        <Title size={22}>Vas bien adelantado</Title>
+        <Sub>Esperá un toque a que el resto llegue a tu ronda. Aprovechá para charlar 😄</Sub>
+      </Screen>
+    );
+  }
+
+  const prompt = PROMPTS.find((p) => p.id === room.promptIds[myProgress]) || { text: "(consigna no encontrada)" };
+
+  const confirm = async () => {
+    if (saving) return; // evita doble-submit por doble-tap
+    setSaving(true);
+    // Releemos fresco en vez de confiar en progressMap (puede tener hasta
+    // POLL_MS de atraso) para no pisar una respuesta ya guardada.
+    const prev = (await readProgress(room.code, myId)) || { answers: [], reviewDone: false };
+    const nextAnswers = [...prev.answers, { yo: yo.trim(), partner: pareja.trim(), submittedAt: Date.now() }];
+    await writeProgress(room.code, myId, { answers: nextAnswers, reviewDone: false });
+    setSaving(false);
+    onAnswered(nextAnswers);
+  };
+
+  return (
+    <Screen>
+      <Title size={20}>Consigna {myProgress + 1} / {TOTAL_PROMPTS}</Title>
+      <Sub style={{ marginTop: -8, fontSize: 17, color: "#FBEEF0", fontWeight: 700 }}>{prompt.text}</Sub>
+      <Card style={{ marginBottom: 16 }}>
+        <label style={{ fontSize: 12, color: C.gold, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>Yo</label>
+        <input value={yo} onChange={(e) => setYo(e.target.value)} placeholder="Tu respuesta" style={inputStyle} />
+        <label style={{ fontSize: 12, color: C.gold, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>
+          Creo que {me?.partnerName}
+        </label>
+        <input value={pareja} onChange={(e) => setPareja(e.target.value)} placeholder="Qué creés que respondería" style={{ ...inputStyle, marginBottom: 0 }} />
+      </Card>
+      <BigButton onClick={confirm} disabled={saving}>
+        {saving ? "Guardando..." : "Confirmar ➜"}
+      </BigButton>
+      <Sub style={{ fontSize: 12.5, color: C.textFaint }}>Podés dejar algo en blanco y seguir — se puede completar al final.</Sub>
+    </Screen>
+  );
+}
+
+// ==================== REVISIÓN FINAL ====================
+function ReviewScreen({ room, myId, progressMap, onDone }) {
+  const mine = progressMap[myId] || { answers: [], reviewDone: false };
+  const [answers, setAnswers] = useState(mine.answers);
+  const [secondsLeft, setSecondsLeft] = useState(REVIEW_SECONDS);
+  const finishedRef = useRef(false);
+
+  useEffect(() => {
+    if (finishedRef.current) return;
+    const id = setInterval(() => {
+      setSecondsLeft((s) => {
+        if (s <= 1) {
+          clearInterval(id);
+          finish();
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const finish = async () => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    await writeProgress(room.code, myId, { answers, reviewDone: true });
+    onDone();
+  };
+
+  const blanks = answers
+    .map((a, i) => ({ ...a, i }))
+    .filter((a) => !a.yo.trim() || !a.partner.trim());
+
+  const updateAnswer = (i, field, value) => {
+    setAnswers((prev) => {
+      const copy = prev.map((a) => ({ ...a }));
+      copy[i][field] = value;
+      return copy;
+    });
+  };
+
+  return (
+    <Screen>
+      <Title size={22}>Revisá tus respuestas</Title>
+      <div style={{ fontFamily: "'Fraunces', serif", fontSize: 28, color: secondsLeft <= 10 ? C.roseSoft : C.gold, marginBottom: 12 }}>
+        ⏱ {String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:{String(secondsLeft % 60).padStart(2, "0")}
+      </div>
+      {blanks.length === 0 ? (
+        <Sub>¡No dejaste nada en blanco! 🎉</Sub>
+      ) : (
+        <Card style={{ marginBottom: 16, maxHeight: 420, overflowY: "auto" }}>
+          {blanks.map((b) => {
+            const prompt = PROMPTS.find((p) => p.id === room.promptIds[b.i]) || {};
+            return (
+              <div key={b.i} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 6 }}>
+                  Consigna {b.i + 1}: {prompt.text}
+                </div>
+                {!b.yo.trim() && (
+                  <input
+                    value={answers[b.i].yo}
+                    onChange={(e) => updateAnswer(b.i, "yo", e.target.value)}
+                    placeholder="Yo..."
+                    style={{ ...inputStyle, marginBottom: 6 }}
+                  />
+                )}
+                {!b.partner.trim() && (
+                  <input
+                    value={answers[b.i].partner}
+                    onChange={(e) => updateAnswer(b.i, "partner", e.target.value)}
+                    placeholder="Creo que mi pareja..."
+                    style={{ ...inputStyle, marginBottom: 0 }}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </Card>
+      )}
+      <BigButton onClick={finish}>Listo, terminar ✅</BigButton>
+    </Screen>
+  );
+}
+
+// ==================== REVELACIONES (los celus circulan por la mesa) ====================
+function RevealBrowser({ room, frontier, progressMap, judgmentsMap, onClose }) {
+  const couples = couplesFromPlayers(room.players || []).filter((c) => c.length === 2);
+  const [openCoupleId, setOpenCoupleId] = useState(null);
+  const [localJudgments, setLocalJudgments] = useState(judgmentsMap);
+  useEffect(() => { setLocalJudgments(judgmentsMap); }, [judgmentsMap]);
+
+  // Dos toques seguidos (ej. juzgar los dos lados de una pareja, uno atrás
+  // del otro) pueden pisarse si ambas escrituras leen el estado ANTES de que
+  // la primera termine de guardar. Por eso encolamos las escrituras a esta
+  // clave y siempre releemos el valor más fresco justo antes de mezclar el
+  // cambio, en vez de confiar en el estado que puede estar desactualizado.
+  const writeChainRef = useRef(Promise.resolve());
+  const toggleJudgment = (coupleId, roundIdx, field, value) => {
+    setLocalJudgments((prev) => {
+      const current = prev[coupleId] || {};
+      const roundData = { ...(current[roundIdx] || {}) };
+      roundData[field] = roundData[field] === value ? null : value;
+      return { ...prev, [coupleId]: { ...current, [roundIdx]: roundData } };
+    });
+    writeChainRef.current = writeChainRef.current
+      .then(async () => {
+        const fresh = await readJudgments(room.code, coupleId);
+        const roundData = { ...(fresh[roundIdx] || {}) };
+        roundData[field] = roundData[field] === value ? null : value;
+        const next = { ...fresh, [roundIdx]: roundData };
+        await writeJudgments(room.code, coupleId, next);
+      })
+      .catch(() => {});
+  };
+
+  if (frontier === 0) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <Title size={22}>Todavía no hay nada para revelar</Title>
+        <Sub>Apenas ambos de una pareja (y todos los demás) contesten la primera consigna, aparece acá.</Sub>
+        <BigButton onClick={onClose} color="transparent" style={{ boxShadow: "none", color: C.textMuted }}>
+          ← Volver
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  if (openCoupleId) {
+    const couple = couples.find((c) => c[0].coupleId === openCoupleId);
+    if (!couple) return null;
+    const [A, B] = couple;
+    const judgments = localJudgments[openCoupleId] || {};
+    return (
+      <Screen>
+        <Title size={20}>{A.name} ❤️ {B.name}</Title>
+        <Sub>Pasale el celu a otra pareja para que los juzguen 😄</Sub>
+        <Card style={{ marginBottom: 16, width: "100%", maxWidth: 420 }}>
+          {Array.from({ length: frontier }).map((_, i) => {
+            const prompt = PROMPTS.find((p) => p.id === room.promptIds[i]) || {};
+            const aAns = (progressMap[A.id]?.answers || [])[i] || { yo: "", partner: "" };
+            const bAns = (progressMap[B.id]?.answers || [])[i] || { yo: "", partner: "" };
+            const j = judgments[i] || {};
+            return (
+              <div key={i} style={{ marginBottom: 18, paddingBottom: 18, borderBottom: i < frontier - 1 ? "1px solid rgba(255,255,255,0.1)" : "none" }}>
+                <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 8 }}>#{i + 1} — {prompt.text}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <div style={{ fontSize: 14 }}>
+                    <b>{A.name}</b>: {aAns.yo || <i style={{ color: C.textFaint }}>(en blanco)</i>}
+                    <div style={{ fontSize: 12.5, color: C.textFaint }}>Creía que {B.name}: {aAns.partner || "—"}</div>
+                  </div>
+                  <button
+                    onClick={() => toggleJudgment(openCoupleId, i, "aCorrect", true)}
+                    style={{
+                      background: j.aCorrect === true ? C.green : "rgba(255,255,255,0.08)",
+                      color: j.aCorrect === true ? "#0c2e1c" : "#FBEEF0",
+                      border: "none", borderRadius: 10, padding: "6px 10px", fontWeight: 800, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap",
+                    }}
+                  >
+                    {j.aCorrect === true ? "✅ Acertó" : "¿Acertó?"}
+                  </button>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 14 }}>
+                    <b>{B.name}</b>: {bAns.yo || <i style={{ color: C.textFaint }}>(en blanco)</i>}
+                    <div style={{ fontSize: 12.5, color: C.textFaint }}>Creía que {A.name}: {bAns.partner || "—"}</div>
+                  </div>
+                  <button
+                    onClick={() => toggleJudgment(openCoupleId, i, "bCorrect", true)}
+                    style={{
+                      background: j.bCorrect === true ? C.green : "rgba(255,255,255,0.08)",
+                      color: j.bCorrect === true ? "#0c2e1c" : "#FBEEF0",
+                      border: "none", borderRadius: 10, padding: "6px 10px", fontWeight: 800, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap",
+                    }}
+                  >
+                    {j.bCorrect === true ? "✅ Acertó" : "¿Acertó?"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </Card>
+        <BigButton onClick={() => setOpenCoupleId(null)} color="transparent" style={{ boxShadow: "none", color: C.textMuted }}>
+          ← Otra pareja
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen>
+      <Title size={22}>Revelaciones</Title>
+      <Sub>Elegí una pareja para ver (y juzgar) sus respuestas</Sub>
+      <Card style={{ marginBottom: 16 }}>
+        {couples.map((c) => {
+          const [A, B] = c;
+          const j = localJudgments[A.coupleId] || {};
+          const score = Object.values(j).reduce((s, r) => s + (r.aCorrect ? 1 : 0) + (r.bCorrect ? 1 : 0), 0);
+          return (
+            <button
+              key={A.coupleId}
+              onClick={() => setOpenCoupleId(A.coupleId)}
+              style={{
+                width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 12, padding: "12px 14px", marginBottom: 8, cursor: "pointer",
+                color: "#FBEEF0", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 14,
+              }}
+            >
+              <span>❤️ {A.name} + {B.name}</span>
+              <span style={{ color: C.gold, fontWeight: 800 }}>{score} pts</span>
+            </button>
+          );
+        })}
+      </Card>
+      <BigButton onClick={onClose} color="transparent" style={{ boxShadow: "none", color: C.textMuted }}>
+        ← Volver
+      </BigButton>
+    </Screen>
+  );
+}
+
+// ==================== RESULTADOS FINALES ====================
+function ResultsScreen({ room, judgmentsMap, allJudged }) {
+  const couples = couplesFromPlayers(room.players || []).filter((c) => c.length === 2);
+  const ranked = couples
+    .map((c) => {
+      const j = judgmentsMap[c[0].coupleId] || {};
+      const score = Object.values(j).reduce((s, r) => s + (r.aCorrect ? 1 : 0) + (r.bCorrect ? 1 : 0), 0);
+      return { names: `${c[0].name} + ${c[1].name}`, score };
+    })
+    .sort((a, b) => b.score - a.score);
+  const maxScore = TOTAL_PROMPTS * 2;
+  const medals = ["🥇", "🥈", "🥉"];
+
+  return (
+    <Screen style={{ justifyContent: "center" }}>
+      <div style={{ fontSize: 60, marginBottom: 6 }}>🏆</div>
+      <Title size={26}>Resultado final</Title>
+      {!allJudged && (
+        <Sub style={{ fontSize: 12.5 }}>El puntaje se sigue actualizando a medida que se van juzgando las rondas.</Sub>
+      )}
+      <Card style={{ marginBottom: 20 }}>
+        {ranked.map((r, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 2px", borderBottom: i < ranked.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
+            <span style={{ fontSize: 15 }}>{medals[i] || `${i + 1}°`} {r.names}</span>
+            <span style={{ color: C.gold, fontWeight: 800 }}>{r.score} / {maxScore}</span>
+          </div>
+        ))}
+      </Card>
+    </Screen>
+  );
+}
+
+// ==================== SALA: ORQUESTA TODO ====================
+function RoomView({ code, myId, onBack }) {
+  const [room, setRoom] = useState(null);
+  const [progressMap, setProgressMap] = useState({});
+  const [judgmentsMap, setJudgmentsMap] = useState({});
+  const [showReveals, setShowReveals] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const r = await readRoom(code);
+      if (!cancelled && r) setRoom(r);
+      if (r && r.phase === "playing") {
+        const [pm, jm] = await Promise.all([listProgress(code), listJudgments(code)]);
+        if (!cancelled) {
+          setProgressMap(pm);
+          setJudgmentsMap(jm);
+        }
+      }
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [code]);
+
+  if (!room) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <HomeButton />
+        <Sub>Cargando sala...</Sub>
+      </Screen>
+    );
+  }
+
+  const leaveRoom = () => {
+    localStorage.removeItem(SESSION_KEY);
+    onBack();
+  };
+
+  if (room.phase === "lobby") {
+    return (
+      <div>
+        <HomeButton />
+        <Lobby room={room} myId={myId} onStarted={setRoom} />
+        <div style={{ textAlign: "center", marginTop: -20, paddingBottom: 20 }}>
+          <button onClick={leaveRoom} style={{ background: "none", border: "none", color: C.textMuted, fontSize: 13, fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>
+            Salir de la sala
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // phase === "playing"
+  const allIds = room.players.map((p) => p.id);
+  const frontier = allIds.length ? Math.min(...allIds.map((id) => (progressMap[id]?.answers || []).length)) : 0;
+  const myProgress = (progressMap[myId]?.answers || []).length;
+  const myReviewDone = progressMap[myId]?.reviewDone;
+  const allJudged = Object.values(judgmentsMap).length > 0 &&
+    couplesFromPlayers(room.players).filter((c) => c.length === 2).every((c) => {
+      const j = judgmentsMap[c[0].coupleId] || {};
+      return Array.from({ length: TOTAL_PROMPTS }).every((_, i) => j[i] && j[i].aCorrect !== undefined && j[i].bCorrect !== undefined && j[i].aCorrect !== null && j[i].bCorrect !== null);
+    });
+
+  const revealButton = frontier > 0 && !showReveals && (
+    <button
+      onClick={() => setShowReveals(true)}
+      style={{
+        position: "fixed", bottom: 18, left: "50%", transform: "translateX(-50%)", zIndex: 40,
+        background: C.gold, color: "#2B0F1E", border: "none", borderRadius: 30, padding: "12px 22px",
+        fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 14, cursor: "pointer",
+        boxShadow: "0 6px 20px rgba(0,0,0,0.4)",
+      }}
+    >
+      👀 Ver revelaciones ({frontier})
+    </button>
+  );
+
+  if (showReveals) {
+    return (
+      <div>
+        <HomeButton />
+        <RevealBrowser room={room} frontier={frontier} progressMap={progressMap} judgmentsMap={judgmentsMap} onClose={() => setShowReveals(false)} />
+      </div>
+    );
+  }
+
+  if (frontier >= TOTAL_PROMPTS) {
+    return (
+      <div>
+        <HomeButton />
+        <ResultsScreen room={room} judgmentsMap={judgmentsMap} allJudged={allJudged} />
+        {revealButton}
+      </div>
+    );
+  }
+
+  if (myProgress >= TOTAL_PROMPTS && !myReviewDone) {
+    return (
+      <div>
+        <HomeButton confirmMessage="¿Salir? Tus respuestas ya están guardadas, pero perdés la revisión de blancos." />
+        <ReviewScreen room={room} myId={myId} progressMap={progressMap} onDone={() => {}} />
+      </div>
+    );
+  }
+
+  if (myProgress >= TOTAL_PROMPTS && myReviewDone) {
+    return (
+      <div>
+        <HomeButton />
+        <Screen style={{ justifyContent: "center" }}>
+          <div style={{ fontSize: 52, marginBottom: 10 }}>🎉</div>
+          <Title size={22}>¡Terminaste!</Title>
+          <Sub>Esperando a que el resto termine para el resultado final. Mientras tanto, mirá las revelaciones.</Sub>
+        </Screen>
+        {revealButton}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <HomeButton confirmMessage="¿Salir? Se pierde tu lugar en la ronda actual." />
+      <PlayScreen room={room} myId={myId} progressMap={progressMap} onAnswered={(a) => setProgressMap((m) => ({ ...m, [myId]: { answers: a, reviewDone: false } }))} />
+      {revealButton}
+    </div>
+  );
+}
+
+// ==================== APP ====================
+function App() {
+  useInjectFont();
+  const [screen, setScreen] = useState("home"); // "home" | "create" | "join" | "room"
+  const [roomCode, setRoomCode] = useState(null);
+  const [myId, setMyId] = useState(null);
+  const [resumable, setResumable] = useState(null);
+
+  useEffect(() => {
+    if (screen !== "home") return;
+    let cancelled = false;
+    (async () => {
+      let saved;
+      try {
+        saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+      } catch {
+        saved = null;
+      }
+      if (!saved || !saved.code || !saved.playerId) {
+        setResumable(null);
+        return;
+      }
+      const existing = await readRoom(saved.code);
+      if (cancelled) return;
+      if (existing && existing.players.some((p) => p.id === saved.playerId)) {
+        setResumable({ code: saved.code, playerId: saved.playerId, roomName: existing.name });
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+        setResumable(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [screen]);
+
+  if (screen === "room") {
+    return <RoomView code={roomCode} myId={myId} onBack={() => setScreen("home")} />;
+  }
+
+  if (screen === "create" || screen === "join") {
+    return (
+      <JoinScreen
+        mode={screen}
+        onBack={() => setScreen("home")}
+        onEntered={(code, id) => {
+          setRoomCode(code);
+          setMyId(id);
+          setScreen("room");
+        }}
+      />
+    );
+  }
+
+  return (
+    <Screen style={{ justifyContent: "center" }}>
+      <HomeButton />
+      <div style={{ fontSize: 60, marginBottom: 6 }}>💞</div>
+      <Title size={32}>Parejas Actuales</Title>
+      <Sub>
+        Primero pensás como vos. Después intentás pensar como tu pareja.
+        Un juego para jugar en mesa, cada uno con su celu.
+      </Sub>
+      {resumable && (
+        <button
+          onClick={() => {
+            setRoomCode(resumable.code);
+            setMyId(resumable.playerId);
+            setScreen("room");
+          }}
+          style={{
+            width: "100%", maxWidth: 400, textAlign: "left", borderRadius: 18, padding: 16, marginBottom: 14,
+            cursor: "pointer", background: "rgba(255,184,77,0.16)", border: `1px solid ${C.gold}`,
+            color: "#FBEEF0", fontFamily: "'Nunito', sans-serif",
+          }}
+        >
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, color: C.gold, fontSize: 15 }}>
+            ↩️ Volver a tu sala ({resumable.code})
+          </div>
+          <div style={{ fontSize: 12.5, color: C.textMuted, marginTop: 2 }}>{resumable.roomName}</div>
+        </button>
+      )}
+      <BigButton onClick={() => setScreen("create")}>💌 Crear sala</BigButton>
+      <BigButton onClick={() => setScreen("join")} color={C.gold}>🔗 Unirme a una sala</BigButton>
+    </Screen>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
