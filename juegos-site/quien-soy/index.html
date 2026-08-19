@@ -770,6 +770,83 @@ function OfflineGame({ onBack }) {
 
 // ==================== ONLINE: SALA COMPARTIDA ====================
 
+// Botón de "pasar de etapa" (arrancar/siguiente ronda) para el modo online:
+// solo lo puede tocar quien tiene el mando. El resto ve quién lo tiene y
+// espera. El mando también puede cedérselo a otra persona a mano.
+function RoundControl({ effectiveHost, isHost, players, onAdvance, onPassControl, canAdvance, label }) {
+  const [showHandoff, setShowHandoff] = useState(false);
+  const others = players.filter((p) => p.id !== effectiveHost?.id);
+
+  return (
+    <div style={{ width: "100%", maxWidth: 380 }}>
+      <div
+        style={{
+          textAlign: "center",
+          fontSize: 13,
+          color: "#C9B8F0",
+          marginBottom: 10,
+        }}
+      >
+        👑 {isHost ? "Vos tenés" : `${effectiveHost?.name || "Alguien"} tiene`} el mando de la sala
+      </div>
+
+      {isHost ? (
+        <>
+          <BigButton onClick={onAdvance} disabled={!canAdvance}>
+            {label}
+          </BigButton>
+          {others.length > 0 && (
+            <>
+              <button
+                onClick={() => setShowHandoff((s) => !s)}
+                style={{
+                  display: "block",
+                  margin: "0 auto 12px",
+                  background: "none",
+                  border: "none",
+                  color: "#8b7fa8",
+                  fontSize: 12.5,
+                  textDecoration: "underline",
+                  cursor: "pointer",
+                }}
+              >
+                {showHandoff ? "Cancelar" : "Pasarle el mando a otro/a"}
+              </button>
+              {showHandoff && (
+                <Card style={{ marginBottom: 14 }}>
+                  {others.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        onPassControl(p.id);
+                        setShowHandoff(false);
+                      }}
+                      style={{
+                        width: "100%",
+                        textAlign: "left",
+                        background: "none",
+                        border: "none",
+                        color: "#F3EEFF",
+                        fontSize: 15,
+                        padding: "8px 4px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      👑 {p.name}
+                    </button>
+                  ))}
+                </Card>
+              )}
+            </>
+          )}
+        </>
+      ) : (
+        <Sub>Esperando a que {effectiveHost?.name || "el anfitrión/a"} empiece...</Sub>
+      )}
+    </div>
+  );
+}
+
 function OnlineGame({ onBack }) {
   const [screen, setScreen] = useState("join"); // "join" | "game"
   const [localNames, setLocalNames] = useState([]);
@@ -880,6 +957,54 @@ function OnlineGame({ onBack }) {
     setScreen("game");
   };
 
+  // Si la sala ya está jugando una ronda (no está en "lobby" ni "roundEnd",
+  // que son los únicos momentos "entre rondas" donde sumar gente no rompe
+  // nada), no metemos jugadores nuevos a mitad de ronda: quedan esperando
+  // acá y los sumamos solos apenas la sala vuelve a un punto seguro.
+  const [pendingJoin, setPendingJoin] = useState(null); // { code, names } | null
+
+  const canJoinPhase = (phase) => phase === "lobby" || phase === "roundEnd";
+
+  const actuallyJoin = async (code, names) => {
+    let existing = await readRoom(code);
+    const newPlayers = names.map((n) => ({
+      id: randomId(),
+      name: n,
+      deviceId: MY_DEVICE_ID,
+      score: 0,
+      joinedAt: Date.now(),
+    }));
+    if (!existing) {
+      existing = {
+        code,
+        players: newPlayers,
+        hostId: newPlayers[0].id, // el/la primero/a en crear la sala tiene el mando
+        phase: "lobby",
+        clueGiverIdx: -1,
+        clueGiverId: null,
+        secretCharacter: null,
+        clues: [],
+        guesses: {},
+        round: 0,
+        createdAt: Date.now(),
+      };
+    } else {
+      const clash = newPlayers.find((np) =>
+        existing.players.some((p) => p.name.toLowerCase() === np.name.toLowerCase())
+      );
+      if (clash) {
+        return { error: `Ya hay alguien llamado "${clash.name}" en esa sala. Cambiá el nombre.` };
+      }
+      existing.players = [...existing.players, ...newPlayers];
+    }
+    await writeRoom(code, existing);
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ code }));
+    setRoom(existing);
+    setRoomCode(code);
+    setScreen("game");
+    return { ok: true };
+  };
+
   const doJoin = async (codeMaybe) => {
     if (localNames.length === 0) {
       setJoinError("Sumá al menos una persona de este celu.");
@@ -889,37 +1014,17 @@ function OnlineGame({ onBack }) {
     setJoinError("");
     try {
       const code = codeMaybe || (codeInput.trim() ? codeInput.trim().toUpperCase() : randomCode());
-      let existing = await readRoom(code);
-      const newPlayers = localNames.map((n) => ({ id: randomId(), name: n, deviceId: MY_DEVICE_ID, score: 0 }));
-      if (!existing) {
-        existing = {
-          code,
-          players: newPlayers,
-          phase: "lobby",
-          clueGiverIdx: -1,
-          clueGiverId: null,
-          secretCharacter: null,
-          clues: [],
-          guesses: {},
-          round: 0,
-          createdAt: Date.now(),
-        };
-      } else {
-        const clash = newPlayers.find((np) =>
-          existing.players.some((p) => p.name.toLowerCase() === np.name.toLowerCase())
-        );
-        if (clash) {
-          setJoinError(`Ya hay alguien llamado "${clash.name}" en esa sala. Cambiá el nombre.`);
-          setJoining(false);
-          return;
-        }
-        existing.players = [...existing.players, ...newPlayers];
+      const existing = await readRoom(code);
+      if (existing && !canJoinPhase(existing.phase)) {
+        // La sala existe pero está en medio de una ronda: esperamos.
+        setPendingJoin({ code, names: [...localNames] });
+        setJoining(false);
+        return;
       }
-      await writeRoom(code, existing);
-      localStorage.setItem(SESSION_KEY, JSON.stringify({ code }));
-      setRoom(existing);
-      setRoomCode(code);
-      setScreen("game");
+      const result = await actuallyJoin(code, localNames);
+      if (result.error) {
+        setJoinError(result.error);
+      }
     } catch (e) {
       setJoinError("No se pudo conectar a la sala. Probá de nuevo.");
     } finally {
@@ -927,12 +1032,51 @@ function OnlineGame({ onBack }) {
     }
   };
 
+  // Mientras alguien espera para sumarse, seguimos consultando la sala y
+  // entramos solos apenas quede libre (entre rondas).
+  useEffect(() => {
+    if (!pendingJoin) return;
+    let cancelled = false;
+    const tick = async () => {
+      const fresh = await readRoom(pendingJoin.code);
+      if (cancelled || !fresh) return;
+      if (canJoinPhase(fresh.phase)) {
+        const result = await actuallyJoin(pendingJoin.code, pendingJoin.names);
+        if (cancelled) return;
+        if (result.error) {
+          setJoinError(result.error);
+        }
+        setPendingJoin(null);
+      }
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingJoin?.code]);
+
   const quickJoin = (code) => {
     setCodeInput(code);
     doJoin(code);
   };
 
-  const leaveRoom = () => {
+  // Al salir de verdad sacamos a los jugadores de ESTE celu de la sala (no
+  // solo localmente): así, si el que se va tenía el mando, la sala lo nota
+  // y pasa el mando a quien sigue. Si algo falla igual dejamos salir a la
+  // persona en vez de trabarla acá.
+  const leaveRoom = async () => {
+    try {
+      const fresh = await readRoom(roomCode);
+      if (fresh) {
+        fresh.players = (fresh.players || []).filter((p) => p.deviceId !== MY_DEVICE_ID);
+        await writeRoom(roomCode, fresh);
+      }
+    } catch {
+      /* seguimos igual */
+    }
     localStorage.removeItem(SESSION_KEY);
     onBack();
   };
@@ -1068,6 +1212,26 @@ function OnlineGame({ onBack }) {
   };
 
   // ---------- PANTALLA DE UNIRSE ----------
+  if (screen === "join" && pendingJoin) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <div style={{ fontSize: 56, marginBottom: 10 }}>⏳</div>
+        <Title size={24}>Esperando un huequito...</Title>
+        <Sub>
+          La sala {pendingJoin.code} está jugando una ronda ahora mismo. Te sumamos {joinNames(pendingJoin.names)}{" "}
+          automáticamente apenas termine — no hace falta que hagas nada.
+        </Sub>
+        <BigButton
+          onClick={() => setPendingJoin(null)}
+          color="transparent"
+          style={{ boxShadow: "none", color: "#C9B8F0" }}
+        >
+          ← Cancelar
+        </BigButton>
+      </Screen>
+    );
+  }
+
   if (screen === "join") {
     return (
       <Screen style={{ justifyContent: "center" }}>
@@ -1245,6 +1409,26 @@ function OnlineGame({ onBack }) {
   const guessesList = Object.entries(room.guesses || {}).map(([id, g]) => ({ id, ...g }));
   const myPlayerIds = myPlayers.map((p) => p.id);
 
+  // El "mando" (quién puede pasar de etapa: arrancar/pasar de ronda) es
+  // quien llegó primero a la sala. No lo recalculamos y reescribimos por
+  // separado: si esa persona ya no está entre los jugadores (se fue),
+  // TODOS los celus derivan solos, a partir de los mismos datos ya
+  // sincronizados, que el mando pasa a quien le sigue en orden de llegada
+  // — sin ninguna escritura extra que pueda pisarse entre varios celus.
+  const effectiveHost =
+    players.find((p) => p.id === room.hostId) ||
+    [...players].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0] ||
+    null;
+  const isHost = !!effectiveHost && myPlayerIds.includes(effectiveHost.id);
+
+  const passControlTo = async (playerId) => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.hostId = playerId;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
   // ---------- LOBBY ----------
   if (room.phase === "lobby") {
     return (
@@ -1283,9 +1467,15 @@ function OnlineGame({ onBack }) {
           ))}
         </Card>
         {players.length < 3 && <Sub>Necesitás al menos 3 jugadores en total. Compartí el código.</Sub>}
-        <BigButton onClick={startRound} disabled={players.length < 3}>
-          Siguiente ronda ➜
-        </BigButton>
+        <RoundControl
+          effectiveHost={effectiveHost}
+          isHost={isHost}
+          players={players}
+          onAdvance={startRound}
+          onPassControl={passControlTo}
+          canAdvance={players.length >= 3}
+          label="Siguiente ronda ➜"
+        />
         <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
           Salir de la sala
         </BigButton>
@@ -1393,6 +1583,8 @@ function OnlineGame({ onBack }) {
     if (isMyDeviceClueGiver) {
       const answered = guessesList.length;
       const total = players.length - 1;
+      const missing = players.filter((p) => p.id !== room.clueGiverId && !(room.guesses || {})[p.id]);
+      const allAnswered = answered >= total;
       return (
         <Screen>
           <Title size={22}>Esperando respuestas</Title>
@@ -1408,9 +1600,31 @@ function OnlineGame({ onBack }) {
               </div>
             ))}
           </Card>
-          <BigButton onClick={goToReview} disabled={guessesList.length === 0}>
+          <BigButton onClick={goToReview} disabled={!allAnswered}>
             Ver respuestas 👁️
           </BigButton>
+          {!allAnswered && answered > 0 && (
+            <button
+              onClick={() => {
+                const names = joinNames(missing.map((p) => p.name));
+                if (window.confirm(`Todavía falta${missing.length === 1 ? "" : "n"} ${names}. ¿Ver las respuestas igual?`)) {
+                  goToReview();
+                }
+              }}
+              style={{
+                display: "block",
+                margin: "-4px auto 0",
+                background: "none",
+                border: "none",
+                color: "#8b7fa8",
+                fontSize: 12.5,
+                textDecoration: "underline",
+                cursor: "pointer",
+              }}
+            >
+              Ver de todos modos (faltan {missing.map((p) => p.name).join(", ")})
+            </button>
+          )}
         </Screen>
       );
     }
@@ -1511,7 +1725,15 @@ function OnlineGame({ onBack }) {
             </div>
           ))}
         </Card>
-        <BigButton onClick={startRound}>Siguiente ronda ➜</BigButton>
+        <RoundControl
+          effectiveHost={effectiveHost}
+          isHost={isHost}
+          players={players}
+          onAdvance={startRound}
+          onPassControl={passControlTo}
+          canAdvance={true}
+          label="Siguiente ronda ➜"
+        />
         <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
           Salir de la sala
         </BigButton>
