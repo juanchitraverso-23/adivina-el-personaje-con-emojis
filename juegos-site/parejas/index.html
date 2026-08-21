@@ -326,13 +326,66 @@ function modeOf(room) {
   return MODES[(room && room.mode) || "parejas"] || MODES.parejas;
 }
 
-const PROMPTS_PADREHIJO = []; // todavía sin consignas oficiales — se cargan con "Consignas nuevas"
+const PROMPTS_PADREHIJO = []; // banco de fábrica — se usa solo para sembrar el banco vivo la primera vez
 const PROMPTS_AMIGOS = [];    // ídem
 const PROMPTS_BY_MODE = {
   parejas: PROMPTS_PAREJAS,
   padrehijo: PROMPTS_PADREHIJO,
   amigos: PROMPTS_AMIGOS,
 };
+
+// ==================== BANCO OFICIAL "VIVO" (se puede editar desde el juego) ====================
+// Los arrays de arriba son solo la semilla de fábrica. El banco real que se
+// usa para jugar vive en KV (una clave por modo) para que agregar o sacar
+// una consigna "para siempre" desde el celu, en medio de una noche de
+// juego, no dependa de que alguien edite código y vuelva a deployar.
+const BANK_PREFIX = "parejas:banco:";
+
+async function readBank(mode) {
+  try {
+    const res = await window.storage.get(BANK_PREFIX + mode, true);
+    if (!res) return null; // todavía no se sembró
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writeBank(mode, prompts) {
+  await window.storage.set(BANK_PREFIX + mode, JSON.stringify(prompts), true);
+}
+// La primera vez que se pide el banco de un modo, si todavía no existe en
+// KV, lo sembramos con la lista de fábrica y esa queda como el banco real
+// de ahí en más (agregar/sacar consignas edita ESTO, no el código fuente).
+async function getOrSeedBank(mode) {
+  const existing = await readBank(mode);
+  if (existing) return existing;
+  const seed = PROMPTS_BY_MODE[mode] || [];
+  await writeBank(mode, seed);
+  return seed;
+}
+// Un id que empieza con "nueva-" es una consigna sumada solo para una
+// partida puntual (via "Consignas nuevas", todavía no confirmada al banco
+// oficial). Cualquier otro id (numérico de fábrica, o "oficial-xxx" de una
+// que se confirmó después) cuenta como parte del banco oficial de verdad.
+function isSessionOnlyPrompt(promptId) {
+  return String(promptId).startsWith("nueva-");
+}
+async function removePromptForever(mode, promptId) {
+  const fresh = (await readBank(mode)) || PROMPTS_BY_MODE[mode] || [];
+  const next = fresh.filter((p) => p.id !== promptId);
+  await writeBank(mode, next);
+  return next;
+}
+async function addPromptForever(mode, text) {
+  const fresh = (await readBank(mode)) || PROMPTS_BY_MODE[mode] || [];
+  const norm = normalizePromptText(text);
+  if (fresh.some((p) => normalizePromptText(p.text) === norm)) {
+    return { ok: false, reason: "duplicate", bank: fresh };
+  }
+  const next = [...fresh, { id: "oficial-" + randomId(), text }];
+  await writeBank(mode, next);
+  return { ok: true, bank: next };
+}
 
 // ==================== UI COMPARTIDA ====================
 const C = {
@@ -616,7 +669,20 @@ function couplesFromPlayers(players) {
 function Lobby({ room, myId, onRoomUpdated, onStarted }) {
   const isHost = room.hostId === myId;
   const cfg = modeOf(room);
-  const officialBank = PROMPTS_BY_MODE[room.mode || "parejas"] || [];
+  const mode = room.mode || "parejas";
+  // El banco real (editable desde el juego) vive en KV; mientras carga
+  // usamos la semilla de fábrica como mejor estimación, así el lobby no
+  // parpadea vacío un instante.
+  const [officialBank, setOfficialBank] = useState(PROMPTS_BY_MODE[mode] || []);
+  useEffect(() => {
+    let cancelled = false;
+    getOrSeedBank(mode).then((bank) => {
+      if (!cancelled) setOfficialBank(bank);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode]);
   const players = room.players || [];
   const solo = players.filter((p) => !p.coupleId);
   const couples = couplesFromPlayers(players.filter((p) => p.coupleId));
@@ -953,10 +1019,13 @@ function PlayScreen({ room, myId, progressMap, onAnswered }) {
   const [yo, setYo] = useState("");
   const [pareja, setPareja] = useState("");
   const [saving, setSaving] = useState(false);
+  const [curating, setCurating] = useState(false);
+  const [curatedMsg, setCuratedMsg] = useState("");
 
   useEffect(() => {
     setYo("");
     setPareja("");
+    setCuratedMsg("");
   }, [myProgress]);
 
   if (myProgress >= totalPrompts) return null; // ya terminó, otro componente se encarga
@@ -973,6 +1042,40 @@ function PlayScreen({ room, myId, progressMap, onAnswered }) {
   }
 
   const prompt = room.prompts[myProgress] || { text: "(consigna no encontrada)" };
+  const mode = room.mode || "parejas";
+  const isSessionOnly = isSessionOnlyPrompt(prompt.id);
+
+  const deleteForever = async () => {
+    if (curating) return;
+    if (!window.confirm('¿Sacar esta consigna del banco oficial para siempre? No va a volver a salir en futuras partidas (esta ronda sigue como está).')) return;
+    setCurating(true);
+    try {
+      await removePromptForever(mode, prompt.id);
+      setCuratedMsg("🗑️ Sacada del banco oficial. No va a volver a aparecer.");
+    } catch {
+      setCuratedMsg("No se pudo guardar el cambio. Probá de nuevo.");
+    } finally {
+      setCurating(false);
+    }
+  };
+
+  const addForever = async () => {
+    if (curating) return;
+    if (!window.confirm("¿Guardar esta consigna para siempre en el banco oficial? Va a poder salir en futuras partidas de este modo.")) return;
+    setCurating(true);
+    try {
+      const result = await addPromptForever(mode, prompt.text);
+      setCuratedMsg(
+        result.ok
+          ? "⭐ Guardada para siempre en el banco oficial."
+          : "Ya estaba guardada (es igual a una que ya existe)."
+      );
+    } catch {
+      setCuratedMsg("No se pudo guardar el cambio. Probá de nuevo.");
+    } finally {
+      setCurating(false);
+    }
+  };
 
   const confirm = async () => {
     if (saving) return; // evita doble-submit por doble-tap
@@ -990,6 +1093,20 @@ function PlayScreen({ room, myId, progressMap, onAnswered }) {
     <Screen>
       <Title size={20}>Consigna {myProgress + 1} / {totalPrompts}</Title>
       <Sub style={{ marginTop: -8, fontSize: 17, color: "#FBEEF0", fontWeight: 700 }}>{prompt.text}</Sub>
+      {curatedMsg ? (
+        <Sub style={{ marginTop: -14, fontSize: 12.5, color: C.gold }}>{curatedMsg}</Sub>
+      ) : (
+        <button
+          onClick={isSessionOnly ? addForever : deleteForever}
+          disabled={curating}
+          style={{
+            display: "block", margin: "-14px auto 22px", background: "none", border: "none",
+            color: C.textFaint, fontSize: 12.5, textDecoration: "underline", cursor: curating ? "default" : "pointer",
+          }}
+        >
+          {isSessionOnly ? "⭐ Esta va bien — guardarla para siempre" : "🗑️ Esta no funciona — sacarla para siempre"}
+        </button>
+      )}
       <Card style={{ marginBottom: 16 }}>
         <label style={{ fontSize: 13, color: C.gold, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>Yo</label>
         <input value={yo} onChange={(e) => setYo(e.target.value)} placeholder="Tu respuesta" style={inputStyle} />
