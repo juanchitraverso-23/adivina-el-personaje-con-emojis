@@ -162,7 +162,7 @@
 
 <script>
 /* ================= DATOS DEL JUEGO ================= */
-const botNamesPool = ["Claude 1", "Claude 2", "Claude 3", "Claude 4"];
+const botNamesPool = ["Bot 1", "Bot 2", "Bot 3", "Bot 4"];
 
 const wordSets = {
   easy: {
@@ -337,35 +337,14 @@ function fallbackClueWord(category, excludeWord, hints, usedWords) {
   return category;
 }
 
-// Llama a la API con límite de tiempo; si falla o tarda de más, devuelve una palabra de respaldo (sin internet)
+// Los bots eligen su pista de un banco de palabras por categoría (sin
+// conexión, sin IA de verdad). Antes esto intentaba llamar a la API de
+// Anthropic directamente desde el celu sin API key, así que SIEMPRE
+// fallaba y cada turno de bot esperaba un viaje de red al pedo antes de
+// caer acá igual. Se saca el intento fallido y se va directo al banco de
+// palabras, que es lo que realmente se usaba siempre.
 async function askBotForClue(prompt, category, excludeWord, hints, usedWords) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
-  try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
-    clearTimeout(timeoutId);
-    if (!response.ok) throw new Error("bad status");
-    const data = await response.json();
-    const textBlock = (data.content || []).find(b => b.type === "text");
-    let text = textBlock ? textBlock.text.trim() : "";
-    const used = (usedWords || []).map(w => (w || "").toLowerCase().trim());
-    if (!text || used.includes(text.toLowerCase())) {
-      text = fallbackClueWord(category, excludeWord, hints, usedWords);
-    }
-    return text;
-  } catch (e) {
-    clearTimeout(timeoutId);
-    return fallbackClueWord(category, excludeWord, hints, usedWords);
-  }
+  return fallbackClueWord(category, excludeWord, hints, usedWords);
 }
 
 function speakAloud(text) {
@@ -943,7 +922,7 @@ function renderOnline(card) {
       <div class="roomCodeBox"><div class="roomCodeLabel">CÓDIGO DE SALA</div><div class="roomCode">${room.code}</div></div>
       <div class="sub">Jugadores en la sala (${room.players.length})</div>
       <div class="playerList">${humanItems}</div>
-      <div class="selectorRow"><div class="selectorLabel">¿Cuántos jugadores Claude suman?</div><div class="botOptions">${botButtons}</div></div>
+      <div class="selectorRow"><div class="selectorLabel">¿Cuántos bots suman?</div><div class="botOptions">${botButtons}</div></div>
       ${renderDifficultyControls(room, isHost, "Online")}
       ${isHost
         ? `${!canStart ? `<div class="warn">Necesitás al menos 3 jugadores en total.</div>` : ""}
@@ -1083,7 +1062,7 @@ function renderLocal(card) {
         </div>
       </div>
       <div class="selectorRow">
-        <div class="selectorLabel">Jugadores Claude</div>
+        <div class="selectorLabel">Jugadores bot</div>
         <div class="stepper">
           <button class="stepBtn" onclick="localAdjustBots(-1)" ${L.botCount <= 0 ? "disabled" : ""}>−</button>
           <div class="stepValue">${L.botCount}</div>
@@ -1168,7 +1147,7 @@ function renderLocal(card) {
       ${!L.clueText && !L.clueLoading ? `<button class="btn btnLavender" onclick="localFetchBotClue('${name}')">Pedir la palabra de ${name} 🔊</button>` : ""}
       ${L.clueText ? `<button class="btn btnSecondary" onclick="localNextClueStep()">Siguiente</button>` : ""}
       ${L.clueError ? `<button class="btn btnSecondary" onclick="localFetchBotClue('${name}')">Reintentar</button>` : ""}
-      <div class="footerNote">Claude dice su palabra en voz alta por el parlante del teléfono.</div>
+      <div class="footerNote">El bot dice su palabra en voz alta por el parlante del teléfono.</div>
     `;
     return;
   }

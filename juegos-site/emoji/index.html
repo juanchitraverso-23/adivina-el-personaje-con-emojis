@@ -729,7 +729,7 @@ function OnlineGame({ onBack }) {
       }
       const id = randomId();
       const avatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
-      existing.players.push({ id, name: trimmedName, avatar, score: 0 });
+      existing.players.push({ id, name: trimmedName, avatar, score: 0, joinedAt: Date.now() });
       await writeRoom(code, existing);
       localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: id, name: trimmedName }));
       setRoom(existing);
@@ -788,7 +788,21 @@ function OnlineGame({ onBack }) {
     setScreen("game");
   };
 
-  const leaveRoom = () => {
+  // Sacamos al jugador de la sala en el servidor (no solo la sesión local)
+  // para que, si tenía el mando, la sala note que se fue y lo pase a quien
+  // sigue en orden de llegada.
+  const leaveRoom = async () => {
+    try {
+      if (roomCode && playerId) {
+        const fresh = await readRoom(roomCode);
+        if (fresh) {
+          fresh.players = (fresh.players || []).filter((p) => p.id !== playerId);
+          await writeRoom(roomCode, fresh);
+        }
+      }
+    } catch {
+      /* seguimos igual */
+    }
     localStorage.removeItem(SESSION_KEY);
     onBack();
   };
@@ -817,6 +831,27 @@ function OnlineGame({ onBack }) {
   const me = room?.players?.find((p) => p.id === playerId) || null;
   const actor = room?.players?.find((p) => p.id === room?.actorId) || null;
   const isActor = room?.actorId === playerId;
+
+  // El "mando" del lobby (quién puede arrancar la ronda) es quien llegó
+  // primero a la sala. Es un valor derivado en cada celu a partir de
+  // room.hostId + joinedAt, nunca se reescribe aparte: si esa persona ya
+  // no está entre los jugadores (se fue), todos derivan solos que el mando
+  // pasa a quien le sigue en orden de llegada, sin ninguna escritura que
+  // pueda pisarse entre celus.
+  const allPlayers = room?.players || [];
+  const effectiveHost =
+    allPlayers.find((p) => p.id === room?.hostId) ||
+    [...allPlayers].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0] ||
+    null;
+  const isHost = !!effectiveHost && effectiveHost.id === playerId;
+
+  const passControlTo = async (targetId) => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.hostId = targetId;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
 
   const elapsed = room?.roundStartTime ? (now - room.roundStartTime) / 1000 : 0;
   const remaining = Math.max(0, ROUND_SECONDS - elapsed);
@@ -856,7 +891,8 @@ function OnlineGame({ onBack }) {
       if (!existing) {
         existing = {
           code,
-          players: [{ id, name: trimmedName, avatar, score: 0 }],
+          players: [{ id, name: trimmedName, avatar, score: 0, joinedAt: Date.now() }],
+          hostId: id, // quien crea la sala tiene el mando
           phase: "lobby",
           actorId: null,
           emoji: null,
@@ -870,7 +906,7 @@ function OnlineGame({ onBack }) {
           setJoining(false);
           return;
         }
-        existing.players.push({ id, name: trimmedName, avatar, score: 0 });
+        existing.players.push({ id, name: trimmedName, avatar, score: 0, joinedAt: Date.now() });
       }
       await writeRoom(code, existing);
       localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: id, name: trimmedName }));
@@ -1093,7 +1129,16 @@ function OnlineGame({ onBack }) {
       </div>
 
       <div className="flex-1 flex flex-col p-5">
-        {room.phase === "lobby" && <LobbyView players={sorted} onStart={startRound} onReset={resetScores} />}
+        {room.phase === "lobby" && (
+          <LobbyView
+            players={sorted}
+            onStart={startRound}
+            onReset={resetScores}
+            effectiveHost={effectiveHost}
+            isHost={isHost}
+            onPassControl={passControlTo}
+          />
+        )}
         {room.phase === "ready" && <ReadyView isActor={isActor} actor={actor} onBegin={revealEmoji} />}
         {room.phase === "preview" && <PreviewView isActor={isActor} actor={actor} emoji={room.emoji} onStartTimer={startTimer} />}
         {room.phase === "acting" && <ActingView isActor={isActor} actor={actor} remaining={remaining} />}
@@ -1105,9 +1150,11 @@ function OnlineGame({ onBack }) {
   );
 }
 
-function LobbyView({ players, onStart, onReset }) {
+function LobbyView({ players, onStart, onReset, effectiveHost, isHost, onPassControl }) {
+  const [showHandoff, setShowHandoff] = useState(false);
   const canStart = players.length >= 2;
   const maxScore = players.length ? Math.max(...players.map((p) => p.score)) : 0;
+  const others = players.filter((p) => p.id !== effectiveHost?.id);
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 mb-3">
@@ -1133,13 +1180,52 @@ function LobbyView({ players, onStart, onReset }) {
           Compartí el código de sala para que se sumen. Necesitás al menos 2 jugadores.
         </p>
       )}
-      <PrimaryButton onClick={onStart} disabled={!canStart}>
-        <Icon name="Sparkles" size={20} /> Siguiente ronda
-      </PrimaryButton>
-      {players.some((p) => p.score > 0) && (
-        <button onClick={onReset} className="w-full mt-3 rounded-2xl py-2.5 font-bold text-base flex items-center justify-center gap-2" style={{ backgroundColor: "rgba(255,255,255,0.05)", color: C.textMuted }}>
-          <Icon name="RefreshCw" size={14} /> Reiniciar puntajes
-        </button>
+      <p className="text-center text-base mb-3" style={{ color: C.textMuted }}>
+        👑 {isHost ? "Vos tenés" : `${effectiveHost?.name || "Alguien"} tiene`} el mando de la sala
+      </p>
+      {isHost ? (
+        <>
+          <PrimaryButton onClick={onStart} disabled={!canStart}>
+            <Icon name="Sparkles" size={20} /> Siguiente ronda
+          </PrimaryButton>
+          {players.some((p) => p.score > 0) && (
+            <button onClick={onReset} className="w-full mt-3 rounded-2xl py-2.5 font-bold text-base flex items-center justify-center gap-2" style={{ backgroundColor: "rgba(255,255,255,0.05)", color: C.textMuted }}>
+              <Icon name="RefreshCw" size={14} /> Reiniciar puntajes
+            </button>
+          )}
+          {others.length > 0 && (
+            <>
+              <button
+                onClick={() => setShowHandoff((s) => !s)}
+                className="mt-3 text-base font-bold underline"
+                style={{ color: C.textFaint, background: "none", border: "none" }}
+              >
+                {showHandoff ? "Cancelar" : "Pasarle el mando a otro/a"}
+              </button>
+              {showHandoff && (
+                <div className="mt-2 rounded-2xl p-2" style={{ backgroundColor: C.card, border: `1px solid ${C.cardBorder}` }}>
+                  {others.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        onPassControl(p.id);
+                        setShowHandoff(false);
+                      }}
+                      className="w-full text-left px-3 py-2 font-bold text-white"
+                      style={{ background: "none", border: "none" }}
+                    >
+                      👑 {p.avatar} {p.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </>
+      ) : (
+        <p className="text-center text-base" style={{ color: C.textMuted }}>
+          Esperando a que {effectiveHost?.name || "el anfitrión/a"} empiece...
+        </p>
       )}
     </div>
   );
