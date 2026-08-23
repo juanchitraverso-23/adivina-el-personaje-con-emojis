@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Secuencias en Cadena — Juego de números</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Secuencias" />
+<meta name="theme-color" content="#1B1035" />
+<style>
+  html, body { margin:0; padding:0; background:#0c0620; }
+  #root { min-height: 100vh; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script src="../storage.js"></script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+// ============================================================
+// Secuencias en Cadena: hasta 8 jugadores, cada uno en su celu.
+// Todos arrancan con las mismas 5 secuencias (contar de X en X,
+// del 1 al 99). Al completar una, le mandás una secuencia nueva a
+// otro jugador — como una línea de Tetris. Si a alguien se le
+// acumulan demasiadas, queda eliminado. Gana el último en pie.
+// ============================================================
+const STORAGE_PREFIX = "secuencias:sala:";
+const POLL_MS = 1000;
+const SESSION_KEY = "secuencias:sesion";
+const MAX_PLAYERS = 8;
+const DEFAULT_MAX_QUEUE = 8;
+const BASE_QUEUE_SIZE = 5;
+const STEP_MIN = 8;
+const STEP_MAX = 27;
+
+const PLAYER_COLORS = ["#FF3E7F", "#5B4B8A", "#FFD23F", "#3DDC84", "#4FC3F7", "#FF9F1C", "#B983FF", "#FF6B6B"];
+
+function randomId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+function randomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+const MY_DEVICE_ID = (() => {
+  const KEY = "secuencias:deviceId";
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id = randomId();
+    localStorage.setItem(KEY, id);
+  }
+  return id;
+})();
+
+async function readRoom(code) {
+  try {
+    const res = await window.storage.get(STORAGE_PREFIX + code, true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writeRoom(code, room) {
+  await window.storage.set(STORAGE_PREFIX + code, JSON.stringify(room), true);
+}
+function playerKey(code, round, playerId) {
+  return STORAGE_PREFIX + code + ":r" + round + ":player:" + playerId;
+}
+async function readPlayerState(code, round, playerId) {
+  try {
+    const res = await window.storage.get(playerKey(code, round, playerId), true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writePlayerState(code, round, playerId, state) {
+  await window.storage.set(playerKey(code, round, playerId), JSON.stringify(state), true);
+}
+async function listPlayerStates(code, round) {
+  const prefix = playerKey(code, round, "");
+  let entries = [];
+  try {
+    entries = await window.storage.list(prefix);
+  } catch {
+    entries = [];
+  }
+  const map = {};
+  entries.forEach((e) => {
+    const playerId = e.key.slice(prefix.length);
+    try {
+      map[playerId] = JSON.parse(e.value);
+    } catch {}
+  });
+  return map;
+}
+
+function seqForStep(step) {
+  const arr = [];
+  for (let v = step; v <= 99; v += step) arr.push(v);
+  return arr;
+}
+function randomStep() {
+  return STEP_MIN + Math.floor(Math.random() * (STEP_MAX - STEP_MIN + 1));
+}
+function pickSteps(n) {
+  const pool = [];
+  for (let i = STEP_MIN; i <= STEP_MAX; i++) pool.push(i);
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, n);
+}
+
+const GRADIENT_BG = "radial-gradient(circle at 20% -10%, #3a2166 0%, #170b2e 45%, #0c0620 100%)";
+
+function useInjectFont() {
+  useEffect(() => {
+    if (document.getElementById("aq-fonts")) return;
+    const link = document.createElement("link");
+    link.id = "aq-fonts";
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap";
+    document.head.appendChild(link);
+  }, []);
+}
+
+function Screen({ children, style, homeConfirm }) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        width: "100%",
+        background: GRADIENT_BG,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        padding: "28px 18px 40px",
+        fontFamily: "'Nunito', sans-serif",
+        color: "#F3EEFF",
+        boxSizing: "border-box",
+        ...style,
+      }}
+    >
+      {homeConfirm !== null && <HomeButton confirmMessage={homeConfirm} />}
+      {children}
+    </div>
+  );
+}
+
+function HomeButton({ confirmMessage }) {
+  return (
+    <a
+      href="../"
+      onClick={(e) => {
+        if (confirmMessage && !window.confirm(confirmMessage)) e.preventDefault();
+      }}
+      title="Volver al menú de juegos"
+      style={{
+        position: "fixed",
+        top: "calc(env(safe-area-inset-top, 0px) + 14px)",
+        left: 14,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "9px 16px 9px 11px",
+        borderRadius: 30,
+        background: "rgba(0,0,0,0.6)",
+        border: "1.5px solid rgba(255,255,255,0.4)",
+        color: "#fff",
+        fontFamily: "'Nunito', sans-serif",
+        fontWeight: 800,
+        fontSize: 15,
+        textDecoration: "none",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+      }}
+    >
+      <span style={{ fontSize: 19 }}>🏠</span> Menú
+    </a>
+  );
+}
+
+function Title({ children, size = 30 }) {
+  return (
+    <h1
+      style={{
+        fontFamily: "'Baloo 2', sans-serif",
+        fontWeight: 800,
+        fontSize: size,
+        color: "#FFD23F",
+        textShadow: "0 3px 0 rgba(0,0,0,0.35)",
+        margin: "0 0 6px",
+        textAlign: "center",
+        letterSpacing: 0.3,
+      }}
+    >
+      {children}
+    </h1>
+  );
+}
+
+function Sub({ children, style }) {
+  return (
+    <p
+      style={{
+        color: "#C9B8F0",
+        fontSize: 16,
+        textAlign: "center",
+        margin: "0 0 22px",
+        lineHeight: 1.4,
+        ...style,
+      }}
+    >
+      {children}
+    </p>
+  );
+}
+
+function BigButton({ children, onClick, color = "#FF3E7F", disabled, style }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        width: "100%",
+        maxWidth: 380,
+        padding: "16px 20px",
+        borderRadius: 18,
+        border: "none",
+        background: disabled ? "#4a3d63" : color,
+        color: disabled ? "#8b7fa8" : "#1B1035",
+        fontFamily: "'Baloo 2', sans-serif",
+        fontWeight: 700,
+        fontSize: 18,
+        boxShadow: disabled ? "none" : "0 6px 0 rgba(0,0,0,0.28)",
+        cursor: disabled ? "default" : "pointer",
+        marginBottom: 14,
+        transition: "transform 0.08s ease",
+        ...style,
+      }}
+      onMouseDown={(e) => {
+        if (!disabled) e.currentTarget.style.transform = "translateY(4px)";
+      }}
+      onMouseUp={(e) => {
+        e.currentTarget.style.transform = "translateY(0)";
+      }}
+      onTouchStart={(e) => {
+        if (!disabled) e.currentTarget.style.transform = "translateY(4px)";
+      }}
+      onTouchEnd={(e) => {
+        e.currentTarget.style.transform = "translateY(0)";
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Card({ children, style }) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 420,
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.12)",
+        borderRadius: 22,
+        padding: 20,
+        boxSizing: "border-box",
+        marginBottom: 16,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.15)",
+  background: "rgba(0,0,0,0.25)",
+  color: "#F3EEFF",
+  fontSize: 17,
+  marginBottom: 10,
+  outline: "none",
+  fontFamily: "'Nunito', sans-serif",
+};
+
+function SequenceTrail({ step, progress }) {
+  const seq = seqForStep(step);
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", marginBottom: 16, width: "100%", maxWidth: 420 }}>
+      {seq.map((v, i) => (
+        <div
+          key={i}
+          style={{
+            minWidth: 40,
+            padding: "8px 4px",
+            borderRadius: 10,
+            textAlign: "center",
+            fontWeight: 800,
+            fontFamily: "'Baloo 2', sans-serif",
+            fontSize: 16,
+            background: i < progress ? "rgba(61,220,132,0.25)" : i === progress ? "rgba(255,210,63,0.22)" : "rgba(255,255,255,0.06)",
+            border: i === progress ? "2px solid #FFD23F" : "1px solid rgba(255,255,255,0.1)",
+            color: i < progress ? "#3DDC84" : i === progress ? "#FFD23F" : "#5a4d6e",
+          }}
+        >
+          {i < progress ? v : i === progress ? "?" : "·"}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NumericKeypad({ draft, setDraft, onEnter, disabled }) {
+  const press = (d) => {
+    if (!disabled) setDraft((v) => (v + d).slice(0, 3));
+  };
+  const backspace = () => {
+    if (!disabled) setDraft((v) => v.slice(0, -1));
+  };
+  const rows = [
+    ["1", "2", "3"],
+    ["4", "5", "6"],
+    ["7", "8", "9"],
+    ["⌫", "0", "✓"],
+  ];
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, width: "100%", maxWidth: 300 }}>
+      {rows.flat().map((k, i) => (
+        <button
+          key={i}
+          disabled={disabled}
+          onClick={() => {
+            if (k === "⌫") backspace();
+            else if (k === "✓") onEnter();
+            else press(k);
+          }}
+          style={{
+            fontSize: 22,
+            fontWeight: 800,
+            fontFamily: "'Baloo 2', sans-serif",
+            padding: "16px 0",
+            borderRadius: 14,
+            border: "none",
+            cursor: disabled ? "default" : "pointer",
+            background: k === "✓" ? "#3DDC84" : k === "⌫" ? "#FF5D7A" : "rgba(255,255,255,0.08)",
+            color: k === "✓" || k === "⌫" ? "#1B1035" : "#F3EEFF",
+            opacity: disabled ? 0.4 : 1,
+          }}
+        >
+          {k}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PlayerBadgeRow({ players, playerStates, myId }) {
+  const aliveList = players.filter((p) => (playerStates[p.id] || {}).alive !== false);
+  const maxQueueAlive = Math.max(0, ...aliveList.map((p) => ((playerStates[p.id] || {}).queue || []).length));
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(4, 1fr)",
+        gap: 8,
+        width: "100%",
+        maxWidth: 460,
+        marginBottom: 18,
+      }}
+    >
+      {players.map((p, i) => {
+        const st = playerStates[p.id];
+        const qLen = st ? (st.queue || []).length : 0;
+        const alive = st ? st.alive !== false : true;
+        const isJoker = alive && qLen === maxQueueAlive && maxQueueAlive > 0;
+        return (
+          <div
+            key={p.id}
+            style={{
+              background: alive ? PLAYER_COLORS[i % PLAYER_COLORS.length] : "#241d38",
+              borderRadius: 12,
+              padding: "8px 6px",
+              textAlign: "center",
+              opacity: alive ? 1 : 0.6,
+              border: p.id === myId ? "2px solid #FFD23F" : "2px solid transparent",
+              position: "relative",
+              boxSizing: "border-box",
+            }}
+          >
+            {isJoker && <span style={{ position: "absolute", top: -10, right: -4, fontSize: 16 }}>🃏</span>}
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 800,
+                color: alive ? "#1B1035" : "#8b7fa8",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {alive ? p.name : "💀 " + p.name}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: alive ? "#1B1035" : "#5a4d6e" }}>
+              {alive ? qLen : ""}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TargetPicker({ players, playerStates, myId, myLastAttacked, isJoker, onAttack }) {
+  const [useJoker, setUseJoker] = useState(false);
+  const aliveList = players.filter((p) => (playerStates[p.id] || {}).alive !== false);
+  const aliveCount = aliveList.length;
+  const candidates = aliveList.filter((p) => {
+    if (p.id === myId) return false;
+    if (aliveCount > 2 && p.id === myLastAttacked) return false;
+    return true;
+  });
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.75)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 100,
+        padding: 20,
+      }}
+    >
+      <Card style={{ maxWidth: 380, marginBottom: 0 }}>
+        <Title size={22}>¡Bien! ¿A quién atacás?</Title>
+        {isJoker && (
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 14,
+              color: "#FFD23F",
+              fontWeight: 700,
+              cursor: "pointer",
+              fontSize: 14,
+            }}
+          >
+            <input type="checkbox" checked={useJoker} onChange={(e) => setUseJoker(e.target.checked)} />
+            💥 Comodín: mandar el doble (vas último)
+          </label>
+        )}
+        {candidates.length === 0 ? (
+          <Sub style={{ marginBottom: 0 }}>No hay a quién atacar ahora mismo — seguí jugando.</Sub>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+            {candidates.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => onAttack(p.id, useJoker)}
+                style={{
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  borderRadius: 12,
+                  padding: "14px 8px",
+                  color: "#F3EEFF",
+                  fontWeight: 700,
+                  fontSize: 15,
+                  cursor: "pointer",
+                }}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function Home({ onSelect }) {
+  return (
+    <Screen style={{ justifyContent: "center" }} homeConfirm={null}>
+      <div style={{ fontSize: 64, marginBottom: 6 }}>🧮</div>
+      <Title size={34}>Secuencias en Cadena</Title>
+      <Sub>
+        Todos arrancan con las mismas secuencias para completar (contar de X en X). Cada una que
+        resolvés le mandás una secuencia extra a un rival, como una línea de Tetris. Si a alguien
+        se le acumulan demasiadas, queda eliminado. ¡Gana el último en pie!
+      </Sub>
+      <BigButton onClick={() => onSelect("game")} color="#FF3E7F">
+        🎮 Jugar
+      </BigButton>
+    </Screen>
+  );
+}
+
+function JoinScreen({ onJoined, onBack }) {
+  const [name, setName] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [openRooms, setOpenRooms] = useState([]);
+  const [resumable, setResumable] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const entries = await window.storage.list(STORAGE_PREFIX);
+        if (cancelled) return;
+        const rooms = entries
+          .map((e) => {
+            if (!/^secuencias:sala:[^:]+$/.test(e.key)) return null;
+            try {
+              return JSON.parse(e.value);
+            } catch {
+              return null;
+            }
+          })
+          .filter((r) => r && r.phase === "lobby" && Date.now() - (r.createdAt || 0) < 3 * 60 * 60 * 1000)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setOpenRooms(rooms);
+      } catch {}
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let saved;
+      try {
+        saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+      } catch {
+        saved = null;
+      }
+      if (!saved || !saved.code || !saved.playerId) {
+        setResumable(null);
+        return;
+      }
+      const existing = await readRoom(saved.code);
+      if (cancelled) return;
+      if (existing && existing.players.some((p) => p.id === saved.playerId)) {
+        setResumable({
+          code: saved.code,
+          playerId: saved.playerId,
+          name: (existing.players.find((p) => p.id === saved.playerId) || {}).name,
+        });
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+        setResumable(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const doJoin = async (codeMaybe) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setJoinError("Escribí tu nombre.");
+      return;
+    }
+    setJoining(true);
+    setJoinError("");
+    try {
+      const code = codeMaybe || (codeInput.trim() ? codeInput.trim().toUpperCase() : randomCode());
+      let existing = await readRoom(code);
+      if (existing && existing.phase !== "lobby") {
+        setJoinError("Esa sala ya está jugando. Esperá a la próxima ronda.");
+        setJoining(false);
+        return;
+      }
+      const me = { id: randomId(), name: trimmed, deviceId: MY_DEVICE_ID, joinedAt: Date.now() };
+      if (!existing) {
+        existing = {
+          code,
+          hostId: me.id,
+          players: [me],
+          phase: "lobby",
+          round: 1,
+          maxQueue: DEFAULT_MAX_QUEUE,
+          winnerId: null,
+          createdAt: Date.now(),
+        };
+      } else {
+        if (existing.players.length >= MAX_PLAYERS) {
+          setJoinError(`Sala llena (máximo ${MAX_PLAYERS} jugadores).`);
+          setJoining(false);
+          return;
+        }
+        if (existing.players.some((p) => p.name.toLowerCase() === trimmed.toLowerCase())) {
+          setJoinError(`Ya hay alguien llamado "${trimmed}" en esa sala. Cambiá el nombre.`);
+          setJoining(false);
+          return;
+        }
+        existing.players = [...existing.players, me];
+      }
+      await writeRoom(code, existing);
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: me.id }));
+      onJoined(code, me.id);
+    } catch (e) {
+      setJoinError("No se pudo conectar a la sala. Probá de nuevo.");
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  return (
+    <Screen>
+      <Title size={26}>Secuencias en Cadena</Title>
+      <Sub style={{ marginTop: -10 }}>Hasta 8 jugadores, cada uno en su celu</Sub>
+      <Card style={{ width: "100%", maxWidth: 420 }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Tu nombre" style={inputStyle} />
+        <input
+          value={codeInput}
+          onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+          placeholder="Código de sala (opcional)"
+          style={inputStyle}
+        />
+        {joinError && <div style={{ color: "#FF5D7A", fontSize: 13, marginBottom: 8 }}>{joinError}</div>}
+        <BigButton onClick={() => doJoin(null)} disabled={joining}>
+          {codeInput.trim() ? "Unirme a esa sala" : "Crear sala nueva"}
+        </BigButton>
+      </Card>
+
+      {resumable && (
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <Sub style={{ marginTop: 0 }}>
+            Ya estabas en la sala <b>{resumable.code}</b> como {resumable.name}
+          </Sub>
+          <BigButton onClick={() => onJoined(resumable.code, resumable.playerId)} color="#5B4B8A">
+            Volver a esa sala
+          </BigButton>
+        </Card>
+      )}
+
+      {openRooms.length > 0 && (
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", fontWeight: 700, marginBottom: 8 }}>Salas abiertas ahora</div>
+          {openRooms.map((r) => (
+            <button
+              key={r.code}
+              onClick={() => {
+                setCodeInput(r.code);
+                doJoin(r.code);
+              }}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                width: "100%",
+                background: "rgba(255,255,255,0.06)",
+                border: "none",
+                borderRadius: 10,
+                padding: "10px 12px",
+                marginBottom: 6,
+                color: "#F3EEFF",
+                cursor: "pointer",
+                fontWeight: 700,
+              }}
+            >
+              <span>{r.code}</span>
+              <span style={{ color: "#8b7fa8" }}>{(r.players || []).length}/{MAX_PLAYERS} jugadores</span>
+            </button>
+          ))}
+        </Card>
+      )}
+
+      <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+        Volver
+      </BigButton>
+    </Screen>
+  );
+}
+
+function GameRoom({ roomCode, myId, onBack }) {
+  const [room, setRoom] = useState(null);
+  const [playerStates, setPlayerStates] = useState({});
+  const [typedDraft, setTypedDraft] = useState("");
+  const [wrongFlash, setWrongFlash] = useState(false);
+  const [showTargetPicker, setShowTargetPicker] = useState(false);
+
+  const leaveRoom = async () => {
+    try {
+      const fresh = await readRoom(roomCode);
+      if (fresh) {
+        fresh.players = (fresh.players || []).filter((p) => p.id !== myId);
+        await writeRoom(roomCode, fresh);
+      }
+    } catch {}
+    localStorage.removeItem(SESSION_KEY);
+    onBack();
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const r = await readRoom(roomCode);
+      if (cancelled || !r) return;
+      setRoom(r);
+      const round = r.round || 1;
+      if (r.phase === "playing" || r.phase === "ended") {
+        const states = await listPlayerStates(roomCode, round);
+        if (cancelled) return;
+        setPlayerStates(states);
+
+        if (r.phase === "playing") {
+          const aliveList = (r.players || []).filter((p) => (states[p.id] || {}).alive !== false && states[p.id]);
+          if (aliveList.length <= 1 && Object.keys(states).length >= (r.players || []).length) {
+            const fresh = await readRoom(roomCode);
+            if (fresh && fresh.phase === "playing") {
+              fresh.phase = "ended";
+              fresh.winnerId = aliveList[0] ? aliveList[0].id : null;
+              await writeRoom(roomCode, fresh);
+            }
+          }
+        }
+      }
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [roomCode]);
+
+  if (!room) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <Sub>Cargando sala...</Sub>
+      </Screen>
+    );
+  }
+
+  const players = room.players || [];
+  const effectiveHost =
+    players.find((p) => p.id === room.hostId) ||
+    [...players].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0] ||
+    null;
+  const isHost = !!effectiveHost && effectiveHost.id === myId;
+
+  const passControlTo = async (targetId) => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.hostId = targetId;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  const startGame = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh || fresh.players.length < 2) return;
+    const round = fresh.round || 1;
+    const steps = pickSteps(BASE_QUEUE_SIZE);
+    const newStates = {};
+    fresh.players.forEach((p) => {
+      newStates[p.id] = { queue: [...steps], progress: 0, alive: true, lastAttacked: null, eliminatedAt: null };
+    });
+    await Promise.all(fresh.players.map((p) => writePlayerState(roomCode, round, p.id, newStates[p.id])));
+    fresh.phase = "playing";
+    fresh.winnerId = null;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+    setPlayerStates(newStates);
+  };
+
+  const playAgain = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.round = (fresh.round || 1) + 1;
+    fresh.phase = "lobby";
+    fresh.winnerId = null;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+    setPlayerStates({});
+  };
+
+  // ---------- LOBBY ----------
+  if (room.phase === "lobby") {
+    return (
+      <Screen homeConfirm="¿Salir de la sala?">
+        <Title size={26}>Sala {room.code}</Title>
+        <Sub style={{ marginTop: -10 }}>
+          Compartí el código para que se sumen ({players.length}/{MAX_PLAYERS}). Mínimo 2 jugadores.
+        </Sub>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          {players.map((p) => (
+            <div key={p.id} style={{ padding: "6px 2px", color: "#F3EEFF" }}>
+              {p.id === effectiveHost?.id ? "👑 " : "• "}
+              {p.name}
+              {p.id === myId ? " (vos)" : ""}
+            </div>
+          ))}
+        </Card>
+        {isHost ? (
+          <>
+            <BigButton onClick={startGame} disabled={players.length < 2}>
+              {players.length < 2 ? "Esperando otro jugador..." : "Empezar 🎮"}
+            </BigButton>
+            {players.length > 1 && (
+              <Card style={{ width: "100%", maxWidth: 420 }}>
+                <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6 }}>Pasarle el mando a otro/a</div>
+                {players
+                  .filter((p) => p.id !== myId)
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => passControlTo(p.id)}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        textAlign: "left",
+                        background: "rgba(255,255,255,0.06)",
+                        border: "none",
+                        borderRadius: 8,
+                        padding: "8px 10px",
+                        marginBottom: 4,
+                        color: "#F3EEFF",
+                        cursor: "pointer",
+                      }}
+                    >
+                      👑 {p.name}
+                    </button>
+                  ))}
+              </Card>
+            )}
+          </>
+        ) : (
+          <Sub>Esperando a que {effectiveHost ? effectiveHost.name : "el anfitrión/a"} empiece...</Sub>
+        )}
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- ENDED ----------
+  if (room.phase === "ended") {
+    const round = room.round || 1;
+    const ranked = [...players].sort((a, b) => {
+      const sa = playerStates[a.id] || {};
+      const sb = playerStates[b.id] || {};
+      if (a.id === room.winnerId) return -1;
+      if (b.id === room.winnerId) return 1;
+      return (sb.eliminatedAt || 0) - (sa.eliminatedAt || 0);
+    });
+    const medals = ["🥇", "🥈", "🥉"];
+    return (
+      <Screen>
+        <Title size={26}>🏆 {room.winnerId ? "¡Fin de la partida!" : "Partida terminada"}</Title>
+        {room.winnerId && (
+          <Sub style={{ marginTop: -10 }}>
+            Ganó <b style={{ color: "#FFD23F" }}>{(players.find((p) => p.id === room.winnerId) || {}).name}</b>
+          </Sub>
+        )}
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          {ranked.map((p, i) => (
+            <div
+              key={p.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                padding: "8px 2px",
+                borderBottom: i < ranked.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none",
+              }}
+            >
+              <span>
+                {medals[i] || `${i + 1}°`} {p.name}
+                {p.id === myId ? " (vos)" : ""}
+              </span>
+            </div>
+          ))}
+        </Card>
+        {isHost && <BigButton onClick={playAgain}>🔁 Jugar otra ronda</BigButton>}
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- PLAYING ----------
+  const round = room.round || 1;
+  const myState = playerStates[myId];
+  const iAmAlive = myState ? myState.alive !== false : true;
+  const aliveList = players.filter((p) => (playerStates[p.id] || {}).alive !== false);
+  const maxQueueAlive = Math.max(0, ...aliveList.map((p) => ((playerStates[p.id] || {}).queue || []).length));
+  const isJoker = iAmAlive && myState && (myState.queue || []).length === maxQueueAlive && maxQueueAlive > 0;
+
+  const performAttack = async (targetId, useJoker) => {
+    const howMany = useJoker && isJoker ? 2 : 1;
+    const freshTarget = (await readPlayerState(roomCode, round, targetId)) || {
+      queue: [],
+      progress: 0,
+      alive: true,
+      lastAttacked: null,
+      eliminatedAt: null,
+    };
+    const newSteps = [];
+    for (let i = 0; i < howMany; i++) newSteps.push(randomStep());
+    const newQueue = [...(freshTarget.queue || []), ...newSteps];
+    const overflowed = newQueue.length > (room.maxQueue || DEFAULT_MAX_QUEUE);
+    const nextTargetState = {
+      ...freshTarget,
+      queue: newQueue,
+      alive: overflowed ? false : freshTarget.alive,
+      eliminatedAt: overflowed && freshTarget.alive !== false ? Date.now() : freshTarget.eliminatedAt,
+    };
+    await writePlayerState(roomCode, round, targetId, nextTargetState);
+    setPlayerStates((m) => ({ ...m, [targetId]: nextTargetState }));
+
+    const freshMe = (await readPlayerState(roomCode, round, myId)) || myState;
+    const nextMe = { ...freshMe, lastAttacked: targetId };
+    await writePlayerState(roomCode, round, myId, nextMe);
+    setPlayerStates((m) => ({ ...m, [myId]: nextMe }));
+    setShowTargetPicker(false);
+  };
+
+  const submitDigit = async () => {
+    if (!myState || !iAmAlive || !typedDraft) return;
+    const step = myState.queue[0];
+    const seq = seqForStep(step);
+    const expected = seq[myState.progress];
+    const typed = parseInt(typedDraft, 10);
+    if (typed === expected) {
+      const isLastNumber = myState.progress + 1 >= seq.length;
+      const fresh = (await readPlayerState(roomCode, round, myId)) || myState;
+      if (isLastNumber) {
+        const newQueue = fresh.queue.slice(1);
+        const next = { ...fresh, queue: newQueue, progress: 0 };
+        await writePlayerState(roomCode, round, myId, next);
+        setPlayerStates((m) => ({ ...m, [myId]: next }));
+        setTypedDraft("");
+        setShowTargetPicker(true);
+      } else {
+        const next = { ...fresh, progress: myState.progress + 1 };
+        await writePlayerState(roomCode, round, myId, next);
+        setPlayerStates((m) => ({ ...m, [myId]: next }));
+        setTypedDraft("");
+      }
+    } else {
+      setWrongFlash(true);
+      setTypedDraft("");
+      setTimeout(() => setWrongFlash(false), 500);
+    }
+  };
+
+  return (
+    <Screen homeConfirm="¿Salir? Perdés tu progreso de esta partida.">
+      <Title size={22}>Sala {room.code}</Title>
+      <PlayerBadgeRow players={players} playerStates={playerStates} myId={myId} />
+
+      {!iAmAlive ? (
+        <Card style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
+          <div style={{ fontSize: 44, marginBottom: 8 }}>💀</div>
+          <Title size={20}>Fuiste eliminado/a</Title>
+          <Sub style={{ marginBottom: 0 }}>Mirá cómo sigue la partida arriba.</Sub>
+        </Card>
+      ) : myState && myState.queue && myState.queue.length > 0 ? (
+        <>
+          <Sub style={{ marginTop: -6 }}>
+            Contá de <b style={{ color: "#FFD23F" }}>{myState.queue[0]}</b> en {myState.queue[0]}
+          </Sub>
+          <SequenceTrail step={myState.queue[0]} progress={myState.progress} />
+          <input
+            value={typedDraft}
+            onChange={(e) => setTypedDraft(e.target.value.replace(/[^0-9]/g, ""))}
+            onKeyDown={(e) => e.key === "Enter" && submitDigit()}
+            inputMode="numeric"
+            placeholder="?"
+            style={{
+              ...inputStyle,
+              maxWidth: 300,
+              textAlign: "center",
+              fontSize: 28,
+              fontWeight: 800,
+              fontFamily: "'Baloo 2', sans-serif",
+              border: wrongFlash ? "2px solid #FF5D7A" : inputStyle.border,
+            }}
+          />
+          <NumericKeypad draft={typedDraft} setDraft={setTypedDraft} onEnter={submitDigit} disabled={false} />
+        </>
+      ) : (
+        <Sub>Esperando la próxima secuencia...</Sub>
+      )}
+
+      {showTargetPicker && (
+        <TargetPicker
+          players={players}
+          playerStates={playerStates}
+          myId={myId}
+          myLastAttacked={myState ? myState.lastAttacked : null}
+          isJoker={isJoker}
+          onAttack={performAttack}
+        />
+      )}
+
+      <BigButton
+        onClick={leaveRoom}
+        color="transparent"
+        style={{ boxShadow: "none", color: "#C9B8F0", marginTop: 20 }}
+      >
+        Salir de la sala
+      </BigButton>
+    </Screen>
+  );
+}
+
+function App() {
+  useInjectFont();
+  const [mode, setMode] = useState("home");
+  const [roomCode, setRoomCode] = useState(null);
+  const [myId, setMyId] = useState(null);
+
+  if (mode === "home") return <Home onSelect={setMode} />;
+  if (mode === "game" && roomCode && myId) {
+    return (
+      <GameRoom
+        roomCode={roomCode}
+        myId={myId}
+        onBack={() => {
+          setRoomCode(null);
+          setMyId(null);
+          setMode("home");
+        }}
+      />
+    );
+  }
+  return (
+    <JoinScreen
+      onJoined={(code, id) => {
+        setRoomCode(code);
+        setMyId(id);
+      }}
+      onBack={() => setMode("home")}
+    />
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
