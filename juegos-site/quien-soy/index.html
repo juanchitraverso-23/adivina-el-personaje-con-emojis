@@ -319,6 +319,9 @@ function Home({ onSelect }) {
       <BigButton onClick={() => onSelect("online")} color="#5B4B8A">
         🌐 Jugar Online
       </BigButton>
+      <BigButton onClick={() => onSelect("simultaneo")} color="#FFD23F" style={{ color: "#1B1035" }}>
+        🎉 Todos a la vez
+      </BigButton>
     </Screen>
   );
 }
@@ -328,6 +331,7 @@ function App() {
   const [mode, setMode] = useState("home");
   if (mode === "home") return <Home onSelect={setMode} />;
   if (mode === "online") return <OnlineGame onBack={() => setMode("home")} />;
+  if (mode === "simultaneo") return <SimultaneousGame onBack={() => setMode("home")} />;
   return <OfflineGame onBack={() => setMode("home")} />;
 }
 
@@ -1744,6 +1748,970 @@ function OnlineGame({ onBack }) {
           Salir de la sala
         </BigButton>
       </Screen>
+    );
+  }
+
+  return null;
+}
+
+// ============================================================
+// MODO "TODOS A LA VEZ": todos piensan un personaje y arman sus
+// pistas al mismo tiempo, y despues todos adivinan a todos en
+// simultaneo. Sala propia (prefijo distinto), un jugador por
+// celular. Cada ronda usa su propio numero (room.round) para que
+// "jugar de nuevo" no pise los personajes/progreso de la ronda
+// anterior: alcanza con subir el numero, no hace falta borrar nada.
+// ============================================================
+const SIM_STORAGE_PREFIX = "quiensoy-todos:sala:";
+const SIM_SESSION_KEY = "quien-soy-todos:sesion";
+const SIM_MAX_CLUES = 10;
+
+function simSecretKey(code, round, playerId) {
+  return SIM_STORAGE_PREFIX + code + ":r" + round + ":secret:" + playerId;
+}
+function simProgressKey(code, round, playerId) {
+  return SIM_STORAGE_PREFIX + code + ":r" + round + ":progress:" + playerId;
+}
+async function simReadRoom(code) {
+  try {
+    const res = await window.storage.get(SIM_STORAGE_PREFIX + code, true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function simWriteRoom(code, room) {
+  await window.storage.set(SIM_STORAGE_PREFIX + code, JSON.stringify(room), true);
+}
+async function simWriteSecret(code, round, playerId, secret) {
+  await window.storage.set(simSecretKey(code, round, playerId), JSON.stringify(secret), true);
+}
+async function simListSecrets(code, round) {
+  const prefix = simSecretKey(code, round, "");
+  let entries = [];
+  try {
+    entries = await window.storage.list(prefix);
+  } catch {
+    entries = [];
+  }
+  const map = {};
+  entries.forEach((e) => {
+    const playerId = e.key.slice(prefix.length);
+    try {
+      map[playerId] = JSON.parse(e.value);
+    } catch {}
+  });
+  return map;
+}
+async function simReadProgress(code, round, playerId) {
+  try {
+    const res = await window.storage.get(simProgressKey(code, round, playerId), true);
+    if (!res) return {};
+    return JSON.parse(res.value);
+  } catch {
+    return {};
+  }
+}
+async function simWriteProgress(code, round, playerId, data) {
+  await window.storage.set(simProgressKey(code, round, playerId), JSON.stringify(data), true);
+}
+async function simListProgress(code, round) {
+  const prefix = simProgressKey(code, round, "");
+  let entries = [];
+  try {
+    entries = await window.storage.list(prefix);
+  } catch {
+    entries = [];
+  }
+  const map = {};
+  entries.forEach((e) => {
+    const playerId = e.key.slice(prefix.length);
+    try {
+      map[playerId] = JSON.parse(e.value);
+    } catch {}
+  });
+  return map;
+}
+
+// -- coincidencia tolerante a errores de tipeo --
+function simNormalize(s) {
+  return String(s || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+function simLevenshtein(a, b) {
+  const m = a.length,
+    n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+function simIsMatch(guess, answers) {
+  const g = simNormalize(guess);
+  if (!g) return false;
+  return (answers || []).some((ans) => {
+    const a = simNormalize(ans);
+    if (!a) return false;
+    if (g === a) return true;
+    const tolerance = Math.max(1, Math.floor(Math.max(a.length, g.length) * 0.2));
+    return simLevenshtein(g, a) <= tolerance;
+  });
+}
+function simPointsFor(revealedAt) {
+  return Math.max(1, 11 - (revealedAt || 1));
+}
+
+function EmojiSequenceInput({ clues, setClues }) {
+  const [draft, setDraft] = useState("");
+  const addClue = (e) => {
+    if (clues.length >= SIM_MAX_CLUES) return;
+    setClues([...clues, e]);
+  };
+  const addCustom = () => {
+    const t = draft.trim();
+    if (!t) return;
+    addClue(t);
+    setDraft("");
+  };
+  const removeAt = (i) => setClues(clues.filter((_, idx) => idx !== i));
+
+  return (
+    <div style={{ marginTop: 6, marginBottom: 6 }}>
+      <div
+        style={{
+          fontSize: 13,
+          color: "#8b7fa8",
+          fontWeight: 700,
+          marginBottom: 6,
+        }}
+      >
+        Tus pistas en orden ({clues.length}/{SIM_MAX_CLUES}) — la primera es la que se ve primero
+      </div>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 6,
+          minHeight: 40,
+          marginBottom: 10,
+          padding: 8,
+          background: "rgba(0,0,0,0.18)",
+          borderRadius: 10,
+        }}
+      >
+        {clues.length === 0 && (
+          <span style={{ color: "#5a4d6e", fontSize: 13, alignSelf: "center" }}>
+            Todavía no pusiste ninguna pista
+          </span>
+        )}
+        {clues.map((c, i) => (
+          <button
+            key={i}
+            onClick={() => removeAt(i)}
+            title="Tocar para sacarla"
+            style={{
+              fontSize: 26,
+              background: "rgba(255,255,255,0.08)",
+              border: "none",
+              borderRadius: 8,
+              padding: "2px 6px",
+              cursor: "pointer",
+              position: "relative",
+            }}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(6, 1fr)",
+          gap: 6,
+          marginBottom: 10,
+        }}
+      >
+        {QUICK_EMOJIS.map((e) => (
+          <button
+            key={e}
+            onClick={() => addClue(e)}
+            disabled={clues.length >= SIM_MAX_CLUES}
+            style={{
+              fontSize: 22,
+              padding: "6px 0",
+              background: "rgba(255,255,255,0.06)",
+              border: "none",
+              borderRadius: 8,
+              cursor: clues.length >= SIM_MAX_CLUES ? "default" : "pointer",
+              opacity: clues.length >= SIM_MAX_CLUES ? 0.4 : 1,
+            }}
+          >
+            {e}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input
+          value={draft}
+          onChange={(ev) => setDraft(ev.target.value)}
+          onKeyDown={(ev) => ev.key === "Enter" && addCustom()}
+          placeholder="O pegá cualquier otro emoji"
+          style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
+        />
+        <button
+          onClick={addCustom}
+          disabled={clues.length >= SIM_MAX_CLUES}
+          style={{
+            background: "#5B4B8A",
+            color: "#F3EEFF",
+            border: "none",
+            borderRadius: 10,
+            padding: "0 16px",
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SimSetupScreen({ room, myId, secrets, onBack }) {
+  const [nameDraft, setNameDraft] = useState("");
+  const [aliasDraft, setAliasDraft] = useState("");
+  const [clues, setClues] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const mySecret = secrets[myId];
+
+  if (mySecret) {
+    const total = (room.players || []).length;
+    const doneCount = Object.keys(secrets).length;
+    return (
+      <Screen homeConfirm="¿Salir? Se pierde tu personaje para esta ronda.">
+        <div style={{ fontSize: 52, marginBottom: 10 }}>✅</div>
+        <Title size={22}>Ya armaste tus pistas</Title>
+        <Sub>Esperando a que todos terminen ({doneCount}/{total})...</Sub>
+      </Screen>
+    );
+  }
+
+  const confirm = async () => {
+    const name = nameDraft.trim();
+    if (!name || clues.length === 0 || saving) return;
+    setSaving(true);
+    const aliases = aliasDraft
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    await simWriteSecret(room.code, room.round || 1, myId, { answers: [name, ...aliases], clues });
+    setSaving(false);
+  };
+
+  return (
+    <Screen homeConfirm="¿Salir? Se pierde tu personaje para esta ronda.">
+      <Title size={22}>Pensá a alguien</Title>
+      <Sub style={{ marginTop: -10 }}>
+        Elegí una persona o personaje y describilo con hasta 10 emojis, en orden
+      </Sub>
+      <Card style={{ marginBottom: 16, width: "100%", maxWidth: 420 }}>
+        <input
+          value={nameDraft}
+          onChange={(e) => setNameDraft(e.target.value)}
+          placeholder="¿Quién es? (nadie más lo ve)"
+          style={inputStyle}
+        />
+        <input
+          value={aliasDraft}
+          onChange={(e) => setAliasDraft(e.target.value)}
+          placeholder="¿Se escribe de otra forma? (separá con coma, opcional)"
+          style={inputStyle}
+        />
+        <EmojiSequenceInput clues={clues} setClues={setClues} />
+      </Card>
+      <BigButton onClick={confirm} disabled={!nameDraft.trim() || clues.length === 0 || saving}>
+        {saving ? "Guardando..." : "Confirmar pistas ✅"}
+      </BigButton>
+    </Screen>
+  );
+}
+
+function SimTargetCard({ target, targetPlayer, myProgress, onGuess, onRequestClue }) {
+  const [guessDraft, setGuessDraft] = useState("");
+  const [wrongFlash, setWrongFlash] = useState(false);
+  const revealed = myProgress?.revealed || 1;
+  const solved = !!myProgress?.solved;
+  const cluesShown = (target.clues || []).slice(0, revealed);
+  const maxClues = Math.min(SIM_MAX_CLUES, (target.clues || []).length);
+  const canAskMore = !solved && revealed < maxClues;
+
+  const submit = async () => {
+    const text = guessDraft.trim();
+    if (!text || solved) return;
+    const ok = await onGuess(text);
+    if (ok) {
+      setGuessDraft("");
+    } else {
+      setWrongFlash(true);
+      setGuessDraft("");
+      setTimeout(() => setWrongFlash(false), 700);
+    }
+  };
+
+  return (
+    <Card style={{ marginBottom: 14, width: "100%", maxWidth: 420 }}>
+      <div
+        style={{
+          fontSize: 13,
+          color: "#8b7fa8",
+          fontWeight: 800,
+          marginBottom: 8,
+          textTransform: "uppercase",
+          letterSpacing: 1,
+        }}
+      >
+        {targetPlayer.name}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+        {cluesShown.map((c, i) => (
+          <div
+            key={i}
+            style={{ fontSize: 30, background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "4px 8px" }}
+          >
+            {c}
+          </div>
+        ))}
+      </div>
+      {solved ? (
+        <div style={{ color: "#3DDC84", fontWeight: 800, fontSize: 16 }}>
+          ✅ ¡Era {target.answers && target.answers[0]}! +{simPointsFor(myProgress.solvedAtRevealed)} pts
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <input
+              value={guessDraft}
+              onChange={(e) => setGuessDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submit()}
+              placeholder="¿Quién es?"
+              style={{
+                ...inputStyle,
+                marginBottom: 0,
+                flex: 1,
+                border: wrongFlash ? "2px solid #FF5D7A" : inputStyle.border,
+              }}
+            />
+            <button
+              onClick={submit}
+              style={{
+                background: "#FFD23F",
+                color: "#1B1035",
+                border: "none",
+                borderRadius: 10,
+                padding: "0 16px",
+                fontWeight: 800,
+                cursor: "pointer",
+              }}
+            >
+              OK
+            </button>
+          </div>
+          <button
+            onClick={onRequestClue}
+            disabled={!canAskMore}
+            style={{
+              background: "none",
+              border: "1px solid rgba(255,255,255,0.15)",
+              borderRadius: 10,
+              padding: "6px 10px",
+              color: canAskMore ? "#F3EEFF" : "#5a4d6e",
+              fontSize: 13,
+              cursor: canAskMore ? "pointer" : "default",
+              fontWeight: 700,
+            }}
+          >
+            🔍 Pedir otra pista ({revealed}/{maxClues})
+          </button>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function SimGuessingScreen({ room, myId, secrets, progressMap, setProgressMap, isHost, onEndRound, onLeave }) {
+  const others = (room.players || []).filter((p) => p.id !== myId);
+  const myProgress = progressMap[myId] || {};
+  const round = room.round || 1;
+
+  const submitGuess = async (targetId, guessText) => {
+    const target = secrets[targetId];
+    if (!target) return false;
+    const fresh = (await simReadProgress(room.code, round, myId)) || {};
+    const cur = fresh[targetId] || { revealed: 1, solved: false, solvedAtRevealed: null, wrongAttempts: [] };
+    if (cur.solved) return true;
+    const isRight = simIsMatch(guessText, target.answers);
+    const next = { ...fresh };
+    if (isRight) {
+      next[targetId] = { ...cur, solved: true, solvedAtRevealed: cur.revealed };
+    } else {
+      next[targetId] = { ...cur, wrongAttempts: [...(cur.wrongAttempts || []), { text: guessText, atRevealed: cur.revealed }] };
+    }
+    await simWriteProgress(room.code, round, myId, next);
+    setProgressMap((m) => ({ ...m, [myId]: next }));
+    return isRight;
+  };
+
+  const requestClue = async (targetId) => {
+    const target = secrets[targetId];
+    if (!target) return;
+    const fresh = (await simReadProgress(room.code, round, myId)) || {};
+    const cur = fresh[targetId] || { revealed: 1, solved: false, solvedAtRevealed: null, wrongAttempts: [] };
+    const maxClues = Math.min(SIM_MAX_CLUES, (target.clues || []).length);
+    if (cur.solved || cur.revealed >= maxClues) return;
+    const next = { ...fresh, [targetId]: { ...cur, revealed: cur.revealed + 1 } };
+    await simWriteProgress(room.code, round, myId, next);
+    setProgressMap((m) => ({ ...m, [myId]: next }));
+  };
+
+  const solvedCount = others.filter((o) => myProgress[o.id]?.solved).length;
+  const myScore = others.reduce((s, o) => {
+    const t = myProgress[o.id];
+    return s + (t && t.solved ? simPointsFor(t.solvedAtRevealed) : 0);
+  }, 0);
+
+  return (
+    <Screen homeConfirm="¿Salir? Se pierde tu progreso adivinando en esta ronda.">
+      <Title size={24}>Adiviná a los demás</Title>
+      <Sub style={{ marginTop: -10 }}>
+        Acertaste {solvedCount} de {others.length} — {myScore} pts
+      </Sub>
+      {others.map((o) => (
+        <SimTargetCard
+          key={o.id}
+          target={secrets[o.id] || { answers: [], clues: [] }}
+          targetPlayer={o}
+          myProgress={myProgress[o.id]}
+          onGuess={(text) => submitGuess(o.id, text)}
+          onRequestClue={() => requestClue(o.id)}
+        />
+      ))}
+      {isHost ? (
+        <BigButton onClick={onEndRound} color="#5B4B8A" style={{ marginTop: 6 }}>
+          🏁 Terminar ronda y ver resultados
+        </BigButton>
+      ) : (
+        <Sub style={{ fontSize: 13, color: "#8b7fa8" }}>El anfitrión/a corta la ronda cuando quiera.</Sub>
+      )}
+      <BigButton onClick={onLeave} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+        Salir de la sala
+      </BigButton>
+    </Screen>
+  );
+}
+
+function SimResultsScreen({ room, myId, secrets, progressMap, setProgressMap, isHost, onPlayAgain, onLeave }) {
+  const players = room.players || [];
+  const round = room.round || 1;
+  const scores = {};
+  players.forEach((p) => {
+    scores[p.id] = 0;
+  });
+  Object.entries(progressMap).forEach(([guesserId, targets]) => {
+    Object.entries(targets || {}).forEach(([targetId, t]) => {
+      if (t.solved) scores[guesserId] = (scores[guesserId] || 0) + simPointsFor(t.solvedAtRevealed);
+    });
+  });
+  const ranked = [...players].sort((a, b) => (scores[b.id] || 0) - (scores[a.id] || 0));
+  const medals = ["🥇", "🥈", "🥉"];
+
+  const markCorrect = async (guesserId, attemptIdx) => {
+    const fresh = (await simReadProgress(room.code, round, guesserId)) || {};
+    const cur = fresh[myId];
+    if (!cur || cur.solved) return;
+    const attempt = (cur.wrongAttempts || [])[attemptIdx];
+    if (!attempt) return;
+    const next = { ...fresh, [myId]: { ...cur, solved: true, solvedAtRevealed: attempt.atRevealed } };
+    await simWriteProgress(room.code, round, guesserId, next);
+    setProgressMap((m) => ({ ...m, [guesserId]: next }));
+  };
+
+  const pendingReviews = [];
+  players.forEach((p) => {
+    if (p.id === myId) return;
+    const t = progressMap[p.id] && progressMap[p.id][myId];
+    if (t && !t.solved && (t.wrongAttempts || []).length > 0) {
+      pendingReviews.push({ guesser: p, attempts: t.wrongAttempts });
+    }
+  });
+
+  return (
+    <Screen>
+      <Title size={26}>🏆 Resultados</Title>
+      <Card style={{ marginBottom: 20, width: "100%", maxWidth: 420 }}>
+        {ranked.map((p, i) => (
+          <div
+            key={p.id}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 10,
+              padding: "8px 2px",
+              borderBottom: i < ranked.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none",
+            }}
+          >
+            <span>
+              {medals[i] || `${i + 1}°`} {p.name}
+              {p.id === myId ? " (vos)" : ""} — era{" "}
+              <b style={{ color: "#FFD23F" }}>{(secrets[p.id] && secrets[p.id].answers && secrets[p.id].answers[0]) || "?"}</b>
+            </span>
+            <span style={{ color: "#FFD23F", fontWeight: 800, whiteSpace: "nowrap" }}>{scores[p.id] || 0}</span>
+          </div>
+        ))}
+      </Card>
+
+      {pendingReviews.length > 0 && (
+        <Card style={{ marginBottom: 20, width: "100%", maxWidth: 420 }}>
+          <div style={{ fontFamily: "'Baloo 2', sans-serif", color: "#FFD23F", marginBottom: 10, fontWeight: 700 }}>
+            ¿Alguna de estas en realidad iba? (tu personaje era{" "}
+            {secrets[myId] && secrets[myId].answers && secrets[myId].answers[0]})
+          </div>
+          {pendingReviews.map(({ guesser, attempts }) => (
+            <div key={guesser.id} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 13, color: "#C9B8F0", marginBottom: 4 }}>{guesser.name} probó:</div>
+              {attempts.map((a, i) => (
+                <button
+                  key={i}
+                  onClick={() => markCorrect(guesser.id, i)}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    background: "rgba(255,255,255,0.06)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 10,
+                    padding: "8px 12px",
+                    marginBottom: 6,
+                    color: "#F3EEFF",
+                    cursor: "pointer",
+                  }}
+                >
+                  "{a.text}" — <span style={{ color: "#FFD23F", fontWeight: 700 }}>marcar como correcta ✓</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {isHost && <BigButton onClick={onPlayAgain}>🔁 Jugar otra ronda</BigButton>}
+      <BigButton onClick={onLeave} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+        Salir de la sala
+      </BigButton>
+    </Screen>
+  );
+}
+
+function SimultaneousGame({ onBack }) {
+  const [screen, setScreen] = useState("join");
+  const [name, setName] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [openRooms, setOpenRooms] = useState([]);
+  const [resumable, setResumable] = useState(null);
+
+  const [roomCode, setRoomCode] = useState(null);
+  const [myId, setMyId] = useState(null);
+  const [room, setRoom] = useState(null);
+  const [secrets, setSecrets] = useState({});
+  const [progressMap, setProgressMap] = useState({});
+
+  useEffect(() => {
+    if (screen !== "join") return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const entries = await window.storage.list(SIM_STORAGE_PREFIX);
+        if (cancelled) return;
+        const rooms = entries
+          .map((e) => {
+            if (!/^quiensoy-todos:sala:[^:]+$/.test(e.key)) return null;
+            try {
+              return JSON.parse(e.value);
+            } catch {
+              return null;
+            }
+          })
+          .filter((r) => r && r.phase === "lobby" && Date.now() - (r.createdAt || 0) < 3 * 60 * 60 * 1000)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setOpenRooms(rooms);
+      } catch {}
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [screen]);
+
+  useEffect(() => {
+    if (screen !== "join") return;
+    let cancelled = false;
+    (async () => {
+      let saved;
+      try {
+        saved = JSON.parse(localStorage.getItem(SIM_SESSION_KEY) || "null");
+      } catch {
+        saved = null;
+      }
+      if (!saved || !saved.code || !saved.playerId) {
+        setResumable(null);
+        return;
+      }
+      const existing = await simReadRoom(saved.code);
+      if (cancelled) return;
+      if (existing && existing.players.some((p) => p.id === saved.playerId)) {
+        setResumable({
+          code: saved.code,
+          playerId: saved.playerId,
+          name: (existing.players.find((p) => p.id === saved.playerId) || {}).name,
+        });
+      } else {
+        localStorage.removeItem(SIM_SESSION_KEY);
+        setResumable(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [screen]);
+
+  const resumeSession = () => {
+    if (!resumable) return;
+    setRoomCode(resumable.code);
+    setMyId(resumable.playerId);
+    setScreen("game");
+  };
+
+  const doJoin = async (codeMaybe) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setJoinError("Escribí tu nombre.");
+      return;
+    }
+    setJoining(true);
+    setJoinError("");
+    try {
+      const code = codeMaybe || (codeInput.trim() ? codeInput.trim().toUpperCase() : randomCode());
+      let existing = await simReadRoom(code);
+      if (existing && existing.phase !== "lobby" && existing.phase !== "setup") {
+        setJoinError("Esa sala ya está adivinando. Esperá a que termine la ronda.");
+        setJoining(false);
+        return;
+      }
+      const me = { id: randomId(), name: trimmed, deviceId: MY_DEVICE_ID, joinedAt: Date.now() };
+      if (!existing) {
+        existing = {
+          code,
+          hostId: me.id,
+          players: [me],
+          phase: "lobby",
+          round: 1,
+          createdAt: Date.now(),
+        };
+      } else {
+        if (existing.players.some((p) => p.name.toLowerCase() === trimmed.toLowerCase())) {
+          setJoinError(`Ya hay alguien llamado "${trimmed}" en esa sala. Cambiá el nombre.`);
+          setJoining(false);
+          return;
+        }
+        existing.players = [...existing.players, me];
+      }
+      await simWriteRoom(code, existing);
+      localStorage.setItem(SIM_SESSION_KEY, JSON.stringify({ code, playerId: me.id }));
+      setRoomCode(code);
+      setMyId(me.id);
+      setScreen("game");
+    } catch (e) {
+      setJoinError("No se pudo conectar a la sala. Probá de nuevo.");
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const leaveRoom = async () => {
+    try {
+      const fresh = await simReadRoom(roomCode);
+      if (fresh) {
+        fresh.players = (fresh.players || []).filter((p) => p.id !== myId);
+        await simWriteRoom(roomCode, fresh);
+      }
+    } catch {}
+    localStorage.removeItem(SIM_SESSION_KEY);
+    onBack();
+  };
+
+  useEffect(() => {
+    if (!roomCode) return;
+    let cancelled = false;
+    const tick = async () => {
+      const r = await simReadRoom(roomCode);
+      if (cancelled || !r) return;
+      setRoom(r);
+      const round = r.round || 1;
+      if (r.phase === "setup" || r.phase === "guessing") {
+        const s = await simListSecrets(roomCode, round);
+        if (cancelled) return;
+        setSecrets(s);
+        if (r.phase === "setup" && r.players.length >= 2 && Object.keys(s).length >= r.players.length) {
+          const fresh = await simReadRoom(roomCode);
+          if (fresh && fresh.phase === "setup") {
+            fresh.phase = "guessing";
+            await simWriteRoom(roomCode, fresh);
+          }
+        }
+      }
+      if (r.phase === "guessing" || r.phase === "results") {
+        const p = await simListProgress(roomCode, round);
+        if (!cancelled) setProgressMap(p);
+      }
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [roomCode]);
+
+  const players = room?.players || [];
+  const effectiveHost =
+    players.find((p) => p.id === room?.hostId) ||
+    [...players].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0] ||
+    null;
+  const isHost = !!effectiveHost && effectiveHost.id === myId;
+
+  const passControlTo = async (targetId) => {
+    const fresh = await simReadRoom(roomCode);
+    if (!fresh) return;
+    fresh.hostId = targetId;
+    await simWriteRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  const startSetup = async () => {
+    const fresh = await simReadRoom(roomCode);
+    if (!fresh || fresh.players.length < 2) return;
+    fresh.phase = "setup";
+    await simWriteRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  const endRound = async () => {
+    const fresh = await simReadRoom(roomCode);
+    if (!fresh) return;
+    fresh.phase = "results";
+    await simWriteRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  const playAgain = async () => {
+    const fresh = await simReadRoom(roomCode);
+    if (!fresh) return;
+    fresh.round = (fresh.round || 1) + 1;
+    fresh.phase = "setup";
+    await simWriteRoom(roomCode, fresh);
+    setRoom(fresh);
+    setSecrets({});
+    setProgressMap({});
+  };
+
+  if (screen === "join") {
+    return (
+      <Screen>
+        <Title size={26}>Todos a la vez</Title>
+        <Sub style={{ marginTop: -10 }}>Todos piensan un personaje y después se adivinan entre todos</Sub>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Tu nombre"
+            style={inputStyle}
+          />
+          <input
+            value={codeInput}
+            onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+            placeholder="Código de sala (opcional)"
+            style={inputStyle}
+          />
+          {joinError && <div style={{ color: "#FF5D7A", fontSize: 13, marginBottom: 8 }}>{joinError}</div>}
+          <BigButton onClick={() => doJoin(null)} disabled={joining}>
+            {codeInput.trim() ? "Unirme a esa sala" : "Crear sala nueva"}
+          </BigButton>
+        </Card>
+
+        {resumable && (
+          <Card style={{ width: "100%", maxWidth: 420 }}>
+            <Sub style={{ marginTop: 0 }}>
+              Ya estabas en la sala <b>{resumable.code}</b> como {resumable.name}
+            </Sub>
+            <BigButton onClick={resumeSession} color="#5B4B8A">
+              Volver a esa sala
+            </BigButton>
+          </Card>
+        )}
+
+        {openRooms.length > 0 && (
+          <Card style={{ width: "100%", maxWidth: 420 }}>
+            <div style={{ fontSize: 13, color: "#8b7fa8", fontWeight: 700, marginBottom: 8 }}>Salas abiertas ahora</div>
+            {openRooms.map((r) => (
+              <button
+                key={r.code}
+                onClick={() => {
+                  setCodeInput(r.code);
+                  doJoin(r.code);
+                }}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  width: "100%",
+                  background: "rgba(255,255,255,0.06)",
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                  marginBottom: 6,
+                  color: "#F3EEFF",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                <span>{r.code}</span>
+                <span style={{ color: "#8b7fa8" }}>{(r.players || []).length} jugador(es)</span>
+              </button>
+            ))}
+          </Card>
+        )}
+
+        <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Volver
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  if (!room) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <Sub>Cargando sala...</Sub>
+      </Screen>
+    );
+  }
+
+  if (room.phase === "lobby") {
+    return (
+      <Screen homeConfirm="¿Salir de la sala?">
+        <Title size={26}>Sala {room.code}</Title>
+        <Sub style={{ marginTop: -10 }}>Compartí el código para que se sumen. Mínimo 2 jugadores.</Sub>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          {players.map((p) => (
+            <div key={p.id} style={{ padding: "6px 2px", color: "#F3EEFF" }}>
+              {p.id === effectiveHost?.id ? "👑 " : "• "}
+              {p.name}
+              {p.id === myId ? " (vos)" : ""}
+            </div>
+          ))}
+        </Card>
+        {isHost ? (
+          <>
+            <BigButton onClick={startSetup} disabled={players.length < 2}>
+              {players.length < 2 ? "Esperando otro jugador..." : "Empezar 🎬"}
+            </BigButton>
+            {players.length > 1 && (
+              <Card style={{ width: "100%", maxWidth: 420 }}>
+                <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6 }}>Pasarle el mando a otro/a</div>
+                {players
+                  .filter((p) => p.id !== myId)
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => passControlTo(p.id)}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        textAlign: "left",
+                        background: "rgba(255,255,255,0.06)",
+                        border: "none",
+                        borderRadius: 8,
+                        padding: "8px 10px",
+                        marginBottom: 4,
+                        color: "#F3EEFF",
+                        cursor: "pointer",
+                      }}
+                    >
+                      👑 {p.name}
+                    </button>
+                  ))}
+              </Card>
+            )}
+          </>
+        ) : (
+          <Sub>Esperando a que {effectiveHost ? effectiveHost.name : "el anfitrión/a"} empiece...</Sub>
+        )}
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  if (room.phase === "setup") {
+    return <SimSetupScreen room={room} myId={myId} secrets={secrets} onBack={leaveRoom} />;
+  }
+
+  if (room.phase === "guessing") {
+    return (
+      <SimGuessingScreen
+        room={room}
+        myId={myId}
+        secrets={secrets}
+        progressMap={progressMap}
+        setProgressMap={setProgressMap}
+        isHost={isHost}
+        onEndRound={endRound}
+        onLeave={leaveRoom}
+      />
+    );
+  }
+
+  if (room.phase === "results") {
+    return (
+      <SimResultsScreen
+        room={room}
+        myId={myId}
+        secrets={secrets}
+        progressMap={progressMap}
+        setProgressMap={setProgressMap}
+        isHost={isHost}
+        onPlayAgain={playAgain}
+        onLeave={leaveRoom}
+      />
     );
   }
 
