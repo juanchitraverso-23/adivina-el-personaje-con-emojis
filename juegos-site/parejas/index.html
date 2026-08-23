@@ -590,6 +590,7 @@ function JoinScreen({ mode, gameMode, onBack, onEntered }) {
         existing.players = [...players, me];
       }
       await writeRoom(code, existing);
+      window.storage.incrementCounter("players").catch(() => {});
       localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: me.id }));
       onEntered(code, me.id);
     } catch (e) {

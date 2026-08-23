@@ -731,6 +731,7 @@ function OnlineGame({ onBack }) {
       const avatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
       existing.players.push({ id, name: trimmedName, avatar, score: 0, joinedAt: Date.now() });
       await writeRoom(code, existing);
+      window.storage.incrementCounter("players").catch(() => {});
       localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: id, name: trimmedName }));
       setRoom(existing);
       setRoomCode(code);
@@ -909,6 +910,7 @@ function OnlineGame({ onBack }) {
         existing.players.push({ id, name: trimmedName, avatar, score: 0, joinedAt: Date.now() });
       }
       await writeRoom(code, existing);
+      window.storage.incrementCounter("players").catch(() => {});
       localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: id, name: trimmedName }));
       setRoom(existing);
       setRoomCode(code);

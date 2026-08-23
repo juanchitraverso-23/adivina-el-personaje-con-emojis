@@ -13,7 +13,7 @@ const ROOM_TTL_SECONDS = 6 * 60 * 60; // las salas se autolimpian a las 6hs de i
 function withCors(resp) {
   const headers = new Headers(resp.headers);
   headers.set("Access-Control-Allow-Origin", "*");
-  headers.set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS");
+  headers.set("Access-Control-Allow-Methods", "GET, PUT, POST, OPTIONS");
   headers.set("Access-Control-Allow-Headers", "Content-Type");
   return new Response(resp.body, { status: resp.status, headers });
 }
@@ -46,6 +46,41 @@ export default {
           headers: { "content-type": "application/json; charset=utf-8" },
         })
       );
+    }
+
+    // Contador persistente (sin vencimiento, a diferencia de las salas que se
+    // autolimpian a las 6hs): lo usa la home para mostrar cuánta gente jugó
+    // en total. Cada "entrada" a un juego suma, aunque sea el mismo celu
+    // entrando de nuevo o a otro juego — así lo pidió el dueño del sitio.
+    if (url.pathname.startsWith("/api/counter/")) {
+      if (request.method === "OPTIONS") return withCors(new Response(null, { status: 204 }));
+
+      const rest = url.pathname.slice("/api/counter/".length); // "<nombre>" o "<nombre>/increment"
+      const parts = rest.split("/");
+      const name = decodeURIComponent(parts[0] || "");
+      const isIncrement = parts[1] === "increment";
+      if (!name) return withCors(new Response("Falta el nombre del contador", { status: 400 }));
+      const key = "counter:" + name;
+
+      if (isIncrement && request.method === "POST") {
+        let by = 1;
+        let setTo = null;
+        try {
+          const body = await request.json();
+          if (body && Number.isFinite(body.by) && body.by > 0 && body.by <= 100) by = Math.floor(body.by);
+          if (body && Number.isFinite(body.set) && body.set >= 0) setTo = Math.floor(body.set);
+        } catch {}
+        const next = setTo !== null ? setTo : (parseInt((await env.ROOMS.get(key)) || "0", 10) || 0) + by;
+        await env.ROOMS.put(key, String(next)); // sin expirationTtl: este queda para siempre
+        return withCors(new Response(String(next), { headers: { "content-type": "text/plain" } }));
+      }
+
+      if (!isIncrement && request.method === "GET") {
+        const current = parseInt((await env.ROOMS.get(key)) || "0", 10) || 0;
+        return withCors(new Response(String(current), { headers: { "content-type": "text/plain" } }));
+      }
+
+      return withCors(new Response("Method not allowed", { status: 405 }));
     }
 
     if (url.pathname.startsWith("/api/kv/")) {

@@ -43,11 +43,26 @@
   .emoji { font-size: 34px; }
   .name { font-family: 'Baloo 2', sans-serif; font-weight: 700; font-size: 18px; color: #F3EEFF; }
   .tag { font-size: 12px; color: #C9B8F0; }
+  .counter {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 30px;
+    padding: 8px 18px;
+    margin: -12px 0 26px;
+    font-size: 14px;
+    color: #C9B8F0;
+    font-weight: 700;
+  }
+  .counter b { color: #FFD23F; font-family: 'Baloo 2', sans-serif; }
 </style>
 </head>
 <body>
   <div style="font-size:56px;">🎉</div>
   <h1>Juegos de JX</h1>
+  <div class="counter" id="playerCounter"></div>
 
   <a class="card" href="./quien-soy/">
     <div class="emoji">🕵️‍♂️</div>
@@ -88,5 +103,21 @@
       <div class="tag">Contá, atacá, sobreviví</div>
     </div>
   </a>
+
+  <script src="./storage.js"></script>
+  <script>
+    (async function () {
+      try {
+        const total = await window.storage.getCounter("players");
+        const el = document.getElementById("playerCounter");
+        if (el && total > 0) {
+          el.innerHTML = "🎮 <b>" + total.toLocaleString("es-AR") + "</b> jugadores entraron a jugar";
+          el.style.display = "flex";
+        }
+      } catch (e) {
+        // sin contador visible, no molesta a nadie
+      }
+    })();
+  </script>
 </body>
 </html>

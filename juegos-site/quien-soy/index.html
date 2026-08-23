@@ -1008,6 +1008,7 @@ function OnlineGame({ onBack }) {
       existing.players = [...existing.players, ...newPlayers];
     }
     await writeRoom(code, existing);
+    window.storage.incrementCounter("players", newPlayers.length).catch(() => {});
     localStorage.setItem(SESSION_KEY, JSON.stringify({ code }));
     setRoom(existing);
     setRoomCode(code);
@@ -2445,6 +2446,7 @@ function SimultaneousGame({ onBack }) {
         existing.players = [...existing.players, me];
       }
       await simWriteRoom(code, existing);
+      window.storage.incrementCounter("players").catch(() => {});
       localStorage.setItem(SIM_SESSION_KEY, JSON.stringify({ code, playerId: me.id }));
       setRoomCode(code);
       setMyId(me.id);

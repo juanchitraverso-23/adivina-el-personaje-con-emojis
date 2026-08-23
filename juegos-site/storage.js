@@ -33,5 +33,24 @@
     return res.json(); // [{ key, value }]
   }
 
-  window.storage = { get, set, list };
+  // Contador persistente (nunca vence, a diferencia de las claves de sala).
+  // incrementCounter suma "by" (1 por default) y devuelve el total nuevo;
+  // getCounter solo lee el total actual. Uso: contar entradas de jugadores
+  // en la home, entre otros contadores que hagan falta a futuro.
+  async function incrementCounter(name, by) {
+    const res = await fetch("/api/counter/" + encodeURIComponent(name) + "/increment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ by: by || 1 }),
+    });
+    if (!res.ok) throw new Error("incrementCounter falló: " + res.status);
+    return parseInt(await res.text(), 10);
+  }
+  async function getCounter(name) {
+    const res = await fetch("/api/counter/" + encodeURIComponent(name));
+    if (!res.ok) throw new Error("getCounter falló: " + res.status);
+    return parseInt(await res.text(), 10);
+  }
+
+  window.storage = { get, set, list, incrementCounter, getCounter };
 })();
