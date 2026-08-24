@@ -384,16 +384,42 @@ function SequenceTrail({ step, progress }) {
   );
 }
 
+function GridInstruction() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        justifyContent: "center",
+        background: "rgba(255,210,63,0.12)",
+        border: "1.5px solid rgba(255,210,63,0.45)",
+        borderRadius: 14,
+        padding: "10px 18px",
+        marginBottom: 18,
+        fontWeight: 800,
+        fontFamily: "'Baloo 2', sans-serif",
+        color: "#FFD23F",
+        fontSize: 17,
+        textAlign: "center",
+      }}
+    >
+      🔽 Tocá de MAYOR a MENOR
+    </div>
+  );
+}
+
 function GridBoard({ task, progress, onTap, shake }) {
   const sorted = [...task.numbers].sort((a, b) => b - a);
+  const fontSize = task.size >= 5 ? 22 : task.size === 4 ? 26 : 32;
   return (
     <div
       style={{
         display: "grid",
         gridTemplateColumns: `repeat(${task.size}, 1fr)`,
-        gap: 8,
+        gap: task.size >= 5 ? 8 : 10,
         width: "100%",
-        maxWidth: 340,
+        maxWidth: 460,
         marginBottom: 16,
         padding: 8,
         borderRadius: 14,
@@ -410,9 +436,9 @@ function GridBoard({ task, progress, onTap, shake }) {
             disabled={done}
             style={{
               aspectRatio: "1",
-              borderRadius: 10,
+              borderRadius: 12,
               border: "none",
-              fontSize: task.size >= 5 ? 16 : 20,
+              fontSize,
               fontWeight: 800,
               fontFamily: "'Baloo 2', sans-serif",
               cursor: done ? "default" : "pointer",
@@ -752,7 +778,10 @@ function PracticeGame({ onBack }) {
   }
 
   return (
-    <Screen homeConfirm={finished ? null : "¿Salir? Perdés el tiempo de este intento."}>
+    <Screen
+      homeConfirm={finished ? null : "¿Salir? Perdés el tiempo de este intento."}
+      style={task && task.type === "grid" ? { justifyContent: "center" } : undefined}
+    >
       <Title size={24}>🏋️ Practicando</Title>
       <div
         style={{
@@ -782,7 +811,10 @@ function PracticeGame({ onBack }) {
           </BigButton>
         </Card>
       ) : task.type === "grid" ? (
-        <GridBoard task={task} progress={progress} onTap={tapCell} shake={wrongFlash} />
+        <>
+          <GridInstruction />
+          <GridBoard task={task} progress={progress} onTap={tapCell} shake={wrongFlash} />
+        </>
       ) : (
         <>
           <Sub style={{ marginTop: -6 }}>
@@ -1363,7 +1395,10 @@ function GameRoom({ roomCode, myId, onBack }) {
   };
 
   return (
-    <Screen homeConfirm="¿Salir? Perdés tu progreso de esta partida.">
+    <Screen
+      homeConfirm="¿Salir? Perdés tu progreso de esta partida."
+      style={myState && myState.queue && myState.queue[0] && myState.queue[0].type === "grid" ? { justifyContent: "center" } : undefined}
+    >
       <Title size={22}>Sala {room.code}</Title>
       <PlayerBadgeRow players={players} playerStates={playerStates} myId={myId} />
 
@@ -1376,9 +1411,7 @@ function GameRoom({ roomCode, myId, onBack }) {
       ) : myState && myState.queue && myState.queue.length > 0 ? (
         myState.queue[0].type === "grid" ? (
           <>
-            <Sub style={{ marginTop: -6 }}>
-              Tocá los números de <b style={{ color: "#FFD23F" }}>mayor a menor</b>
-            </Sub>
+            <GridInstruction />
             <GridBoard task={myState.queue[0]} progress={myState.progress} onTap={tapCell} shake={wrongFlash} />
           </>
         ) : (
