@@ -37,6 +37,7 @@ const DEFAULT_MAX_QUEUE = 8;
 const BASE_QUEUE_SIZE = 5;
 const STEP_MIN = 8;
 const STEP_MAX = 27;
+const PRACTICE_BEST_KEY = "secuencias:practica:mejores";
 
 const PLAYER_COLORS = ["#FF3E7F", "#5B4B8A", "#FFD23F", "#3DDC84", "#4FC3F7", "#FF9F1C", "#B983FF", "#FF6B6B"];
 
@@ -610,8 +611,208 @@ function Home({ onSelect }) {
         se le acumulan demasiadas, queda eliminado. ¡Gana el último en pie!
       </Sub>
       <BigButton onClick={() => onSelect("game")} color="#FF3E7F">
-        🎮 Jugar
+        🎮 Jugar con otros
       </BigButton>
+      <BigButton onClick={() => onSelect("practice")} color="#5B4B8A">
+        🏋️ Practicar solo/a
+      </BigButton>
+    </Screen>
+  );
+}
+
+function PracticeGame({ onBack }) {
+  const [taskType, setTaskType] = useState("seq");
+  const [gridSize, setGridSize] = useState(3);
+  const [started, setStarted] = useState(false);
+  const [task, setTask] = useState(null);
+  const [progress, setProgress] = useState(0);
+  const [typedDraft, setTypedDraft] = useState("");
+  const [wrongFlash, setWrongFlash] = useState(false);
+  const [startTime, setStartTime] = useState(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const [finalMs, setFinalMs] = useState(null);
+  const [bestMs, setBestMs] = useState(null);
+  const [isNewBest, setIsNewBest] = useState(false);
+
+  const practiceKey = taskType === "grid" ? `grid-${gridSize}` : "seq";
+
+  useEffect(() => {
+    try {
+      const all = JSON.parse(localStorage.getItem(PRACTICE_BEST_KEY) || "{}");
+      setBestMs(all[practiceKey] != null ? all[practiceKey] : null);
+    } catch {
+      setBestMs(null);
+    }
+  }, [practiceKey]);
+
+  useEffect(() => {
+    if (!started || finished || !startTime) return;
+    const id = setInterval(() => setElapsedMs(Date.now() - startTime), 100);
+    return () => clearInterval(id);
+  }, [started, finished, startTime]);
+
+  const fmt = (ms) => (Math.max(0, ms) / 1000).toFixed(1) + "s";
+
+  const newTask = () => {
+    setTask(randomTask(taskType, gridSize));
+    setProgress(0);
+    setTypedDraft("");
+    setFinished(false);
+    setFinalMs(null);
+    setIsNewBest(false);
+    setElapsedMs(0);
+    setStartTime(Date.now());
+    setStarted(true);
+  };
+
+  const finishTask = (ms) => {
+    setFinished(true);
+    setFinalMs(ms);
+    try {
+      const all = JSON.parse(localStorage.getItem(PRACTICE_BEST_KEY) || "{}");
+      const prevBest = all[practiceKey];
+      if (prevBest == null || ms < prevBest) {
+        all[practiceKey] = ms;
+        localStorage.setItem(PRACTICE_BEST_KEY, JSON.stringify(all));
+        setBestMs(ms);
+        setIsNewBest(true);
+      }
+    } catch {}
+  };
+
+  const submitDigit = () => {
+    if (!task || finished || !typedDraft) return;
+    const answers = expectedAnswers(task);
+    const expected = answers[progress];
+    const typed = parseInt(typedDraft, 10);
+    if (typed === expected) {
+      const isLast = progress + 1 >= answers.length;
+      setTypedDraft("");
+      if (isLast) finishTask(Date.now() - startTime);
+      else setProgress(progress + 1);
+    } else {
+      setWrongFlash(true);
+      setTypedDraft("");
+      setTimeout(() => setWrongFlash(false), 500);
+    }
+  };
+
+  const tapCell = (idx) => {
+    if (!task || finished) return;
+    const answers = expectedAnswers(task);
+    const expected = answers[progress];
+    const value = task.numbers[idx];
+    if (value !== expected) {
+      setWrongFlash(true);
+      setTimeout(() => setWrongFlash(false), 500);
+      return;
+    }
+    const isLast = progress + 1 >= answers.length;
+    if (isLast) finishTask(Date.now() - startTime);
+    else setProgress(progress + 1);
+  };
+
+  if (!started) {
+    return (
+      <Screen>
+        <Title size={26}>🏋️ Practicar</Title>
+        <Sub style={{ marginTop: -10 }}>Solo/a, contra el reloj — sin ataques ni rivales</Sub>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Tipo de ejercicio</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: taskType === "grid" ? 10 : 0 }}>
+            <button onClick={() => setTaskType("seq")} style={pillStyle(taskType !== "grid")}>
+              🔢 Secuencias
+            </button>
+            <button onClick={() => setTaskType("grid")} style={pillStyle(taskType === "grid")}>
+              🔳 Grilla
+            </button>
+          </div>
+          {taskType === "grid" && (
+            <div style={{ display: "flex", gap: 8 }}>
+              {[3, 4, 5].map((n) => (
+                <button key={n} onClick={() => setGridSize(n)} style={pillStyle(gridSize === n)}>
+                  {n}x{n}
+                </button>
+              ))}
+            </div>
+          )}
+        </Card>
+        {bestMs != null && (
+          <Sub style={{ marginTop: -6 }}>
+            🏆 Tu mejor tiempo acá: <b style={{ color: "#FFD23F" }}>{fmt(bestMs)}</b>
+          </Sub>
+        )}
+        <BigButton onClick={newTask}>Empezar ▶️</BigButton>
+        <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Volver
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen homeConfirm={finished ? null : "¿Salir? Perdés el tiempo de este intento."}>
+      <Title size={24}>🏋️ Practicando</Title>
+      <div
+        style={{
+          fontSize: 40,
+          fontWeight: 800,
+          fontFamily: "'Baloo 2', sans-serif",
+          color: finished ? (isNewBest ? "#3DDC84" : "#FFD23F") : "#F3EEFF",
+          marginBottom: 2,
+        }}
+      >
+        {fmt(finished ? finalMs : elapsedMs)}
+      </div>
+      {bestMs != null && (
+        <Sub style={{ marginTop: 0, fontSize: 13 }}>Mejor marca: {fmt(bestMs)}</Sub>
+      )}
+
+      {finished ? (
+        <Card style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
+          {isNewBest && <div style={{ color: "#3DDC84", fontWeight: 800, marginBottom: 10 }}>🎉 ¡Nueva mejor marca!</div>}
+          <BigButton onClick={newTask}>Otra 🔁</BigButton>
+          <BigButton
+            onClick={() => setStarted(false)}
+            color="transparent"
+            style={{ boxShadow: "none", color: "#C9B8F0" }}
+          >
+            Cambiar ejercicio
+          </BigButton>
+        </Card>
+      ) : task.type === "grid" ? (
+        <GridBoard task={task} progress={progress} onTap={tapCell} shake={wrongFlash} />
+      ) : (
+        <>
+          <Sub style={{ marginTop: -6 }}>
+            Contá de <b style={{ color: "#FFD23F" }}>{task.step}</b> en {task.step}
+          </Sub>
+          <SequenceTrail step={task.step} progress={progress} />
+          <input
+            value={typedDraft}
+            onChange={(e) => setTypedDraft(e.target.value.replace(/[^0-9]/g, ""))}
+            onKeyDown={(e) => e.key === "Enter" && submitDigit()}
+            inputMode="numeric"
+            placeholder="?"
+            style={{
+              ...inputStyle,
+              maxWidth: 300,
+              textAlign: "center",
+              fontSize: 28,
+              fontWeight: 800,
+              fontFamily: "'Baloo 2', sans-serif",
+              border: wrongFlash ? "2px solid #FF5D7A" : inputStyle.border,
+            }}
+          />
+          <NumericKeypad draft={typedDraft} setDraft={setTypedDraft} onEnter={submitDigit} disabled={false} />
+        </>
+      )}
+      {!finished && (
+        <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0", marginTop: 12 }}>
+          Salir
+        </BigButton>
+      )}
     </Screen>
   );
 }
@@ -1238,6 +1439,7 @@ function App() {
   const [myId, setMyId] = useState(null);
 
   if (mode === "home") return <Home onSelect={setMode} />;
+  if (mode === "practice") return <PracticeGame onBack={() => setMode("home")} />;
   if (mode === "game" && roomCode && myId) {
     return (
       <GameRoom
