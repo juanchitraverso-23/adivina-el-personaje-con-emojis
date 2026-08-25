@@ -1059,13 +1059,21 @@ function GameRoom({ roomCode, myId, onBack }) {
   const pendingWritesRef = useRef(0);
   const syncingRef = useRef(false);
   const syncDirtyRef = useRef(false);
+  // Cuántas grillas tenía mi cola la última vez que supimos con certeza qué
+  // tenía el servidor (recién leído, o recién escrito por mí). Comparar la
+  // cola fresca contra ESTO — y no contra el largo de mi cola local actual —
+  // es lo que distingue "llegó un ataque nuevo" de "todavía no sincronicé
+  // que yo misma acorté mi cola al completar una grilla": si comparara
+  // contra mi cola local, completar una grilla (que la acorta) haría
+  // parecer que el servidor "tiene de más", y ese sobrante (en realidad la
+  // grilla vieja que ya completé) se volvería a agregar solo.
+  const lastKnownServerQueueLenRef = useRef(0);
 
   // Persiste myLiveStateRef.current al servidor. Relee fresco justo antes de
   // escribir y conserva cualquier grilla extra que haya llegado por ataque
-  // desde la última vez que sincronizamos (fresh.queue puede ser más larga
-  // que la que conocíamos localmente). Se corre en loop propio: si durante
-  // una sincronización se pide otra (por otro click), no se pisan ni se
-  // amontonan pedidos — cuando termina la que está en curso, vuelve a
+  // desde la última vez que sincronizamos. Se corre en loop propio: si
+  // durante una sincronización se pide otra (por otro click), no se pisan
+  // ni se amontonan pedidos — cuando termina la que está en curso, vuelve a
   // sincronizar una vez más con el estado más nuevo, y listo.
   const runSyncLoop = async (roomCode, round, myId) => {
     if (syncingRef.current) return;
@@ -1077,18 +1085,28 @@ function GameRoom({ roomCode, myId, onBack }) {
         const cur = myLiveStateRef.current;
         if (!cur) break;
         const fresh = (await readPlayerState(roomCode, round, myId)) || cur;
-        const liveQueue = myLiveStateRef.current.queue || [];
-        const extra = (fresh.queue || []).length > liveQueue.length ? fresh.queue.slice(liveQueue.length) : [];
-        const liveNow = myLiveStateRef.current;
+        const freshQueueLen = (fresh.queue || []).length;
+        let liveNow = myLiveStateRef.current;
+        let liveQueue = liveNow.queue || [];
+        if (freshQueueLen > lastKnownServerQueueLenRef.current) {
+          // Esto sí es nuevo desde la última vez que supimos del servidor
+          // (un ataque que llegó mientras tanto): lo sumamos al final.
+          const extra = fresh.queue.slice(lastKnownServerQueueLenRef.current);
+          liveQueue = liveQueue.concat(extra);
+          liveNow = { ...liveNow, queue: liveQueue };
+          myLiveStateRef.current = liveNow;
+          setPlayerStates((m) => ({ ...m, [myId]: liveNow }));
+        }
         const merged = {
           ...fresh,
-          queue: liveQueue.concat(extra),
+          queue: liveQueue,
           solvedCount: liveNow.solvedCount,
           lastAttacked: liveNow.lastAttacked,
           alive: liveNow.alive === false || fresh.alive === false ? false : true,
           eliminatedAt: liveNow.eliminatedAt || fresh.eliminatedAt || null,
         };
         await writePlayerState(roomCode, round, myId, merged);
+        lastKnownServerQueueLenRef.current = merged.queue.length;
       }
     } finally {
       syncingRef.current = false;
@@ -1134,7 +1152,10 @@ function GameRoom({ roomCode, myId, onBack }) {
         // estado local (ni la referencia síncrona que usan los clicks) con
         // esta lectura del server, que puede no reflejar todavía el último
         // click.
-        if (pendingWritesRef.current === 0) myLiveStateRef.current = states[myId] || myLiveStateRef.current;
+        if (pendingWritesRef.current === 0) {
+          myLiveStateRef.current = states[myId] || myLiveStateRef.current;
+          lastKnownServerQueueLenRef.current = (myLiveStateRef.current && myLiveStateRef.current.queue || []).length;
+        }
         setPlayerStates((prev) =>
           pendingWritesRef.current > 0 && prev[myId] ? { ...states, [myId]: prev[myId] } : states
         );
@@ -1207,6 +1228,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     await writeRoom(roomCode, fresh);
     setRoom(fresh);
     myLiveStateRef.current = newStates[myId] || null;
+    lastKnownServerQueueLenRef.current = (newStates[myId] && newStates[myId].queue || []).length;
     setPlayerStates(newStates);
   };
 

@@ -1046,6 +1046,74 @@ function GameRoom({ roomCode, myId, onBack }) {
   const [typedDraft, setTypedDraft] = useState("");
   const [wrongFlash, setWrongFlash] = useState(false);
   const [showTargetPicker, setShowTargetPicker] = useState(false);
+  // Cada dígito/toque aplica YA en lo local (instantáneo, sin esperar red)
+  // y el guardado real al servidor pasa en segundo plano — mismo esquema
+  // que Bloques en Cadena. myLiveStateRef es la fuente de verdad de "mi
+  // estado" en todo momento (síncrona, nunca desactualizada entre toques
+  // rápidos). El sync relee el servidor recién antes de escribir y solo
+  // "estampa" mi progreso encima, preservando cualquier tarea que haya
+  // llegado por ataque mientras tanto.
+  const myLiveStateRef = useRef(null);
+  const pendingWritesRef = useRef(0);
+  const syncingRef = useRef(false);
+  const syncDirtyRef = useRef(false);
+  // Cuántos elementos tenía mi cola la última vez que supimos con certeza
+  // qué tenía el servidor (recién leído, o recién escrito por mí). Comparar
+  // la cola fresca contra ESTO — y no contra el largo de mi cola local
+  // actual — es lo que distingue "llegó un ataque nuevo" de "todavía no
+  // sincronicé que yo misma acorté mi cola al completar una tarea": si
+  // comparara contra mi cola local, completar una tarea (que la acorta)
+  // haría parecer que el servidor "tiene de más", y ese sobrante (en
+  // realidad la tarea vieja que ya completé) se volvería a agregar solo.
+  const lastKnownServerQueueLenRef = useRef(0);
+
+  const runSyncLoop = async (roomCode, round, myId) => {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+    pendingWritesRef.current += 1;
+    try {
+      while (syncDirtyRef.current) {
+        syncDirtyRef.current = false;
+        const cur = myLiveStateRef.current;
+        if (!cur) break;
+        const fresh = (await readPlayerState(roomCode, round, myId)) || cur;
+        const freshQueueLen = (fresh.queue || []).length;
+        let liveNow = myLiveStateRef.current;
+        let liveQueue = liveNow.queue || [];
+        if (freshQueueLen > lastKnownServerQueueLenRef.current) {
+          // Esto sí es nuevo desde la última vez que supimos del servidor
+          // (un ataque que llegó mientras tanto): lo sumamos al final.
+          const extra = fresh.queue.slice(lastKnownServerQueueLenRef.current);
+          liveQueue = liveQueue.concat(extra);
+          liveNow = { ...liveNow, queue: liveQueue };
+          myLiveStateRef.current = liveNow;
+          setPlayerStates((m) => ({ ...m, [myId]: liveNow }));
+        }
+        const merged = {
+          ...fresh,
+          queue: liveQueue,
+          progress: liveNow.progress,
+          lastAttacked: liveNow.lastAttacked,
+          alive: liveNow.alive === false || fresh.alive === false ? false : true,
+          eliminatedAt: liveNow.eliminatedAt || fresh.eliminatedAt || null,
+        };
+        await writePlayerState(roomCode, round, myId, merged);
+        lastKnownServerQueueLenRef.current = merged.queue.length;
+      }
+    } finally {
+      syncingRef.current = false;
+      pendingWritesRef.current = Math.max(0, pendingWritesRef.current - 1);
+    }
+  };
+  const scheduleSync = () => {
+    syncDirtyRef.current = true;
+    runSyncLoop(roomCode, room ? room.round || 1 : 1, myId);
+  };
+  const setMyStateNow = (next) => {
+    myLiveStateRef.current = next;
+    setPlayerStates((m) => ({ ...m, [myId]: next }));
+    scheduleSync();
+  };
 
   const leaveRoom = async () => {
     try {
@@ -1069,7 +1137,13 @@ function GameRoom({ roomCode, myId, onBack }) {
       if (r.phase === "playing" || r.phase === "ended") {
         const states = await listPlayerStates(roomCode, round);
         if (cancelled) return;
-        setPlayerStates(states);
+        if (pendingWritesRef.current === 0) {
+          myLiveStateRef.current = states[myId] || myLiveStateRef.current;
+          lastKnownServerQueueLenRef.current = (myLiveStateRef.current && myLiveStateRef.current.queue || []).length;
+        }
+        setPlayerStates((prev) =>
+          pendingWritesRef.current > 0 && prev[myId] ? { ...states, [myId]: prev[myId] } : states
+        );
 
         if (r.phase === "playing") {
           const aliveList = (r.players || []).filter((p) => (states[p.id] || {}).alive !== false && states[p.id]);
@@ -1139,6 +1213,8 @@ function GameRoom({ roomCode, myId, onBack }) {
     fresh.winnerId = null;
     await writeRoom(roomCode, fresh);
     setRoom(fresh);
+    myLiveStateRef.current = newStates[myId] || null;
+    lastKnownServerQueueLenRef.current = (newStates[myId] && newStates[myId].queue || []).length;
     setPlayerStates(newStates);
   };
 
@@ -1310,65 +1386,63 @@ function GameRoom({ roomCode, myId, onBack }) {
   const maxQueueAlive = Math.max(0, ...aliveList.map((p) => ((playerStates[p.id] || {}).queue || []).length));
   const isJoker = iAmAlive && myState && (myState.queue || []).length === maxQueueAlive && maxQueueAlive > 0;
 
-  const performAttack = async (targetId, useJoker) => {
-    const howMany = useJoker && isJoker ? 2 : 1;
-    const freshTarget = (await readPlayerState(roomCode, round, targetId)) || {
-      queue: [],
-      progress: 0,
-      alive: true,
-      lastAttacked: null,
-      eliminatedAt: null,
-    };
-    const newTasks = [];
-    for (let i = 0; i < howMany; i++) newTasks.push(randomTask(roomTaskType, roomGridSize));
-    const newQueue = [...(freshTarget.queue || []), ...newTasks];
-    const overflowed = newQueue.length > (room.maxQueue || DEFAULT_MAX_QUEUE);
-    const nextTargetState = {
-      ...freshTarget,
-      queue: newQueue,
-      alive: overflowed ? false : freshTarget.alive,
-      eliminatedAt: overflowed && freshTarget.alive !== false ? Date.now() : freshTarget.eliminatedAt,
-    };
-    await writePlayerState(roomCode, round, targetId, nextTargetState);
-    setPlayerStates((m) => ({ ...m, [targetId]: nextTargetState }));
-
-    const freshMe = (await readPlayerState(roomCode, round, myId)) || myState;
-    const nextMe = { ...freshMe, lastAttacked: targetId };
-    await writePlayerState(roomCode, round, myId, nextMe);
-    setPlayerStates((m) => ({ ...m, [myId]: nextMe }));
+  // El picker se cierra YA; los dos guardados (la tarea extra para el
+  // rival, y mi propio "a quién ataqué") pasan en segundo plano.
+  const performAttack = (targetId, useJoker) => {
     setShowTargetPicker(false);
+    const cur = myLiveStateRef.current;
+    if (cur) setMyStateNow({ ...cur, lastAttacked: targetId });
+    const howMany = useJoker && isJoker ? 2 : 1;
+    (async () => {
+      const freshTarget = (await readPlayerState(roomCode, round, targetId)) || {
+        queue: [],
+        progress: 0,
+        alive: true,
+        lastAttacked: null,
+        eliminatedAt: null,
+      };
+      const newTasks = [];
+      for (let i = 0; i < howMany; i++) newTasks.push(randomTask(roomTaskType, roomGridSize));
+      const newQueue = [...(freshTarget.queue || []), ...newTasks];
+      const overflowed = newQueue.length > (room.maxQueue || DEFAULT_MAX_QUEUE);
+      const nextTargetState = {
+        ...freshTarget,
+        queue: newQueue,
+        alive: overflowed ? false : freshTarget.alive,
+        eliminatedAt: overflowed && freshTarget.alive !== false ? Date.now() : freshTarget.eliminatedAt,
+      };
+      await writePlayerState(roomCode, round, targetId, nextTargetState);
+      setPlayerStates((m) => ({ ...m, [targetId]: nextTargetState }));
+    })();
   };
 
   // Se llama cuando se completó del todo la tarea que está primera en la
-  // cola (sea "seq" o "grid"): la saca de la cola y abre el selector de a
-  // quién atacar. Compartido entre submitDigit (secuencias) y tapCell
-  // (grilla) porque a ambos les toca lo mismo al terminar.
-  const completeCurrentTask = async () => {
-    const fresh = (await readPlayerState(roomCode, round, myId)) || myState;
-    const newQueue = fresh.queue.slice(1);
-    const next = { ...fresh, queue: newQueue, progress: 0 };
-    await writePlayerState(roomCode, round, myId, next);
-    setPlayerStates((m) => ({ ...m, [myId]: next }));
+  // cola (sea "seq" o "grid"): la saca de la cola YA (instantáneo) y abre
+  // el selector de a quién atacar. Compartido entre submitDigit
+  // (secuencias) y tapCell (grilla) porque a ambos les toca lo mismo.
+  const completeCurrentTask = (cur) => {
+    const newQueue = cur.queue.slice(1);
+    setMyStateNow({ ...cur, queue: newQueue, progress: 0 });
     setShowTargetPicker(true);
   };
 
-  const submitDigit = async () => {
-    if (!myState || !iAmAlive || !typedDraft) return;
-    const task = myState.queue[0];
+  // Aplica el dígito YA sobre mi estado local (síncrono, instantáneo) y
+  // pide que se guarde en segundo plano. myLiveStateRef es la fuente de
+  // verdad, así que aunque tipees rápido cada dígito parte del resultado
+  // real del anterior, no de una copia vieja.
+  const submitDigit = () => {
+    const cur = myLiveStateRef.current;
+    if (!cur || cur.alive === false || !typedDraft) return;
+    const task = cur.queue && cur.queue[0];
+    if (!task) return;
     const answers = expectedAnswers(task);
-    const expected = answers[myState.progress];
+    const expected = answers[cur.progress];
     const typed = parseInt(typedDraft, 10);
     if (typed === expected) {
-      const isLast = myState.progress + 1 >= answers.length;
+      const isLast = cur.progress + 1 >= answers.length;
       setTypedDraft("");
-      if (isLast) {
-        await completeCurrentTask();
-      } else {
-        const fresh = (await readPlayerState(roomCode, round, myId)) || myState;
-        const next = { ...fresh, progress: myState.progress + 1 };
-        await writePlayerState(roomCode, round, myId, next);
-        setPlayerStates((m) => ({ ...m, [myId]: next }));
-      }
+      if (isLast) completeCurrentTask(cur);
+      else setMyStateNow({ ...cur, progress: cur.progress + 1 });
     } else {
       setWrongFlash(true);
       setTypedDraft("");
@@ -1376,27 +1450,22 @@ function GameRoom({ roomCode, myId, onBack }) {
     }
   };
 
-  const tapCell = async (idx) => {
-    if (!myState || !iAmAlive) return;
-    const task = myState.queue[0];
-    if (task.type !== "grid") return;
+  const tapCell = (idx) => {
+    const cur = myLiveStateRef.current;
+    if (!cur || cur.alive === false) return;
+    const task = cur.queue && cur.queue[0];
+    if (!task || task.type !== "grid") return;
     const answers = expectedAnswers(task);
-    const expected = answers[myState.progress];
+    const expected = answers[cur.progress];
     const value = task.numbers[idx];
     if (value !== expected) {
       setWrongFlash(true);
       setTimeout(() => setWrongFlash(false), 500);
       return;
     }
-    const isLast = myState.progress + 1 >= answers.length;
-    if (isLast) {
-      await completeCurrentTask();
-    } else {
-      const fresh = (await readPlayerState(roomCode, round, myId)) || myState;
-      const next = { ...fresh, progress: myState.progress + 1 };
-      await writePlayerState(roomCode, round, myId, next);
-      setPlayerStates((m) => ({ ...m, [myId]: next }));
-    }
+    const isLast = cur.progress + 1 >= answers.length;
+    if (isLast) completeCurrentTask(cur);
+    else setMyStateNow({ ...cur, progress: cur.progress + 1 });
   };
 
   return (
