@@ -99,11 +99,6 @@
     display: flex; flex-direction: column; align-items: center;
     margin-bottom: 18px;
   }
-  .title-emoji {
-    font-size: 44px;
-    animation: pop-in 0.5s cubic-bezier(.34,1.56,.64,1) both;
-    filter: drop-shadow(0 4px 4px rgba(0,0,0,0.4));
-  }
   h1 {
     font-family: 'Baloo 2', sans-serif;
     font-weight: 800;
@@ -124,7 +119,7 @@
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .title-emoji, h1 { animation: none; }
+    h1 { animation: none; }
   }
 
   .counter {
@@ -203,7 +198,6 @@
 
   <div class="page">
     <div class="title-row">
-      <div class="title-emoji">🎉</div>
       <h1>Juegos de JX</h1>
     </div>
     <div class="counter" id="playerCounter"></div>
