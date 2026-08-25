@@ -105,9 +105,14 @@ async function listPlayerStates(code, round) {
   return map;
 }
 
+// Siempre 10 casilleros (10 múltiplos de "step"), sin importar el paso: antes
+// se contaba "hasta 99", así que un paso grande (27) daba secuencias de 3
+// números y uno chico (8) de 12 — la dificultad y la duración de la tarea
+// variaban un montón según te tocara. Ahora la longitud es siempre la misma,
+// tanto en modo batalla como en práctica (comparten esta misma función).
 function seqForStep(step) {
   const arr = [];
-  for (let v = step; v <= 99; v += step) arr.push(v);
+  for (let i = 1; i <= 10; i++) arr.push(step * i);
   return arr;
 }
 function randomStep() {
