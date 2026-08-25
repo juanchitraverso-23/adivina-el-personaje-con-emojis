@@ -181,39 +181,44 @@
     .card { opacity: 1; transform: none; animation: none; }
   }
 
-  /* ---------- Transición "warp" al tocar un juego: el botón se agranda y
-     se pixela como zoomeando hacia la pantalla, estilo Mode 7 de SNES.
-     La cuadrícula (::before) son los "pixeles": al escalar el botón, sus
-     bloques crecen con él, así que cuanto más cerca "está" más grandes y
-     cuadrados se ven — el efecto de pixelado sale solo, sin canvas. ---------- */
-  .card.warp {
+  /* ---------- Transición al tocar un juego: en vez de que el botón "venga"
+     hacia la cámara (eso escalaba un elemento con backdrop-filter/blur a
+     40x, carísimo de renderizar en cada frame — por eso se trababa), ahora
+     es al revés: el jugador se mete EN el botón. Un círculo simple (sin
+     blur, sin texto — nada caro de dibujar) nace en el punto tocado y crece
+     lento hasta tragarse toda la pantalla, como si entráramos por él. Solo
+     anima "transform" (scale) y "opacity", lo más barato que hay para el
+     navegador — por eso corre suave aunque dure más de un segundo. ---------- */
+  .card.diving { opacity: 0; transition: opacity 0.35s ease; }
+  .warp-portal {
     position: fixed;
-    z-index: 50;
-    margin: 0;
-    animation: card-warp 0.5s cubic-bezier(.6,0,.85,1) forwards;
+    z-index: 55;
+    border-radius: 50%;
+    transform: scale(0);
+    transform-origin: center center;
     pointer-events: none;
+    animation: portal-grow 1.1s cubic-bezier(.45, 0, .7, 1) forwards;
   }
-  .card.warp::before {
+  .warp-portal::after {
     content: "";
     position: absolute;
     inset: 0;
     border-radius: inherit;
     background-image:
-      repeating-linear-gradient(0deg, rgba(255,255,255,0.95) 0 3px, transparent 3px 9px),
-      repeating-linear-gradient(90deg, rgba(255,255,255,0.95) 0 3px, transparent 3px 9px);
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.9) 0 3px, transparent 3px 9px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.9) 0 3px, transparent 3px 9px);
     mix-blend-mode: overlay;
     opacity: 0;
-    animation: pixel-fade 0.5s ease forwards;
+    animation: portal-pixels 1.1s ease forwards;
   }
-  @keyframes card-warp {
-    0%   { transform: scale(1); filter: saturate(1) brightness(1); }
-    55%  { transform: scale(7); filter: saturate(1.7) brightness(1.25); }
-    100% { transform: scale(40); filter: saturate(2.4) brightness(2.3); opacity: 0.35; }
+  @keyframes portal-grow {
+    0%   { transform: scale(0); }
+    100% { transform: scale(1); }
   }
-  @keyframes pixel-fade {
+  @keyframes portal-pixels {
     0%   { opacity: 0; }
-    50%  { opacity: 0.85; }
-    100% { opacity: 0.25; }
+    45%  { opacity: 0.8; }
+    100% { opacity: 0.3; }
   }
   .warp-flash {
     position: fixed;
@@ -222,11 +227,11 @@
     background: #fff;
     opacity: 0;
     pointer-events: none;
-    animation: warp-flash 0.5s ease forwards;
+    animation: warp-flash 1.1s ease forwards;
   }
   @keyframes warp-flash {
-    0%, 65% { opacity: 0; }
-    85%     { opacity: 0.85; }
+    0%, 78% { opacity: 0; }
+    92%     { opacity: 0.9; }
     100%    { opacity: 0; }
   }
 </style>
@@ -315,29 +320,45 @@
       }
     })();
 
-    // Transición "warp" al tocar un juego: en vez de navegar directo,
-    // fijamos el botón tocado en su posición actual (position:fixed con el
-    // mismo rect) y lo dejamos animar ahí encima de todo antes de irnos a
-    // la otra página — si no, al pasar a position:fixed perdería el lugar
-    // que tenía en el flujo normal.
+    // Transición al tocar un juego: en vez de navegar directo, el botón
+    // desaparece rápido (como si lo atravesaras) y un círculo simple nace
+    // en el punto tocado y crece hasta tragarse la pantalla — recién ahí
+    // navegamos. El tamaño final (~2.4x la diagonal de la pantalla) se
+    // calcula así porque un círculo escalado desde su centro necesita ese
+    // radio para cubrir hasta la esquina más lejana sin dejar bordes.
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let diving = false;
     document.querySelectorAll(".card").forEach((card) => {
       card.addEventListener("click", (e) => {
-        if (card.classList.contains("disabled") || card.classList.contains("warp")) return;
+        if (card.classList.contains("disabled") || diving) return;
         if (reduceMotion) return; // sin animación, navega directo como siempre
         e.preventDefault();
+        diving = true;
         const href = card.getAttribute("href");
         const rect = card.getBoundingClientRect();
-        card.style.top = rect.top + "px";
-        card.style.left = rect.left + "px";
-        card.style.width = rect.width + "px";
-        card.classList.add("warp");
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const size = Math.max(window.innerWidth, window.innerHeight) * 2.4;
+
+        card.classList.add("diving");
+
+        const portal = document.createElement("div");
+        portal.className = "warp-portal";
+        portal.style.width = size + "px";
+        portal.style.height = size + "px";
+        portal.style.left = cx - size / 2 + "px";
+        portal.style.top = cy - size / 2 + "px";
+        portal.style.background =
+          "radial-gradient(circle at 40% 35%, #fff8d8, #ffd23f 40%, #ff9a1c 70%, #ff3e7f 100%)";
+        document.body.appendChild(portal);
+
         const flash = document.createElement("div");
         flash.className = "warp-flash";
         document.body.appendChild(flash);
+
         setTimeout(() => {
           window.location.href = href;
-        }, 460);
+        }, 1050);
       });
     });
   </script>
