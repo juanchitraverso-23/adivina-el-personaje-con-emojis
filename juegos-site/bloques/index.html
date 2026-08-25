@@ -1043,6 +1043,15 @@ function GameRoom({ roomCode, myId, onBack }) {
   const [wrongFlash, setWrongFlash] = useState(false);
   const [showTargetPicker, setShowTargetPicker] = useState(false);
   const [now, setNow] = useState(Date.now());
+  // Los clicks en piezas se encolan acá para procesarse de a uno: si tocás
+  // dos piezas rápido, el segundo click tiene que partir del resultado que
+  // el primero ya guardó en el servidor, no de una copia vieja en memoria
+  // (si no, el segundo click puede "revivir" la pieza que borró el primero).
+  // pendingWritesRef, mientras hay escrituras en vuelo, evita además que el
+  // sondeo cada 1s pise mi propio estado local con una lectura del server
+  // que todavía no llegó a reflejar el último click.
+  const tapChainRef = useRef(Promise.resolve());
+  const pendingWritesRef = useRef(0);
 
   const leaveRoom = async () => {
     try {
@@ -1067,7 +1076,9 @@ function GameRoom({ roomCode, myId, onBack }) {
       if (r.phase === "playing" || r.phase === "ended") {
         const states = await listPlayerStates(roomCode, round);
         if (cancelled) return;
-        setPlayerStates(states);
+        setPlayerStates((prev) =>
+          pendingWritesRef.current > 0 && prev[myId] ? { ...states, [myId]: prev[myId] } : states
+        );
 
         if (r.phase === "playing") {
           const aliveList = (r.players || []).filter((p) => (states[p.id] || {}).alive !== false && states[p.id]);
@@ -1312,8 +1323,11 @@ function GameRoom({ roomCode, myId, onBack }) {
   // primera en la cola: la saca de la cola. En la final, terminar la grilla
   // gana la partida directamente; si no, se rellena la cola si quedó vacía
   // (para que siempre haya algo por resolver) y se ofrece atacar.
-  const completeCurrentGrid = async () => {
-    const fresh = (await readPlayerState(roomCode, round, myId)) || myState;
+  // `freshOverride` es el estado que ya leyó processTap justo antes de
+  // llamar acá — evita una segunda lectura innecesaria (y otra ventana de
+  // carrera con un ataque entrante).
+  const completeCurrentGrid = async (freshOverride) => {
+    const fresh = freshOverride || (await readPlayerState(roomCode, round, myId)) || myState;
     const newQueue = fresh.queue.slice(1);
     const solvedCount = (fresh.solvedCount || 0) + 1;
 
@@ -1338,14 +1352,18 @@ function GameRoom({ roomCode, myId, onBack }) {
     setShowTargetPicker(true);
   };
 
-  const tapCell = async (idx) => {
-    if (!myState || !iAmAlive || showTargetPicker) return;
-    const grid = myState.queue[0];
+  // Procesa un click contra el estado MÁS FRESCO posible (recién leído del
+  // server), nunca contra la copia que teníamos en memoria — así, aunque el
+  // click anterior todavía no se haya reflejado en `myState`, este no lo pisa.
+  const processTap = async (idx) => {
+    const freshFull = (await readPlayerState(roomCode, round, myId)) || myState;
+    if (!freshFull || freshFull.alive === false) return;
+    const grid = freshFull.queue && freshFull.queue[0];
     if (!grid) return;
     const pieceId = grid.cellPiece[idx];
     if (pieceId == null || pieceId < 0) return;
     const piece = grid.pieces[pieceId];
-    if (piece.cleared) return;
+    if (piece.cleared) return; // ya la agarró un click anterior
     const activeColor = grid.colorOrder[grid.activeColorIndex];
     if (piece.color !== activeColor) {
       setWrongFlash(true);
@@ -1358,15 +1376,27 @@ function GameRoom({ roomCode, myId, onBack }) {
     const newGrid = { ...grid, pieces: newPieces, activeColorIndex: newIndex };
 
     if (newIndex >= grid.colorOrder.length) {
-      await completeCurrentGrid();
+      await completeCurrentGrid(freshFull);
       return;
     }
-    const freshFull = (await readPlayerState(roomCode, round, myId)) || myState;
     const freshQueue = [...freshFull.queue];
     freshQueue[0] = newGrid;
     const next = { ...freshFull, queue: freshQueue };
     await writePlayerState(roomCode, round, myId, next);
     setPlayerStates((m) => ({ ...m, [myId]: next }));
+  };
+
+  // Encola el click detrás de cualquier otro que todavía se esté guardando,
+  // para que el server los procese siempre de a uno y en orden.
+  const tapCell = (idx) => {
+    if (!myState || !iAmAlive || showTargetPicker) return;
+    pendingWritesRef.current += 1;
+    tapChainRef.current = tapChainRef.current
+      .then(() => processTap(idx))
+      .catch(() => {})
+      .then(() => {
+        pendingWritesRef.current = Math.max(0, pendingWritesRef.current - 1);
+      });
   };
 
   const currentGrid = myState && myState.queue && myState.queue[0];
