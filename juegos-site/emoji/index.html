@@ -7,10 +7,18 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Adiviná el Emoji" />
-<meta name="theme-color" content="#1b0f2e" />
+<meta name="theme-color" content="#0c0620" />
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
-  html, body { margin:0; padding:0; background:#1b0f2e; }
+  html, body { margin:0; padding:0; background:#0c0620; }
   #root { min-height: 100vh; }
+  body { font-family: 'Nunito', sans-serif; }
+  /* Mismo lenguaje visual que el resto del sitio (violeta oscuro + Baloo 2
+     para títulos/botones); "font-black" es la clase que ya se usaba acá
+     para toda cabecera y texto de botón, así que alcanza con esta única
+     regla para que todo pase a Baloo 2 sin tocar cada componente. */
+  .font-black { font-family: 'Baloo 2', sans-serif; }
+  input::placeholder { color: #8b7fa8; opacity: 1; }
 </style>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -25,26 +33,34 @@ const { useState, useEffect, useRef } = React;
 
 const ROUND_SECONDS = 15;
 
-// ---- Colores (siempre inline: las clases Tailwind con hex arbitrario no compilan en este entorno) ----
+// ---- Colores (siempre inline: las clases Tailwind con hex arbitrario no
+// compilan en este entorno). Misma paleta que el resto del sitio (violeta
+// oscuro, rosa como color de acción principal, amarillo como acento de
+// título/trofeo, verde para "correcto", rojo para "incorrecto"); se
+// mantienen los brillos de color de fondo propios de este juego, solo
+// recoloreados para que combinen con la familia. ----
 const C = {
-  bg: "#1b0f2e",
-  card: "rgba(255,255,255,0.08)",
+  bg: "#170b2e",
+  card: "rgba(255,255,255,0.06)",
   cardBorder: "rgba(255,255,255,0.12)",
-  inputBg: "rgba(255,255,255,0.95)",
-  textDark: "#1b0f2e",
-  textMuted: "#c9b8e8",
-  textFaint: "#8a7ba3",
-  gold: "#ffb703",
-  goldHover: "#ffc933",
-  pink: "#ff2e88",
-  pinkSoft: "#ff6b9d",
-  teal: "#00d4b8",
+  inputBg: "rgba(0,0,0,0.25)",
+  inputBorder: "rgba(255,255,255,0.15)",
+  inputText: "#F3EEFF",
+  textDark: "#1B1035",
+  textMuted: "#C9B8F0",
+  textFaint: "#8b7fa8",
+  gold: "#FFD23F",
+  goldHover: "#ffdd66",
+  primary: "#FF3E7F",
+  pink: "#FF3E7F",
+  pinkSoft: "#FF5D7A",
+  teal: "#3DDC84",
 };
 
 const bgStyle = {
   backgroundColor: C.bg,
   backgroundImage:
-    "radial-gradient(circle at 15% 10%, rgba(255,46,136,0.25) 0%, transparent 45%), radial-gradient(circle at 90% 90%, rgba(0,212,184,0.2) 0%, transparent 45%)",
+    "radial-gradient(circle at 15% 10%, rgba(255,62,127,0.22) 0%, transparent 45%), radial-gradient(circle at 90% 90%, rgba(61,220,132,0.16) 0%, transparent 45%), radial-gradient(circle at 20% -10%, rgba(58,33,102,0.85) 0%, transparent 55%)",
 };
 
 // ---- Categorías de emojis (varios cientos, agrupados) ----
@@ -182,7 +198,7 @@ function PrimaryButton({ children, onClick, disabled, style, ...rest }) {
       onClick={onClick}
       disabled={disabled}
       className="w-full rounded-2xl py-4 font-black text-lg transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-40"
-      style={{ backgroundColor: C.gold, color: C.textDark, ...style }}
+      style={{ backgroundColor: C.primary, color: C.textDark, ...style }}
       {...rest}
     >
       {children}
@@ -331,7 +347,7 @@ function EmojiGrid({ onPick }) {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Buscar emoji (ej: perro, fiesta, auto)"
             className="w-full rounded-xl pl-10 pr-4 py-3 text-base font-semibold outline-none"
-            style={{ backgroundColor: C.inputBg, color: C.textDark }}
+            style={{ backgroundColor: C.inputBg, color: C.inputText, border: `1px solid ${C.inputBorder}` }}
           />
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg pointer-events-none">🔎</span>
         </div>
@@ -383,7 +399,7 @@ function HandoffScreen({ playerName, subtitle, onReady }) {
           </p>
         )}
       </div>
-      <button onClick={onReady} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.gold, color: C.textDark }}>
+      <button onClick={onReady} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.primary, color: C.textDark }}>
         Listo, soy yo
       </button>
     </div>
@@ -510,10 +526,10 @@ function OfflineGame({ onBack }) {
                 onKeyDown={(e) => e.key === "Enter" && addPlayer()}
                 placeholder="Nombre del jugador"
                 className="flex-1 rounded-xl px-4 py-3 font-semibold outline-none"
-                style={{ backgroundColor: C.inputBg, color: C.textDark }}
+                style={{ backgroundColor: C.inputBg, color: C.inputText, border: `1px solid ${C.inputBorder}` }}
                 maxLength={16}
               />
-              <button onClick={addPlayer} className="rounded-xl px-4 font-black" style={{ backgroundColor: C.gold, color: C.textDark }}>
+              <button onClick={addPlayer} className="rounded-xl px-4 font-black" style={{ backgroundColor: C.primary, color: C.textDark }}>
                 +
               </button>
             </div>
@@ -561,7 +577,7 @@ function OfflineGame({ onBack }) {
             <button
               onClick={nextRound}
               className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95 flex items-center gap-2"
-              style={{ backgroundColor: C.gold, color: C.textDark }}
+              style={{ backgroundColor: C.primary, color: C.textDark }}
             >
               <Icon name="Shuffle" size={20} /> Siguiente ronda
             </button>
@@ -585,7 +601,7 @@ function OfflineGame({ onBack }) {
             <div className="leading-none select-none" style={{ fontSize: "min(45vw, 220px)" }}>
               {emoji}
             </div>
-            <button onClick={startTimer} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.gold, color: C.textDark }}>
+            <button onClick={startTimer} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.primary, color: C.textDark }}>
               OK, ¡empezar!
             </button>
           </div>
@@ -636,7 +652,7 @@ function OfflineGame({ onBack }) {
                   <div
                     key={id}
                     className="flex items-center justify-between rounded-2xl px-4 py-3"
-                    style={{ backgroundColor: correct ? "rgba(0,212,184,0.2)" : "rgba(255,46,136,0.12)", border: `1px solid ${correct ? C.teal : "rgba(255,46,136,0.4)"}` }}
+                    style={{ backgroundColor: correct ? "rgba(61,220,132,0.2)" : "rgba(255,93,122,0.12)", border: `1px solid ${correct ? C.teal : "rgba(255,93,122,0.4)"}` }}
                   >
                     <span className="font-bold text-white">
                       {avatarOf(id)} {nameOf(id)}
@@ -1014,7 +1030,7 @@ function OnlineGame({ onBack }) {
             <button
               onClick={resumeSession}
               className="w-full text-left rounded-2xl p-4 mb-4 transition active:scale-95"
-              style={{ backgroundColor: "rgba(255,183,3,0.18)", border: `1px solid ${C.gold}` }}
+              style={{ backgroundColor: "rgba(255,210,63,0.18)", border: `1px solid ${C.gold}` }}
             >
               <div className="font-black text-base" style={{ color: C.gold }}>
                 ↩️ Volver a tu sala ({resumable.code})
@@ -1034,7 +1050,7 @@ function OnlineGame({ onBack }) {
               onChange={(e) => setName(e.target.value)}
               placeholder="Ej: Juanchi"
               className="w-full rounded-xl px-4 py-3 mb-4 font-semibold outline-none"
-              style={{ backgroundColor: C.inputBg, color: C.textDark }}
+              style={{ backgroundColor: C.inputBg, color: C.inputText, border: `1px solid ${C.inputBorder}` }}
               maxLength={16}
             />
             <label className="block text-sm font-bold uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>
@@ -1045,7 +1061,7 @@ function OnlineGame({ onBack }) {
               onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
               placeholder="Dejalo vacío para crear una sala"
               className="w-full rounded-xl px-4 py-3 mb-1 font-semibold tracking-widest outline-none"
-              style={{ backgroundColor: C.inputBg, color: C.textDark }}
+              style={{ backgroundColor: C.inputBg, color: C.inputText, border: `1px solid ${C.inputBorder}` }}
               maxLength={4}
             />
             <p className="text-sm mb-4" style={{ color: C.textFaint }}>
@@ -1244,7 +1260,7 @@ function ReadyView({ isActor, actor, onBegin }) {
             Te vamos a mostrar tu emoji en privado. Los demás no deben ver tu pantalla.
           </p>
         </div>
-        <button onClick={onBegin} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.gold, color: C.textDark }}>
+        <button onClick={onBegin} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.primary, color: C.textDark }}>
           Mostrame el emoji
         </button>
       </div>
@@ -1269,7 +1285,7 @@ function PreviewView({ isActor, actor, emoji, onStartTimer }) {
         <div className="leading-none select-none" style={{ fontSize: "min(45vw, 220px)" }}>
           {emoji}
         </div>
-        <button onClick={onStartTimer} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.gold, color: C.textDark }}>
+        <button onClick={onStartTimer} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.primary, color: C.textDark }}>
           OK, ¡empezar!
         </button>
       </div>
@@ -1333,7 +1349,7 @@ function ScoringView({ isActor, actor, players, checked, setChecked, onConfirm }
             onClick={() => toggle(p.id)}
             className="w-full flex items-center justify-between rounded-2xl px-4 py-3 transition"
             style={{
-              backgroundColor: checked[p.id] ? "rgba(0,212,184,0.2)" : C.card,
+              backgroundColor: checked[p.id] ? "rgba(61,220,132,0.2)" : C.card,
               border: `1px solid ${checked[p.id] ? C.teal : C.cardBorder}`,
             }}
           >
