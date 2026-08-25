@@ -180,6 +180,55 @@
   @media (prefers-reduced-motion: reduce) {
     .card { opacity: 1; transform: none; animation: none; }
   }
+
+  /* ---------- Transición "warp" al tocar un juego: el botón se agranda y
+     se pixela como zoomeando hacia la pantalla, estilo Mode 7 de SNES.
+     La cuadrícula (::before) son los "pixeles": al escalar el botón, sus
+     bloques crecen con él, así que cuanto más cerca "está" más grandes y
+     cuadrados se ven — el efecto de pixelado sale solo, sin canvas. ---------- */
+  .card.warp {
+    position: fixed;
+    z-index: 50;
+    margin: 0;
+    animation: card-warp 0.5s cubic-bezier(.6,0,.85,1) forwards;
+    pointer-events: none;
+  }
+  .card.warp::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.95) 0 3px, transparent 3px 9px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.95) 0 3px, transparent 3px 9px);
+    mix-blend-mode: overlay;
+    opacity: 0;
+    animation: pixel-fade 0.5s ease forwards;
+  }
+  @keyframes card-warp {
+    0%   { transform: scale(1); filter: saturate(1) brightness(1); }
+    55%  { transform: scale(7); filter: saturate(1.7) brightness(1.25); }
+    100% { transform: scale(40); filter: saturate(2.4) brightness(2.3); opacity: 0.35; }
+  }
+  @keyframes pixel-fade {
+    0%   { opacity: 0; }
+    50%  { opacity: 0.85; }
+    100% { opacity: 0.25; }
+  }
+  .warp-flash {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+    animation: warp-flash 0.5s ease forwards;
+  }
+  @keyframes warp-flash {
+    0%, 65% { opacity: 0; }
+    85%     { opacity: 0.85; }
+    100%    { opacity: 0; }
+  }
 </style>
 </head>
 <body>
@@ -265,6 +314,32 @@
         // sin contador visible, no molesta a nadie
       }
     })();
+
+    // Transición "warp" al tocar un juego: en vez de navegar directo,
+    // fijamos el botón tocado en su posición actual (position:fixed con el
+    // mismo rect) y lo dejamos animar ahí encima de todo antes de irnos a
+    // la otra página — si no, al pasar a position:fixed perdería el lugar
+    // que tenía en el flujo normal.
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.querySelectorAll(".card").forEach((card) => {
+      card.addEventListener("click", (e) => {
+        if (card.classList.contains("disabled") || card.classList.contains("warp")) return;
+        if (reduceMotion) return; // sin animación, navega directo como siempre
+        e.preventDefault();
+        const href = card.getAttribute("href");
+        const rect = card.getBoundingClientRect();
+        card.style.top = rect.top + "px";
+        card.style.left = rect.left + "px";
+        card.style.width = rect.width + "px";
+        card.classList.add("warp");
+        const flash = document.createElement("div");
+        flash.className = "warp-flash";
+        document.body.appendChild(flash);
+        setTimeout(() => {
+          window.location.href = href;
+        }, 460);
+      });
+    });
   </script>
 </body>
 </html>
