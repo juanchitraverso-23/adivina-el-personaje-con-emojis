@@ -1,0 +1,1443 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Bloques en Cadena — Juego de colores</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Bloques" />
+<meta name="theme-color" content="#1B1035" />
+<style>
+  html, body { margin:0; padding:0; background:#0c0620; }
+  #root { min-height: 100vh; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script src="../storage.js"></script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef } = React;
+
+// ============================================================
+// Bloques en Cadena: hasta 8 jugadores, cada uno en su celu.
+// Cada grilla es un tablero 10x10 cubierto de piezas tipo Tetris
+// de 6 colores. Los colores se revelan de a uno: hay que tocar
+// todas las piezas del color activo para pasar al siguiente, hasta
+// vaciar el tablero entero. Cada grilla resuelta te da una ficha
+// de ataque para mandarle una grilla extra a un rival (como una
+// línea de Tetris). Cada 1 minuto queda afuera quien tenga más
+// grillas pendientes (si hay empate, siguen todos); quien llegue a
+// 10 pendientes por ataques queda afuera al instante. Al quedar 2
+// en pie es la final: no hay más ataques y su grilla actual
+// parpadea entre colores y blanco y negro cada 5 segundos, hasta
+// que uno de los dos la termina y gana.
+// ============================================================
+const STORAGE_PREFIX = "bloques:sala:";
+const POLL_MS = 1000;
+const SESSION_KEY = "bloques:sesion";
+const MAX_PLAYERS = 8;
+const GRID_SIZE = 10;
+const WIN_TARGET = 5; // grillas base para "calificar" (se pueden sumar más por ataques)
+const MAX_QUEUE_OVERFLOW = 10; // llegar a esta cantidad de grillas pendientes = eliminado
+const ELIMINATION_INTERVAL_MS = 60 * 1000; // cada 1 minuto queda afuera quien más tenga pendiente
+const FLICKER_PERIOD_MS = 5000; // en la final, la grilla parpadea cada 5s
+const PRACTICE_BEST_KEY = "bloques:practica:mejorTiempo";
+
+const PLAYER_COLORS = ["#FF3E7F", "#5B4B8A", "#FFD23F", "#3DDC84", "#4FC3F7", "#FF9F1C", "#B983FF", "#FF6B6B"];
+
+const PIECE_COLORS = [
+  { key: "red", hex: "#FF5D7A", name: "Rojo" },
+  { key: "blue", hex: "#4FC3F7", name: "Celeste" },
+  { key: "yellow", hex: "#FFD23F", name: "Amarillo" },
+  { key: "green", hex: "#3DDC84", name: "Verde" },
+  { key: "purple", hex: "#B983FF", name: "Violeta" },
+  { key: "orange", hex: "#FF9F1C", name: "Naranja" },
+];
+const PIECE_COLOR_KEYS = PIECE_COLORS.map((c) => c.key);
+const PIECE_COLORS_MAP = Object.fromEntries(PIECE_COLORS.map((c) => [c.key, c]));
+
+function randomId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+function randomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+const MY_DEVICE_ID = (() => {
+  const KEY = "bloques:deviceId";
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id = randomId();
+    localStorage.setItem(KEY, id);
+  }
+  return id;
+})();
+
+async function readRoom(code) {
+  try {
+    const res = await window.storage.get(STORAGE_PREFIX + code, true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writeRoom(code, room) {
+  await window.storage.set(STORAGE_PREFIX + code, JSON.stringify(room), true);
+}
+function playerKey(code, round, playerId) {
+  return STORAGE_PREFIX + code + ":r" + round + ":player:" + playerId;
+}
+async function readPlayerState(code, round, playerId) {
+  try {
+    const res = await window.storage.get(playerKey(code, round, playerId), true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writePlayerState(code, round, playerId, state) {
+  await window.storage.set(playerKey(code, round, playerId), JSON.stringify(state), true);
+}
+async function listPlayerStates(code, round) {
+  const prefix = playerKey(code, round, "");
+  let entries = [];
+  try {
+    entries = await window.storage.list(prefix);
+  } catch {
+    entries = [];
+  }
+  const map = {};
+  entries.forEach((e) => {
+    const playerId = e.key.slice(prefix.length);
+    try {
+      map[playerId] = JSON.parse(e.value);
+    } catch {}
+  });
+  return map;
+}
+
+// ---------- Generación de grillas tipo Tetris ----------
+function shuffleArr(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function normalizeShape(cells) {
+  const minR = Math.min(...cells.map((c) => c[0]));
+  const minC = Math.min(...cells.map((c) => c[1]));
+  return cells.map(([r, c]) => [r - minR, c - minC]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+}
+function rotateShape90(cells) {
+  return normalizeShape(cells.map(([r, c]) => [c, -r]));
+}
+function shapeKey(cells) {
+  return cells.map((c) => c.join(",")).join("|");
+}
+function allRotations(base) {
+  const seen = new Map();
+  let cur = normalizeShape(base);
+  for (let i = 0; i < 4; i++) {
+    const key = shapeKey(cur);
+    if (!seen.has(key)) seen.set(key, cur);
+    cur = rotateShape90(cur);
+  }
+  return Array.from(seen.values());
+}
+// Los 7 tetrominós clásicos (O, I, T, S, Z, J, L); allRotations() genera
+// todas sus orientaciones únicas.
+const BASE_TETROMINOES = [
+  [[0, 0], [0, 1], [1, 0], [1, 1]], // O
+  [[0, 0], [0, 1], [0, 2], [0, 3]], // I
+  [[0, 0], [0, 1], [0, 2], [1, 1]], // T
+  [[0, 1], [0, 2], [1, 0], [1, 1]], // S
+  [[0, 0], [0, 1], [1, 1], [1, 2]], // Z
+  [[0, 0], [1, 0], [2, 0], [2, 1]], // J
+  [[0, 1], [1, 1], [2, 0], [2, 1]], // L
+];
+const ALL_TETROMINO_SHAPES = BASE_TETROMINOES.flatMap(allRotations);
+// Piezas más chicas para tapar los huecos que un tetrominó no llega a cubrir
+// (sobre todo cerca del último borde de la grilla).
+const FALLBACK_SHAPES = [
+  [[0, 0]],
+  [[0, 0], [0, 1]],
+  [[0, 0], [1, 0]],
+  [[0, 0], [0, 1], [0, 2]],
+  [[0, 0], [1, 0], [2, 0]],
+  [[0, 0], [0, 1], [1, 0]],
+  [[0, 0], [0, 1], [1, 1]],
+  [[0, 0], [1, 0], [1, 1]],
+  [[0, 1], [1, 0], [1, 1]],
+];
+
+// Genera una grilla NxN cubierta por completo de piezas (mayormente
+// tetrominós), cada una pintada de uno de los 6 colores, con un orden de
+// colores al azar para revelarlos de a uno.
+function generateGrid(size) {
+  const total = size * size;
+  const cellPiece = new Array(total).fill(-1);
+  const pieces = [];
+  const idx = (r, c) => r * size + c;
+  const fits = (shape, offR, offC) => {
+    for (const [dr, dc] of shape) {
+      const r = offR + dr, c = offC + dc;
+      if (r < 0 || c < 0 || r >= size || c >= size) return false;
+      if (cellPiece[idx(r, c)] !== -1) return false;
+    }
+    return true;
+  };
+  for (let scanPos = 0; scanPos < total; scanPos++) {
+    if (cellPiece[scanPos] !== -1) continue;
+    const r0 = Math.floor(scanPos / size), c0 = scanPos % size;
+    let placed = false;
+    for (const list of [shuffleArr(ALL_TETROMINO_SHAPES), shuffleArr(FALLBACK_SHAPES)]) {
+      for (const shape of list) {
+        const [ar, ac] = shape[0];
+        const offR = r0 - ar, offC = c0 - ac;
+        if (fits(shape, offR, offC)) {
+          const pieceId = pieces.length;
+          const cells = shape.map(([dr, dc]) => idx(offR + dr, offC + dc));
+          cells.forEach((ci) => { cellPiece[ci] = pieceId; });
+          pieces.push({ id: pieceId, cells, color: null, cleared: false });
+          placed = true;
+          break;
+        }
+      }
+      if (placed) break;
+    }
+    if (!placed) {
+      const pieceId = pieces.length;
+      cellPiece[scanPos] = pieceId;
+      pieces.push({ id: pieceId, cells: [scanPos], color: null, cleared: false });
+    }
+  }
+  // Reparto round-robin (y después mezclado) para garantizar que los 6
+  // colores aparezcan en la grilla.
+  const colorSeq = shuffleArr(pieces.map((_, i) => PIECE_COLOR_KEYS[i % PIECE_COLOR_KEYS.length]));
+  pieces.forEach((p, i) => { p.color = colorSeq[i]; });
+  return {
+    size,
+    cellPiece,
+    pieces,
+    colorOrder: shuffleArr(PIECE_COLOR_KEYS),
+    activeColorIndex: 0,
+  };
+}
+function computeCellBorders(size, cellPiece) {
+  const idx = (r, c) => r * size + c;
+  const differs = (i, nr, nc, pieceId) => {
+    if (nr < 0 || nc < 0 || nr >= size || nc >= size) return true;
+    return cellPiece[idx(nr, nc)] !== pieceId;
+  };
+  return cellPiece.map((pieceId, i) => {
+    const r = Math.floor(i / size), c = i % size;
+    return {
+      top: differs(i, r - 1, c, pieceId),
+      bottom: differs(i, r + 1, c, pieceId),
+      left: differs(i, r, c - 1, pieceId),
+      right: differs(i, r, c + 1, pieceId),
+    };
+  });
+}
+function isGridSolved(grid) {
+  return grid.activeColorIndex >= grid.colorOrder.length;
+}
+function newQueuedGrid() {
+  return generateGrid(GRID_SIZE);
+}
+
+const GRADIENT_BG = "radial-gradient(circle at 20% -10%, #3a2166 0%, #170b2e 45%, #0c0620 100%)";
+
+function useInjectFont() {
+  useEffect(() => {
+    if (document.getElementById("aq-fonts")) return;
+    const link = document.createElement("link");
+    link.id = "aq-fonts";
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap";
+    document.head.appendChild(link);
+  }, []);
+}
+
+function Screen({ children, style, homeConfirm }) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        width: "100%",
+        background: GRADIENT_BG,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        padding: "28px 18px 40px",
+        fontFamily: "'Nunito', sans-serif",
+        color: "#F3EEFF",
+        boxSizing: "border-box",
+        ...style,
+      }}
+    >
+      {homeConfirm !== null && <HomeButton confirmMessage={homeConfirm} />}
+      {children}
+    </div>
+  );
+}
+
+function HomeButton({ confirmMessage }) {
+  return (
+    <a
+      href="../"
+      onClick={(e) => {
+        if (confirmMessage && !window.confirm(confirmMessage)) e.preventDefault();
+      }}
+      title="Volver al menú de juegos"
+      style={{
+        position: "fixed",
+        top: "calc(env(safe-area-inset-top, 0px) + 14px)",
+        left: 14,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "9px 16px 9px 11px",
+        borderRadius: 30,
+        background: "rgba(0,0,0,0.6)",
+        border: "1.5px solid rgba(255,255,255,0.4)",
+        color: "#fff",
+        fontFamily: "'Nunito', sans-serif",
+        fontWeight: 800,
+        fontSize: 15,
+        textDecoration: "none",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+      }}
+    >
+      <span style={{ fontSize: 19 }}>🏠</span> Menú
+    </a>
+  );
+}
+
+function Title({ children, size = 30 }) {
+  return (
+    <h1
+      style={{
+        fontFamily: "'Baloo 2', sans-serif",
+        fontWeight: 800,
+        fontSize: size,
+        color: "#FFD23F",
+        textShadow: "0 3px 0 rgba(0,0,0,0.35)",
+        margin: "0 0 6px",
+        textAlign: "center",
+        letterSpacing: 0.3,
+      }}
+    >
+      {children}
+    </h1>
+  );
+}
+
+function Sub({ children, style }) {
+  return (
+    <p
+      style={{
+        color: "#C9B8F0",
+        fontSize: 16,
+        textAlign: "center",
+        margin: "0 0 22px",
+        lineHeight: 1.4,
+        ...style,
+      }}
+    >
+      {children}
+    </p>
+  );
+}
+
+function BigButton({ children, onClick, color = "#FF3E7F", disabled, style }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        width: "100%",
+        maxWidth: 380,
+        padding: "16px 20px",
+        borderRadius: 18,
+        border: "none",
+        background: disabled ? "#4a3d63" : color,
+        color: disabled ? "#8b7fa8" : "#1B1035",
+        fontFamily: "'Baloo 2', sans-serif",
+        fontWeight: 700,
+        fontSize: 18,
+        boxShadow: disabled ? "none" : "0 6px 0 rgba(0,0,0,0.28)",
+        cursor: disabled ? "default" : "pointer",
+        marginBottom: 14,
+        transition: "transform 0.08s ease",
+        ...style,
+      }}
+      onMouseDown={(e) => {
+        if (!disabled) e.currentTarget.style.transform = "translateY(4px)";
+      }}
+      onMouseUp={(e) => {
+        e.currentTarget.style.transform = "translateY(0)";
+      }}
+      onTouchStart={(e) => {
+        if (!disabled) e.currentTarget.style.transform = "translateY(4px)";
+      }}
+      onTouchEnd={(e) => {
+        e.currentTarget.style.transform = "translateY(0)";
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Card({ children, style }) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 420,
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.12)",
+        borderRadius: 22,
+        padding: 20,
+        boxSizing: "border-box",
+        marginBottom: 16,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.15)",
+  background: "rgba(0,0,0,0.25)",
+  color: "#F3EEFF",
+  fontSize: 17,
+  marginBottom: 10,
+  outline: "none",
+  fontFamily: "'Nunito', sans-serif",
+};
+
+// ---------- Tablero de piezas ----------
+function ColorBanner({ grid }) {
+  const activeColor = grid.colorOrder[grid.activeColorIndex];
+  const colorDef = PIECE_COLORS_MAP[activeColor];
+  const remaining = grid.pieces.filter((p) => p.color === activeColor && !p.cleared).length;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        justifyContent: "center",
+        background: colorDef.hex + "22",
+        border: "1.5px solid " + colorDef.hex + "88",
+        borderRadius: 14,
+        padding: "10px 18px",
+        marginBottom: 12,
+        fontWeight: 800,
+        fontFamily: "'Baloo 2', sans-serif",
+        color: colorDef.hex,
+        fontSize: 16,
+        textAlign: "center",
+      }}
+    >
+      <span style={{ width: 16, height: 16, borderRadius: 4, background: colorDef.hex, display: "inline-block", flexShrink: 0 }} />
+      Tocá todas las piezas {colorDef.name.toUpperCase()} · quedan {remaining}
+    </div>
+  );
+}
+
+function GridBoard({ grid, onTap, shake, bw }) {
+  const borders = useMemo(() => computeCellBorders(grid.size, grid.cellPiece), [grid.cellPiece]);
+  const activeColor = grid.colorOrder[grid.activeColorIndex];
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${grid.size}, 1fr)`,
+        gap: 2,
+        width: "100%",
+        maxWidth: 460,
+        margin: "0 auto 16px",
+        padding: 6,
+        borderRadius: 14,
+        border: shake ? "2px solid #FF5D7A" : "2px solid transparent",
+        filter: bw ? "grayscale(1)" : "none",
+        transition: "filter 0.6s ease",
+        boxSizing: "border-box",
+      }}
+    >
+      {grid.cellPiece.map((pieceId, i) => {
+        const piece = pieceId >= 0 ? grid.pieces[pieceId] : null;
+        const cleared = !piece || piece.cleared;
+        const isActive = !!piece && !cleared && piece.color === activeColor;
+        const colorDef = piece ? PIECE_COLORS_MAP[piece.color] : null;
+        const b = borders[i];
+        const borderColor = "rgba(10,5,26,0.55)";
+        return (
+          <button
+            key={i}
+            onClick={() => isActive && onTap(i)}
+            disabled={cleared || !isActive}
+            style={{
+              aspectRatio: "1",
+              borderRadius: 4,
+              padding: 0,
+              cursor: isActive ? "pointer" : "default",
+              borderTop: b.top ? "2px solid " + borderColor : "2px solid transparent",
+              borderLeft: b.left ? "2px solid " + borderColor : "2px solid transparent",
+              borderRight: b.right ? "2px solid " + borderColor : "2px solid transparent",
+              borderBottom: b.bottom ? "2px solid " + borderColor : "2px solid transparent",
+              background: cleared ? "rgba(255,255,255,0.04)" : isActive ? colorDef.hex : colorDef.hex + "30",
+              boxShadow: isActive ? "inset 0 0 0 2px rgba(255,255,255,0.55)" : "none",
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function PlayerBadgeRow({ players, playerStates, myId }) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(4, 1fr)",
+        gap: 8,
+        width: "100%",
+        maxWidth: 460,
+        marginBottom: 14,
+      }}
+    >
+      {players.map((p, i) => {
+        const st = playerStates[p.id];
+        const alive = st ? st.alive !== false : true;
+        const qLen = st ? (st.queue || []).length : 0;
+        const qualified = st && (st.solvedCount || 0) >= WIN_TARGET;
+        return (
+          <div
+            key={p.id}
+            style={{
+              background: alive ? PLAYER_COLORS[i % PLAYER_COLORS.length] : "#241d38",
+              borderRadius: 12,
+              padding: "8px 6px",
+              textAlign: "center",
+              opacity: alive ? 1 : 0.6,
+              border: p.id === myId ? "2px solid #FFD23F" : "2px solid transparent",
+              position: "relative",
+              boxSizing: "border-box",
+            }}
+          >
+            {qualified && alive && <span style={{ position: "absolute", top: -10, right: -4, fontSize: 16 }}>✅</span>}
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 800,
+                color: alive ? "#1B1035" : "#8b7fa8",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {alive ? p.name : "💀 " + p.name}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: alive ? "#1B1035" : "#5a4d6e" }}>
+              {alive ? qLen : ""}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TargetPicker({ players, playerStates, myId, myLastAttacked, onAttack, onSkip }) {
+  const aliveList = players.filter((p) => (playerStates[p.id] || {}).alive !== false);
+  const aliveCount = aliveList.length;
+  const candidates = aliveList.filter((p) => {
+    if (p.id === myId) return false;
+    if (aliveCount > 2 && p.id === myLastAttacked) return false;
+    return true;
+  });
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.75)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 100,
+        padding: 20,
+      }}
+    >
+      <Card style={{ maxWidth: 380, marginBottom: 0 }}>
+        <Title size={22}>🧱 ¡Grilla resuelta! ¿A quién le mandás una extra?</Title>
+        {candidates.length === 0 ? (
+          <Sub style={{ marginBottom: 12 }}>No hay a quién atacar ahora mismo.</Sub>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 12 }}>
+            {candidates.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => onAttack(p.id)}
+                style={{
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  borderRadius: 12,
+                  padding: "14px 8px",
+                  color: "#F3EEFF",
+                  fontWeight: 700,
+                  fontSize: 15,
+                  cursor: "pointer",
+                }}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        )}
+        <BigButton onClick={onSkip} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0", marginBottom: 0 }}>
+          {candidates.length === 0 ? "Seguir jugando" : "Saltear (no atacar)"}
+        </BigButton>
+      </Card>
+    </div>
+  );
+}
+
+function Home({ onSelect }) {
+  return (
+    <Screen style={{ justifyContent: "center" }} homeConfirm={null}>
+      <div style={{ fontSize: 64, marginBottom: 6 }}>🧱</div>
+      <Title size={32}>Bloques en Cadena</Title>
+      <Sub>
+        Tocá todas las piezas del color que está activo para que aparezca el siguiente, hasta vaciar
+        la grilla 10x10. Cada grilla resuelta te da una ficha para mandarle una grilla extra a un
+        rival. Cada 1 minuto queda afuera quien tenga más grillas pendientes. Al quedar 2, es la
+        final: sin ataques, y la grilla parpadea entre colores y blanco y negro. ¡Ganá la final!
+      </Sub>
+      <BigButton onClick={() => onSelect("game")} color="#FF3E7F">
+        🎮 Jugar con otros
+      </BigButton>
+      <BigButton onClick={() => onSelect("practice")} color="#5B4B8A">
+        🏋️ Practicar solo/a
+      </BigButton>
+    </Screen>
+  );
+}
+
+function PracticeGame({ onBack }) {
+  const [grid, setGrid] = useState(null);
+  const [startTime, setStartTime] = useState(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const [finalMs, setFinalMs] = useState(null);
+  const [bestMs, setBestMs] = useState(null);
+  const [isNewBest, setIsNewBest] = useState(false);
+  const [wrongFlash, setWrongFlash] = useState(false);
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(PRACTICE_BEST_KEY);
+      setBestMs(v ? parseInt(v, 10) : null);
+    } catch {
+      setBestMs(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!grid || finished || !startTime) return;
+    const id = setInterval(() => setElapsedMs(Date.now() - startTime), 100);
+    return () => clearInterval(id);
+  }, [grid, finished, startTime]);
+
+  const fmt = (ms) => (Math.max(0, ms) / 1000).toFixed(1) + "s";
+
+  const newGame = () => {
+    setGrid(newQueuedGrid());
+    setFinished(false);
+    setFinalMs(null);
+    setIsNewBest(false);
+    setElapsedMs(0);
+    setStartTime(Date.now());
+  };
+
+  const finishGame = (ms) => {
+    setFinished(true);
+    setFinalMs(ms);
+    if (bestMs == null || ms < bestMs) {
+      try {
+        localStorage.setItem(PRACTICE_BEST_KEY, String(ms));
+      } catch {}
+      setBestMs(ms);
+      setIsNewBest(true);
+    }
+  };
+
+  const tapCell = (idx) => {
+    if (!grid || finished) return;
+    const pieceId = grid.cellPiece[idx];
+    if (pieceId < 0) return;
+    const piece = grid.pieces[pieceId];
+    if (piece.cleared) return;
+    const activeColor = grid.colorOrder[grid.activeColorIndex];
+    if (piece.color !== activeColor) {
+      setWrongFlash(true);
+      setTimeout(() => setWrongFlash(false), 400);
+      return;
+    }
+    const newPieces = grid.pieces.map((p) => (p.id === pieceId ? { ...p, cleared: true } : p));
+    const remaining = newPieces.some((p) => p.color === activeColor && !p.cleared);
+    const newIndex = remaining ? grid.activeColorIndex : grid.activeColorIndex + 1;
+    const newGrid = { ...grid, pieces: newPieces, activeColorIndex: newIndex };
+    setGrid(newGrid);
+    if (newIndex >= grid.colorOrder.length) {
+      finishGame(Date.now() - startTime);
+    }
+  };
+
+  if (!grid) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <Title size={26}>🏋️ Practicar</Title>
+        <Sub style={{ marginTop: -10 }}>Solo/a, contra el reloj — sin ataques ni rivales</Sub>
+        {bestMs != null && (
+          <Sub style={{ marginTop: -6 }}>
+            🏆 Tu mejor tiempo: <b style={{ color: "#FFD23F" }}>{fmt(bestMs)}</b>
+          </Sub>
+        )}
+        <BigButton onClick={newGame}>Empezar ▶️</BigButton>
+        <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Volver
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen
+      homeConfirm={finished ? null : "¿Salir? Perdés el tiempo de este intento."}
+      style={{ padding: "20px 10px 40px" }}
+    >
+      <Title size={24}>🏋️ Practicando</Title>
+      <div
+        style={{
+          fontSize: 36,
+          fontWeight: 800,
+          fontFamily: "'Baloo 2', sans-serif",
+          color: finished ? (isNewBest ? "#3DDC84" : "#FFD23F") : "#F3EEFF",
+          marginBottom: 2,
+        }}
+      >
+        {fmt(finished ? finalMs : elapsedMs)}
+      </div>
+      {bestMs != null && <Sub style={{ marginTop: 0, fontSize: 13 }}>Mejor marca: {fmt(bestMs)}</Sub>}
+
+      {finished ? (
+        <Card style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
+          {isNewBest && <div style={{ color: "#3DDC84", fontWeight: 800, marginBottom: 10 }}>🎉 ¡Nueva mejor marca!</div>}
+          <BigButton onClick={newGame}>Otra 🔁</BigButton>
+          <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+            Volver
+          </BigButton>
+        </Card>
+      ) : (
+        <>
+          <ColorBanner grid={grid} />
+          <GridBoard grid={grid} onTap={tapCell} shake={wrongFlash} bw={false} />
+        </>
+      )}
+      {!finished && (
+        <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0", marginTop: 4 }}>
+          Salir
+        </BigButton>
+      )}
+    </Screen>
+  );
+}
+
+function JoinScreen({ onJoined, onBack }) {
+  const [name, setName] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [openRooms, setOpenRooms] = useState([]);
+  const [resumable, setResumable] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const entries = await window.storage.list(STORAGE_PREFIX);
+        if (cancelled) return;
+        const rooms = entries
+          .map((e) => {
+            if (!/^bloques:sala:[^:]+$/.test(e.key)) return null;
+            try {
+              return JSON.parse(e.value);
+            } catch {
+              return null;
+            }
+          })
+          .filter((r) => r && r.phase === "lobby" && Date.now() - (r.createdAt || 0) < 3 * 60 * 60 * 1000)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setOpenRooms(rooms);
+      } catch {}
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let saved;
+      try {
+        saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+      } catch {
+        saved = null;
+      }
+      if (!saved || !saved.code || !saved.playerId) {
+        setResumable(null);
+        return;
+      }
+      const existing = await readRoom(saved.code);
+      if (cancelled) return;
+      if (existing && existing.players.some((p) => p.id === saved.playerId)) {
+        setResumable({
+          code: saved.code,
+          playerId: saved.playerId,
+          name: (existing.players.find((p) => p.id === saved.playerId) || {}).name,
+        });
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+        setResumable(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const doJoin = async (codeMaybe) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setJoinError("Escribí tu nombre.");
+      return;
+    }
+    setJoining(true);
+    setJoinError("");
+    try {
+      const code = codeMaybe || (codeInput.trim() ? codeInput.trim().toUpperCase() : randomCode());
+      let existing = await readRoom(code);
+      if (existing && existing.phase !== "lobby") {
+        setJoinError("Esa sala ya está jugando. Esperá a la próxima ronda.");
+        setJoining(false);
+        return;
+      }
+      const me = { id: randomId(), name: trimmed, deviceId: MY_DEVICE_ID, joinedAt: Date.now() };
+      if (!existing) {
+        existing = {
+          code,
+          hostId: me.id,
+          players: [me],
+          phase: "lobby",
+          round: 1,
+          winnerId: null,
+          nextEliminationAt: null,
+          createdAt: Date.now(),
+        };
+      } else {
+        if (existing.players.length >= MAX_PLAYERS) {
+          setJoinError(`Sala llena (máximo ${MAX_PLAYERS} jugadores).`);
+          setJoining(false);
+          return;
+        }
+        if (existing.players.some((p) => p.name.toLowerCase() === trimmed.toLowerCase())) {
+          setJoinError(`Ya hay alguien llamado "${trimmed}" en esa sala. Cambiá el nombre.`);
+          setJoining(false);
+          return;
+        }
+        existing.players = [...existing.players, me];
+      }
+      await writeRoom(code, existing);
+      window.storage.incrementCounter("players").catch(() => {});
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: me.id }));
+      onJoined(code, me.id);
+    } catch (e) {
+      setJoinError("No se pudo conectar a la sala. Probá de nuevo.");
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  return (
+    <Screen>
+      <Title size={26}>Bloques en Cadena</Title>
+      <Sub style={{ marginTop: -10 }}>Hasta 8 jugadores, cada uno en su celu</Sub>
+      <Card style={{ width: "100%", maxWidth: 420 }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Tu nombre" style={inputStyle} />
+        <input
+          value={codeInput}
+          onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+          placeholder="Código de sala (opcional)"
+          style={inputStyle}
+        />
+        {joinError && <div style={{ color: "#FF5D7A", fontSize: 13, marginBottom: 8 }}>{joinError}</div>}
+        <BigButton onClick={() => doJoin(null)} disabled={joining}>
+          {codeInput.trim() ? "Unirme a esa sala" : "Crear sala nueva"}
+        </BigButton>
+      </Card>
+
+      {resumable && (
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <Sub style={{ marginTop: 0 }}>
+            Ya estabas en la sala <b>{resumable.code}</b> como {resumable.name}
+          </Sub>
+          <BigButton onClick={() => onJoined(resumable.code, resumable.playerId)} color="#5B4B8A">
+            Volver a esa sala
+          </BigButton>
+        </Card>
+      )}
+
+      {openRooms.length > 0 && (
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", fontWeight: 700, marginBottom: 8 }}>Salas abiertas ahora</div>
+          {openRooms.map((r) => (
+            <button
+              key={r.code}
+              onClick={() => {
+                setCodeInput(r.code);
+                doJoin(r.code);
+              }}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                width: "100%",
+                background: "rgba(255,255,255,0.06)",
+                border: "none",
+                borderRadius: 10,
+                padding: "10px 12px",
+                marginBottom: 6,
+                color: "#F3EEFF",
+                cursor: "pointer",
+                fontWeight: 700,
+              }}
+            >
+              <span>{r.code}</span>
+              <span style={{ color: "#8b7fa8" }}>{(r.players || []).length}/{MAX_PLAYERS} jugadores</span>
+            </button>
+          ))}
+        </Card>
+      )}
+
+      <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+        Volver
+      </BigButton>
+    </Screen>
+  );
+}
+
+// Elimina, si corresponde, a quien más grillas tenga pendientes entre los
+// jugadores vivos (si hay empate por el máximo, no elimina a nadie). Se
+// llama desde el tick de sondeo de cualquier cliente; vuelve a leer todo
+// fresco y chequea que nadie más ya haya procesado este mismo turno, para
+// no duplicar la eliminación.
+async function performPeriodicElimination(roomCode, round) {
+  const freshRoom = await readRoom(roomCode);
+  if (!freshRoom || freshRoom.phase !== "playing") return;
+  if (!freshRoom.nextEliminationAt || Date.now() < freshRoom.nextEliminationAt) return;
+  const states = await listPlayerStates(roomCode, round);
+  const aliveList = (freshRoom.players || []).filter((p) => (states[p.id] || {}).alive !== false && states[p.id]);
+  if (aliveList.length > 2) {
+    let maxLen = -1;
+    let maxHolders = [];
+    aliveList.forEach((p) => {
+      const len = (states[p.id].queue || []).length;
+      if (len > maxLen) {
+        maxLen = len;
+        maxHolders = [p.id];
+      } else if (len === maxLen) {
+        maxHolders.push(p.id);
+      }
+    });
+    if (maxHolders.length === 1) {
+      const loserId = maxHolders[0];
+      const loserState = states[loserId];
+      await writePlayerState(roomCode, round, loserId, { ...loserState, alive: false, eliminatedAt: Date.now() });
+    }
+  }
+  freshRoom.nextEliminationAt = Date.now() + ELIMINATION_INTERVAL_MS;
+  await writeRoom(roomCode, freshRoom);
+}
+
+function GameRoom({ roomCode, myId, onBack }) {
+  const [room, setRoom] = useState(null);
+  const [playerStates, setPlayerStates] = useState({});
+  const [wrongFlash, setWrongFlash] = useState(false);
+  const [showTargetPicker, setShowTargetPicker] = useState(false);
+  const [now, setNow] = useState(Date.now());
+
+  const leaveRoom = async () => {
+    try {
+      const fresh = await readRoom(roomCode);
+      if (fresh) {
+        fresh.players = (fresh.players || []).filter((p) => p.id !== myId);
+        await writeRoom(roomCode, fresh);
+      }
+    } catch {}
+    localStorage.removeItem(SESSION_KEY);
+    onBack();
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const r = await readRoom(roomCode);
+      if (cancelled || !r) return;
+      setRoom(r);
+      setNow(Date.now());
+      const round = r.round || 1;
+      if (r.phase === "playing" || r.phase === "ended") {
+        const states = await listPlayerStates(roomCode, round);
+        if (cancelled) return;
+        setPlayerStates(states);
+
+        if (r.phase === "playing") {
+          const aliveList = (r.players || []).filter((p) => (states[p.id] || {}).alive !== false && states[p.id]);
+          const everyoneReported = Object.keys(states).length >= (r.players || []).length;
+          if (aliveList.length <= 1 && everyoneReported) {
+            const fresh = await readRoom(roomCode);
+            if (fresh && fresh.phase === "playing") {
+              fresh.phase = "ended";
+              fresh.winnerId = aliveList[0] ? aliveList[0].id : null;
+              await writeRoom(roomCode, fresh);
+            }
+          } else if (aliveList.length > 2 && r.nextEliminationAt && Date.now() >= r.nextEliminationAt) {
+            await performPeriodicElimination(roomCode, round);
+          }
+        }
+      }
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [roomCode]);
+
+  if (!room) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <Sub>Cargando sala...</Sub>
+      </Screen>
+    );
+  }
+
+  const players = room.players || [];
+  const effectiveHost =
+    players.find((p) => p.id === room.hostId) ||
+    [...players].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0] ||
+    null;
+  const isHost = !!effectiveHost && effectiveHost.id === myId;
+
+  const passControlTo = async (targetId) => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.hostId = targetId;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  const startGame = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh || fresh.players.length < 2) return;
+    const round = fresh.round || 1;
+    const newStates = {};
+    fresh.players.forEach((p) => {
+      newStates[p.id] = {
+        queue: Array.from({ length: WIN_TARGET }, () => newQueuedGrid()),
+        solvedCount: 0,
+        alive: true,
+        lastAttacked: null,
+        eliminatedAt: null,
+      };
+    });
+    await Promise.all(fresh.players.map((p) => writePlayerState(roomCode, round, p.id, newStates[p.id])));
+    fresh.phase = "playing";
+    fresh.winnerId = null;
+    fresh.nextEliminationAt = Date.now() + ELIMINATION_INTERVAL_MS;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+    setPlayerStates(newStates);
+  };
+
+  const playAgain = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.round = (fresh.round || 1) + 1;
+    fresh.phase = "lobby";
+    fresh.winnerId = null;
+    fresh.nextEliminationAt = null;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+    setPlayerStates({});
+  };
+
+  // ---------- LOBBY ----------
+  if (room.phase === "lobby") {
+    return (
+      <Screen homeConfirm="¿Salir de la sala?">
+        <Title size={26}>Sala {room.code}</Title>
+        <Sub style={{ marginTop: -10 }}>
+          Compartí el código para que se sumen ({players.length}/{MAX_PLAYERS}). Mínimo 2 jugadores.
+        </Sub>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          {players.map((p) => (
+            <div key={p.id} style={{ padding: "6px 2px", color: "#F3EEFF" }}>
+              {p.id === effectiveHost?.id ? "👑 " : "• "}
+              {p.name}
+              {p.id === myId ? " (vos)" : ""}
+            </div>
+          ))}
+        </Card>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Cómo se juega</div>
+          <div style={{ fontSize: 14, lineHeight: 1.5, color: "#F3EEFF" }}>
+            🧱 Grillas 10x10 de piezas de 6 colores. Tocá todas las piezas del color activo para que
+            aparezca el siguiente.
+            <br />
+            🎯 Cada grilla resuelta te da una ficha para mandarle una grilla extra a un rival (no se
+            puede repetir el mismo dos veces seguidas).
+            <br />
+            ⏱️ Cada 1 minuto queda afuera quien más grillas tenga pendientes (empate = siguen todos).
+            Llegar a {MAX_QUEUE_OVERFLOW} pendientes = afuera al instante.
+            <br />
+            🏁 Al quedar 2, es la final: sin ataques, y la grilla parpadea entre colores y blanco y
+            negro cada 5 segundos hasta que haya ganador/a.
+          </div>
+        </Card>
+        {isHost ? (
+          <>
+            <BigButton onClick={startGame} disabled={players.length < 2}>
+              {players.length < 2 ? "Esperando otro jugador..." : "Empezar 🎮"}
+            </BigButton>
+            {players.length > 1 && (
+              <Card style={{ width: "100%", maxWidth: 420 }}>
+                <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6 }}>Pasarle el mando a otro/a</div>
+                {players
+                  .filter((p) => p.id !== myId)
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => passControlTo(p.id)}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        textAlign: "left",
+                        background: "rgba(255,255,255,0.06)",
+                        border: "none",
+                        borderRadius: 8,
+                        padding: "8px 10px",
+                        marginBottom: 4,
+                        color: "#F3EEFF",
+                        cursor: "pointer",
+                      }}
+                    >
+                      👑 {p.name}
+                    </button>
+                  ))}
+              </Card>
+            )}
+          </>
+        ) : (
+          <Sub>Esperando a que {effectiveHost ? effectiveHost.name : "el anfitrión/a"} empiece...</Sub>
+        )}
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- ENDED ----------
+  if (room.phase === "ended") {
+    const ranked = [...players].sort((a, b) => {
+      const sa = playerStates[a.id] || {};
+      const sb = playerStates[b.id] || {};
+      if (a.id === room.winnerId) return -1;
+      if (b.id === room.winnerId) return 1;
+      return (sb.eliminatedAt || 0) - (sa.eliminatedAt || 0);
+    });
+    const medals = ["🥇", "🥈", "🥉"];
+    return (
+      <Screen>
+        <Title size={26}>🏆 {room.winnerId ? "¡Fin de la partida!" : "Partida terminada"}</Title>
+        {room.winnerId && (
+          <Sub style={{ marginTop: -10 }}>
+            Ganó <b style={{ color: "#FFD23F" }}>{(players.find((p) => p.id === room.winnerId) || {}).name}</b>
+          </Sub>
+        )}
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          {ranked.map((p, i) => (
+            <div
+              key={p.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                padding: "8px 2px",
+                borderBottom: i < ranked.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none",
+              }}
+            >
+              <span>
+                {medals[i] || `${i + 1}°`} {p.name}
+                {p.id === myId ? " (vos)" : ""}
+              </span>
+            </div>
+          ))}
+        </Card>
+        {isHost && <BigButton onClick={playAgain}>🔁 Jugar otra ronda</BigButton>}
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- PLAYING ----------
+  const round = room.round || 1;
+  const myState = playerStates[myId];
+  const iAmAlive = myState ? myState.alive !== false : true;
+  const aliveList = players.filter((p) => (playerStates[p.id] || {}).alive !== false);
+  const aliveCount = aliveList.length;
+  const isFinalPhase = aliveCount === 2;
+  const secsToElim =
+    !isFinalPhase && room.nextEliminationAt ? Math.max(0, Math.ceil((room.nextEliminationAt - now) / 1000)) : null;
+  const bwPhase = isFinalPhase && Math.floor(now / FLICKER_PERIOD_MS) % 2 === 1;
+
+  const performAttack = async (targetId) => {
+    const freshTarget = (await readPlayerState(roomCode, round, targetId)) || {
+      queue: [],
+      solvedCount: 0,
+      alive: true,
+      lastAttacked: null,
+      eliminatedAt: null,
+    };
+    const newQueue = [...(freshTarget.queue || []), newQueuedGrid()];
+    const overflowed = newQueue.length >= MAX_QUEUE_OVERFLOW;
+    const nextTargetState = {
+      ...freshTarget,
+      queue: newQueue,
+      alive: overflowed ? false : freshTarget.alive,
+      eliminatedAt: overflowed && freshTarget.alive !== false ? Date.now() : freshTarget.eliminatedAt,
+    };
+    await writePlayerState(roomCode, round, targetId, nextTargetState);
+    setPlayerStates((m) => ({ ...m, [targetId]: nextTargetState }));
+
+    const freshMe = (await readPlayerState(roomCode, round, myId)) || myState;
+    const nextMe = { ...freshMe, lastAttacked: targetId };
+    await writePlayerState(roomCode, round, myId, nextMe);
+    setPlayerStates((m) => ({ ...m, [myId]: nextMe }));
+    setShowTargetPicker(false);
+  };
+
+  // Se llama cuando se completaron los 6 colores de la grilla que está
+  // primera en la cola: la saca de la cola. En la final, terminar la grilla
+  // gana la partida directamente; si no, se rellena la cola si quedó vacía
+  // (para que siempre haya algo por resolver) y se ofrece atacar.
+  const completeCurrentGrid = async () => {
+    const fresh = (await readPlayerState(roomCode, round, myId)) || myState;
+    const newQueue = fresh.queue.slice(1);
+    const solvedCount = (fresh.solvedCount || 0) + 1;
+
+    if (isFinalPhase) {
+      const freshRoom = await readRoom(roomCode);
+      if (freshRoom && freshRoom.phase === "playing") {
+        freshRoom.phase = "ended";
+        freshRoom.winnerId = myId;
+        await writeRoom(roomCode, freshRoom);
+        setRoom(freshRoom);
+      }
+      const next = { ...fresh, queue: newQueue, solvedCount };
+      await writePlayerState(roomCode, round, myId, next);
+      setPlayerStates((m) => ({ ...m, [myId]: next }));
+      return;
+    }
+
+    const refilledQueue = newQueue.length === 0 ? [newQueuedGrid()] : newQueue;
+    const next = { ...fresh, queue: refilledQueue, solvedCount };
+    await writePlayerState(roomCode, round, myId, next);
+    setPlayerStates((m) => ({ ...m, [myId]: next }));
+    setShowTargetPicker(true);
+  };
+
+  const tapCell = async (idx) => {
+    if (!myState || !iAmAlive || showTargetPicker) return;
+    const grid = myState.queue[0];
+    if (!grid) return;
+    const pieceId = grid.cellPiece[idx];
+    if (pieceId == null || pieceId < 0) return;
+    const piece = grid.pieces[pieceId];
+    if (piece.cleared) return;
+    const activeColor = grid.colorOrder[grid.activeColorIndex];
+    if (piece.color !== activeColor) {
+      setWrongFlash(true);
+      setTimeout(() => setWrongFlash(false), 400);
+      return;
+    }
+    const newPieces = grid.pieces.map((p) => (p.id === pieceId ? { ...p, cleared: true } : p));
+    const remaining = newPieces.some((p) => p.color === activeColor && !p.cleared);
+    const newIndex = remaining ? grid.activeColorIndex : grid.activeColorIndex + 1;
+    const newGrid = { ...grid, pieces: newPieces, activeColorIndex: newIndex };
+
+    if (newIndex >= grid.colorOrder.length) {
+      await completeCurrentGrid();
+      return;
+    }
+    const freshFull = (await readPlayerState(roomCode, round, myId)) || myState;
+    const freshQueue = [...freshFull.queue];
+    freshQueue[0] = newGrid;
+    const next = { ...freshFull, queue: freshQueue };
+    await writePlayerState(roomCode, round, myId, next);
+    setPlayerStates((m) => ({ ...m, [myId]: next }));
+  };
+
+  const currentGrid = myState && myState.queue && myState.queue[0];
+
+  return (
+    <Screen
+      homeConfirm="¿Salir? Perdés tu progreso de esta partida."
+      style={{ padding: "20px 10px 40px" }}
+    >
+      <Title size={22}>Sala {room.code}</Title>
+      <PlayerBadgeRow players={players} playerStates={playerStates} myId={myId} />
+
+      {isFinalPhase && (
+        <div
+          style={{
+            background: "rgba(255,210,63,0.15)",
+            border: "1.5px solid rgba(255,210,63,0.5)",
+            borderRadius: 14,
+            padding: "8px 16px",
+            marginBottom: 14,
+            color: "#FFD23F",
+            fontWeight: 800,
+            fontFamily: "'Baloo 2', sans-serif",
+            fontSize: 15,
+            textAlign: "center",
+          }}
+        >
+          🏁 ¡FINAL! Sin ataques — terminá tu grilla para ganar
+        </div>
+      )}
+      {!isFinalPhase && secsToElim != null && (
+        <Sub style={{ marginTop: -6, fontSize: 13 }}>
+          ⏱️ Queda afuera quien más grillas tenga en {secsToElim}s (empate = siguen todos)
+        </Sub>
+      )}
+
+      {!iAmAlive ? (
+        <Card style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
+          <div style={{ fontSize: 44, marginBottom: 8 }}>💀</div>
+          <Title size={20}>Quedaste afuera</Title>
+          <Sub style={{ marginBottom: 0 }}>Mirá cómo sigue la partida arriba.</Sub>
+        </Card>
+      ) : currentGrid ? (
+        <>
+          <Sub style={{ marginTop: 0, marginBottom: 8, fontSize: 13 }}>
+            Resueltas: <b style={{ color: "#FFD23F" }}>{myState.solvedCount || 0}</b> · Pendientes:{" "}
+            <b style={{ color: "#FFD23F" }}>{myState.queue.length}</b>
+            {(myState.solvedCount || 0) >= WIN_TARGET ? " · ✅ ya calificaste" : ""}
+          </Sub>
+          <ColorBanner grid={currentGrid} />
+          <GridBoard grid={currentGrid} onTap={tapCell} shake={wrongFlash} bw={bwPhase} />
+        </>
+      ) : (
+        <Sub>Esperando la próxima grilla...</Sub>
+      )}
+
+      {showTargetPicker && (
+        <TargetPicker
+          players={players}
+          playerStates={playerStates}
+          myId={myId}
+          myLastAttacked={myState ? myState.lastAttacked : null}
+          onAttack={performAttack}
+          onSkip={() => setShowTargetPicker(false)}
+        />
+      )}
+
+      <BigButton
+        onClick={leaveRoom}
+        color="transparent"
+        style={{ boxShadow: "none", color: "#C9B8F0", marginTop: 20 }}
+      >
+        Salir de la sala
+      </BigButton>
+    </Screen>
+  );
+}
+
+function App() {
+  useInjectFont();
+  const [mode, setMode] = useState("home");
+  const [roomCode, setRoomCode] = useState(null);
+  const [myId, setMyId] = useState(null);
+
+  if (mode === "home") return <Home onSelect={setMode} />;
+  if (mode === "practice") return <PracticeGame onBack={() => setMode("home")} />;
+  if (mode === "game" && roomCode && myId) {
+    return (
+      <GameRoom
+        roomCode={roomCode}
+        myId={myId}
+        onBack={() => {
+          setRoomCode(null);
+          setMyId(null);
+          setMode("home");
+        }}
+      />
+    );
+  }
+  return (
+    <JoinScreen
+      onJoined={(code, id) => {
+        setRoomCode(code);
+        setMyId(id);
+      }}
+      onBack={() => setMode("home")}
+    />
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
