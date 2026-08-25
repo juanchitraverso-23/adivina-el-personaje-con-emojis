@@ -438,38 +438,12 @@ const inputStyle = {
 };
 
 // ---------- Tablero de piezas ----------
-function ColorBanner({ grid }) {
-  const activeColor = grid.colorOrder[grid.activeColorIndex];
-  const colorDef = PIECE_COLORS_MAP[activeColor];
-  const remaining = grid.pieces.filter((p) => p.color === activeColor && !p.cleared).length;
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        justifyContent: "center",
-        background: colorDef.hex + "22",
-        border: "1.5px solid " + colorDef.hex + "88",
-        borderRadius: 14,
-        padding: "10px 18px",
-        marginBottom: 12,
-        fontWeight: 800,
-        fontFamily: "'Baloo 2', sans-serif",
-        color: colorDef.hex,
-        fontSize: 16,
-        textAlign: "center",
-      }}
-    >
-      <span style={{ width: 16, height: 16, borderRadius: 4, background: colorDef.hex, display: "inline-block", flexShrink: 0 }} />
-      Tocá todas las piezas {colorDef.name.toUpperCase()} · quedan {remaining}
-    </div>
-  );
-}
-
+// Toda la grilla se ve en color y al mismo brillo desde el arranque (no hay
+// piezas "bloqueadas" en gris): el único indicador de qué color tocar es el
+// cuadrado grande de abajo. Tocar una pieza de otro color no hace nada más
+// que sacudir el tablero (shake).
 function GridBoard({ grid, onTap, shake, bw }) {
   const borders = useMemo(() => computeCellBorders(grid.size, grid.cellPiece), [grid.cellPiece]);
-  const activeColor = grid.colorOrder[grid.activeColorIndex];
   return (
     <div
       style={{
@@ -478,7 +452,7 @@ function GridBoard({ grid, onTap, shake, bw }) {
         gap: 2,
         width: "100%",
         maxWidth: 460,
-        margin: "0 auto 16px",
+        margin: "0 auto",
         padding: 6,
         borderRadius: 14,
         border: shake ? "2px solid #FF5D7A" : "2px solid transparent",
@@ -490,30 +464,70 @@ function GridBoard({ grid, onTap, shake, bw }) {
       {grid.cellPiece.map((pieceId, i) => {
         const piece = pieceId >= 0 ? grid.pieces[pieceId] : null;
         const cleared = !piece || piece.cleared;
-        const isActive = !!piece && !cleared && piece.color === activeColor;
         const colorDef = piece ? PIECE_COLORS_MAP[piece.color] : null;
         const b = borders[i];
         const borderColor = "rgba(10,5,26,0.55)";
         return (
           <button
             key={i}
-            onClick={() => isActive && onTap(i)}
-            disabled={cleared || !isActive}
+            onClick={() => !cleared && onTap(i)}
+            disabled={cleared}
             style={{
               aspectRatio: "1",
               borderRadius: 4,
               padding: 0,
-              cursor: isActive ? "pointer" : "default",
+              cursor: cleared ? "default" : "pointer",
               borderTop: b.top ? "2px solid " + borderColor : "2px solid transparent",
               borderLeft: b.left ? "2px solid " + borderColor : "2px solid transparent",
               borderRight: b.right ? "2px solid " + borderColor : "2px solid transparent",
               borderBottom: b.bottom ? "2px solid " + borderColor : "2px solid transparent",
-              background: cleared ? "rgba(255,255,255,0.04)" : isActive ? colorDef.hex : colorDef.hex + "30",
-              boxShadow: isActive ? "inset 0 0 0 2px rgba(255,255,255,0.55)" : "none",
+              background: cleared ? "rgba(255,255,255,0.04)" : colorDef.hex,
             }}
           />
         );
       })}
+    </div>
+  );
+}
+
+// Cuadrado grande debajo de la grilla: muestra el color que hay que tocar
+// ahora. Cuando se agota ese color, este indicador cambia al siguiente.
+function ColorIndicator({ grid, bw }) {
+  const activeColor = grid.colorOrder[grid.activeColorIndex];
+  const colorDef = PIECE_COLORS_MAP[activeColor];
+  const remaining = grid.pieces.filter((p) => p.color === activeColor && !p.cleared).length;
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 8,
+        marginTop: 16,
+        filter: bw ? "grayscale(1)" : "none",
+        transition: "filter 0.6s ease",
+      }}
+    >
+      <div
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: 18,
+          background: colorDef.hex,
+          boxShadow: "0 6px 0 rgba(0,0,0,0.3), inset 0 0 0 3px rgba(255,255,255,0.35)",
+        }}
+      />
+      <div
+        style={{
+          fontFamily: "'Baloo 2', sans-serif",
+          fontWeight: 800,
+          color: colorDef.hex,
+          fontSize: 16,
+          textAlign: "center",
+        }}
+      >
+        Tocá todas las {colorDef.name.toUpperCase()} · quedan {remaining}
+      </div>
     </div>
   );
 }
@@ -649,7 +663,11 @@ function Home({ onSelect }) {
 }
 
 function PracticeGame({ onBack }) {
-  const [grid, setGrid] = useState(null);
+  // Igual que en modo batalla: se arranca con 5 grillas para resolver, una
+  // detrás de otra. La última (la 5ta) parpadea entre colores y blanco y
+  // negro cada 5 segundos, como en la final del modo batalla.
+  const [queue, setQueue] = useState(null);
+  const [solvedCount, setSolvedCount] = useState(0);
   const [startTime, setStartTime] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [finished, setFinished] = useState(false);
@@ -668,15 +686,16 @@ function PracticeGame({ onBack }) {
   }, []);
 
   useEffect(() => {
-    if (!grid || finished || !startTime) return;
+    if (!queue || finished || !startTime) return;
     const id = setInterval(() => setElapsedMs(Date.now() - startTime), 100);
     return () => clearInterval(id);
-  }, [grid, finished, startTime]);
+  }, [queue, finished, startTime]);
 
   const fmt = (ms) => (Math.max(0, ms) / 1000).toFixed(1) + "s";
 
-  const newGame = () => {
-    setGrid(newQueuedGrid());
+  const newRun = () => {
+    setQueue(Array.from({ length: WIN_TARGET }, () => newQueuedGrid()));
+    setSolvedCount(0);
     setFinished(false);
     setFinalMs(null);
     setIsNewBest(false);
@@ -684,7 +703,7 @@ function PracticeGame({ onBack }) {
     setStartTime(Date.now());
   };
 
-  const finishGame = (ms) => {
+  const finishRun = (ms) => {
     setFinished(true);
     setFinalMs(ms);
     if (bestMs == null || ms < bestMs) {
@@ -697,7 +716,8 @@ function PracticeGame({ onBack }) {
   };
 
   const tapCell = (idx) => {
-    if (!grid || finished) return;
+    if (!queue || finished) return;
+    const grid = queue[0];
     const pieceId = grid.cellPiece[idx];
     if (pieceId < 0) return;
     const piece = grid.pieces[pieceId];
@@ -711,24 +731,36 @@ function PracticeGame({ onBack }) {
     const newPieces = grid.pieces.map((p) => (p.id === pieceId ? { ...p, cleared: true } : p));
     const remaining = newPieces.some((p) => p.color === activeColor && !p.cleared);
     const newIndex = remaining ? grid.activeColorIndex : grid.activeColorIndex + 1;
-    const newGrid = { ...grid, pieces: newPieces, activeColorIndex: newIndex };
-    setGrid(newGrid);
+
     if (newIndex >= grid.colorOrder.length) {
-      finishGame(Date.now() - startTime);
+      const newQueue = queue.slice(1);
+      const newSolvedCount = solvedCount + 1;
+      if (newQueue.length === 0) {
+        finishRun(Date.now() - startTime);
+        setSolvedCount(newSolvedCount);
+      } else {
+        setQueue(newQueue);
+        setSolvedCount(newSolvedCount);
+      }
+      return;
     }
+    const newGrid = { ...grid, pieces: newPieces, activeColorIndex: newIndex };
+    setQueue([newGrid, ...queue.slice(1)]);
   };
 
-  if (!grid) {
+  if (!queue) {
     return (
       <Screen style={{ justifyContent: "center" }}>
         <Title size={26}>🏋️ Practicar</Title>
-        <Sub style={{ marginTop: -10 }}>Solo/a, contra el reloj — sin ataques ni rivales</Sub>
+        <Sub style={{ marginTop: -10 }}>
+          Solo/a, contra el reloj — {WIN_TARGET} grillas seguidas, sin ataques ni rivales
+        </Sub>
         {bestMs != null && (
           <Sub style={{ marginTop: -6 }}>
             🏆 Tu mejor tiempo: <b style={{ color: "#FFD23F" }}>{fmt(bestMs)}</b>
           </Sub>
         )}
-        <BigButton onClick={newGame}>Empezar ▶️</BigButton>
+        <BigButton onClick={newRun}>Empezar ▶️</BigButton>
         <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
           Volver
         </BigButton>
@@ -736,9 +768,13 @@ function PracticeGame({ onBack }) {
     );
   }
 
+  const currentGrid = queue[0];
+  const isLastGrid = queue.length === 1;
+  const bwPhase = !finished && isLastGrid && Math.floor(Date.now() / FLICKER_PERIOD_MS) % 2 === 1;
+
   return (
     <Screen
-      homeConfirm={finished ? null : "¿Salir? Perdés el tiempo de este intento."}
+      homeConfirm={finished ? null : "¿Salir? Perdés el progreso de este intento."}
       style={{ padding: "20px 10px 40px" }}
     >
       <Title size={24}>🏋️ Practicando</Title>
@@ -758,19 +794,23 @@ function PracticeGame({ onBack }) {
       {finished ? (
         <Card style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
           {isNewBest && <div style={{ color: "#3DDC84", fontWeight: 800, marginBottom: 10 }}>🎉 ¡Nueva mejor marca!</div>}
-          <BigButton onClick={newGame}>Otra 🔁</BigButton>
+          <BigButton onClick={newRun}>Otra 🔁</BigButton>
           <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
             Volver
           </BigButton>
         </Card>
       ) : (
         <>
-          <ColorBanner grid={grid} />
-          <GridBoard grid={grid} onTap={tapCell} shake={wrongFlash} bw={false} />
+          <Sub style={{ marginTop: 0, marginBottom: 8, fontSize: 13 }}>
+            Grilla <b style={{ color: "#FFD23F" }}>{solvedCount + 1}</b> de {WIN_TARGET}
+            {isLastGrid ? " · ¡última! 🏁" : ""}
+          </Sub>
+          <GridBoard grid={currentGrid} onTap={tapCell} shake={wrongFlash} bw={bwPhase} />
+          <ColorIndicator grid={currentGrid} bw={bwPhase} />
         </>
       )}
       {!finished && (
-        <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0", marginTop: 4 }}>
+        <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0", marginTop: 16 }}>
           Salir
         </BigButton>
       )}
@@ -1376,8 +1416,8 @@ function GameRoom({ roomCode, myId, onBack }) {
             <b style={{ color: "#FFD23F" }}>{myState.queue.length}</b>
             {(myState.solvedCount || 0) >= WIN_TARGET ? " · ✅ ya calificaste" : ""}
           </Sub>
-          <ColorBanner grid={currentGrid} />
           <GridBoard grid={currentGrid} onTap={tapCell} shake={wrongFlash} bw={bwPhase} />
+          <ColorIndicator grid={currentGrid} bw={bwPhase} />
         </>
       ) : (
         <Sub>Esperando la próxima grilla...</Sub>
