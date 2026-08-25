@@ -1043,15 +1043,69 @@ function GameRoom({ roomCode, myId, onBack }) {
   const [wrongFlash, setWrongFlash] = useState(false);
   const [showTargetPicker, setShowTargetPicker] = useState(false);
   const [now, setNow] = useState(Date.now());
-  // Los clicks en piezas se encolan acá para procesarse de a uno: si tocás
-  // dos piezas rápido, el segundo click tiene que partir del resultado que
-  // el primero ya guardó en el servidor, no de una copia vieja en memoria
-  // (si no, el segundo click puede "revivir" la pieza que borró el primero).
-  // pendingWritesRef, mientras hay escrituras en vuelo, evita además que el
-  // sondeo cada 1s pise mi propio estado local con una lectura del server
-  // que todavía no llegó a reflejar el último click.
-  const tapChainRef = useRef(Promise.resolve());
+  // Cada click aplica YA en lo local (instantáneo, sin esperar red) y el
+  // guardado real al servidor pasa en segundo plano por acá. myLiveStateRef
+  // es la fuente de verdad de "mi estado" en todo momento (se lee y escribe
+  // de forma síncrona, así que nunca queda desactualizada entre clicks
+  // rápidos, a diferencia de leer del estado de React que puede tardar un
+  // tick en reflejarse). El sync en segundo plano relee el servidor recién
+  // antes de escribir y solo "estampa" mi progreso encima — así, si llegó
+  // un ataque mientras tanto (alguien me sumó una grilla al final de la
+  // cola), no se pierde: se preserva y se agrega. pendingWritesRef, mientras
+  // hay una sincronización en vuelo, evita que el sondeo cada 1s pise mi
+  // propio estado local con una lectura del server que todavía no llegó a
+  // reflejar el último click.
+  const myLiveStateRef = useRef(null);
   const pendingWritesRef = useRef(0);
+  const syncingRef = useRef(false);
+  const syncDirtyRef = useRef(false);
+
+  // Persiste myLiveStateRef.current al servidor. Relee fresco justo antes de
+  // escribir y conserva cualquier grilla extra que haya llegado por ataque
+  // desde la última vez que sincronizamos (fresh.queue puede ser más larga
+  // que la que conocíamos localmente). Se corre en loop propio: si durante
+  // una sincronización se pide otra (por otro click), no se pisan ni se
+  // amontonan pedidos — cuando termina la que está en curso, vuelve a
+  // sincronizar una vez más con el estado más nuevo, y listo.
+  const runSyncLoop = async (roomCode, round, myId) => {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+    pendingWritesRef.current += 1;
+    try {
+      while (syncDirtyRef.current) {
+        syncDirtyRef.current = false;
+        const cur = myLiveStateRef.current;
+        if (!cur) break;
+        const fresh = (await readPlayerState(roomCode, round, myId)) || cur;
+        const liveQueue = myLiveStateRef.current.queue || [];
+        const extra = (fresh.queue || []).length > liveQueue.length ? fresh.queue.slice(liveQueue.length) : [];
+        const liveNow = myLiveStateRef.current;
+        const merged = {
+          ...fresh,
+          queue: liveQueue.concat(extra),
+          solvedCount: liveNow.solvedCount,
+          lastAttacked: liveNow.lastAttacked,
+          alive: liveNow.alive === false || fresh.alive === false ? false : true,
+          eliminatedAt: liveNow.eliminatedAt || fresh.eliminatedAt || null,
+        };
+        await writePlayerState(roomCode, round, myId, merged);
+      }
+    } finally {
+      syncingRef.current = false;
+      pendingWritesRef.current = Math.max(0, pendingWritesRef.current - 1);
+    }
+  };
+  const scheduleSync = () => {
+    syncDirtyRef.current = true;
+    runSyncLoop(roomCode, room ? room.round || 1 : 1, myId);
+  };
+  // Aplica `next` como mi estado YA (React + la referencia síncrona) y pide
+  // que se guarde en segundo plano.
+  const setMyStateNow = (next) => {
+    myLiveStateRef.current = next;
+    setPlayerStates((m) => ({ ...m, [myId]: next }));
+    scheduleSync();
+  };
 
   const leaveRoom = async () => {
     try {
@@ -1076,6 +1130,11 @@ function GameRoom({ roomCode, myId, onBack }) {
       if (r.phase === "playing" || r.phase === "ended") {
         const states = await listPlayerStates(roomCode, round);
         if (cancelled) return;
+        // Mientras tengo una sincronización propia en vuelo, no piso mi
+        // estado local (ni la referencia síncrona que usan los clicks) con
+        // esta lectura del server, que puede no reflejar todavía el último
+        // click.
+        if (pendingWritesRef.current === 0) myLiveStateRef.current = states[myId] || myLiveStateRef.current;
         setPlayerStates((prev) =>
           pendingWritesRef.current > 0 && prev[myId] ? { ...states, [myId]: prev[myId] } : states
         );
@@ -1147,6 +1206,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     fresh.nextEliminationAt = Date.now() + ELIMINATION_INTERVAL_MS;
     await writeRoom(roomCode, fresh);
     setRoom(fresh);
+    myLiveStateRef.current = newStates[myId] || null;
     setPlayerStates(newStates);
   };
 
@@ -1293,77 +1353,78 @@ function GameRoom({ roomCode, myId, onBack }) {
     !isFinalPhase && room.nextEliminationAt ? Math.max(0, Math.ceil((room.nextEliminationAt - now) / 1000)) : null;
   const bwPhase = isFinalPhase && Math.floor(now / FLICKER_PERIOD_MS) % 2 === 1;
 
-  const performAttack = async (targetId) => {
-    const freshTarget = (await readPlayerState(roomCode, round, targetId)) || {
-      queue: [],
-      solvedCount: 0,
-      alive: true,
-      lastAttacked: null,
-      eliminatedAt: null,
-    };
-    const newQueue = [...(freshTarget.queue || []), newQueuedGrid()];
-    const overflowed = newQueue.length >= MAX_QUEUE_OVERFLOW;
-    const nextTargetState = {
-      ...freshTarget,
-      queue: newQueue,
-      alive: overflowed ? false : freshTarget.alive,
-      eliminatedAt: overflowed && freshTarget.alive !== false ? Date.now() : freshTarget.eliminatedAt,
-    };
-    await writePlayerState(roomCode, round, targetId, nextTargetState);
-    setPlayerStates((m) => ({ ...m, [targetId]: nextTargetState }));
-
-    const freshMe = (await readPlayerState(roomCode, round, myId)) || myState;
-    const nextMe = { ...freshMe, lastAttacked: targetId };
-    await writePlayerState(roomCode, round, myId, nextMe);
-    setPlayerStates((m) => ({ ...m, [myId]: nextMe }));
+  // El picker se cierra YA (no espera red); los dos guardados (la grilla
+  // extra para el rival, y mi propio "a quién ataqué") pasan en segundo
+  // plano. El del rival no lo puedo hacer instantáneo en SU pantalla (no es
+  // mi estado), pero tampoco hace falta: lo va a ver en su próximo sondeo.
+  const performAttack = (targetId) => {
     setShowTargetPicker(false);
+    const cur = myLiveStateRef.current;
+    if (cur) setMyStateNow({ ...cur, lastAttacked: targetId });
+    (async () => {
+      const freshTarget = (await readPlayerState(roomCode, round, targetId)) || {
+        queue: [],
+        solvedCount: 0,
+        alive: true,
+        lastAttacked: null,
+        eliminatedAt: null,
+      };
+      const newQueue = [...(freshTarget.queue || []), newQueuedGrid()];
+      const overflowed = newQueue.length >= MAX_QUEUE_OVERFLOW;
+      const nextTargetState = {
+        ...freshTarget,
+        queue: newQueue,
+        alive: overflowed ? false : freshTarget.alive,
+        eliminatedAt: overflowed && freshTarget.alive !== false ? Date.now() : freshTarget.eliminatedAt,
+      };
+      await writePlayerState(roomCode, round, targetId, nextTargetState);
+      setPlayerStates((m) => ({ ...m, [targetId]: nextTargetState }));
+    })();
   };
 
   // Se llama cuando se completaron los 6 colores de la grilla que está
-  // primera en la cola: la saca de la cola. En la final, terminar la grilla
-  // gana la partida directamente; si no, se rellena la cola si quedó vacía
-  // (para que siempre haya algo por resolver) y se ofrece atacar.
-  // `freshOverride` es el estado que ya leyó processTap justo antes de
-  // llamar acá — evita una segunda lectura innecesaria (y otra ventana de
-  // carrera con un ataque entrante).
-  const completeCurrentGrid = async (freshOverride) => {
-    const fresh = freshOverride || (await readPlayerState(roomCode, round, myId)) || myState;
-    const newQueue = fresh.queue.slice(1);
-    const solvedCount = (fresh.solvedCount || 0) + 1;
+  // primera en la cola: la saca de la cola YA (instantáneo). En la final,
+  // terminar la grilla gana la partida directamente (se refleja en el toque
+  // también al instante); si no, se rellena la cola si quedó vacía (para
+  // que siempre haya algo por resolver) y se ofrece atacar.
+  const completeCurrentGrid = (cur) => {
+    const newQueue = cur.queue.slice(1);
+    const solvedCount = (cur.solvedCount || 0) + 1;
 
     if (isFinalPhase) {
-      const freshRoom = await readRoom(roomCode);
-      if (freshRoom && freshRoom.phase === "playing") {
-        freshRoom.phase = "ended";
-        freshRoom.winnerId = myId;
-        await writeRoom(roomCode, freshRoom);
-        setRoom(freshRoom);
-      }
-      const next = { ...fresh, queue: newQueue, solvedCount };
-      await writePlayerState(roomCode, round, myId, next);
-      setPlayerStates((m) => ({ ...m, [myId]: next }));
+      setRoom((r) => (r ? { ...r, phase: "ended", winnerId: myId } : r));
+      const next = { ...cur, queue: newQueue, solvedCount };
+      setMyStateNow(next);
+      (async () => {
+        const freshRoom = await readRoom(roomCode);
+        if (freshRoom && freshRoom.phase === "playing") {
+          freshRoom.phase = "ended";
+          freshRoom.winnerId = myId;
+          await writeRoom(roomCode, freshRoom);
+        }
+      })();
       return;
     }
 
     const refilledQueue = newQueue.length === 0 ? [newQueuedGrid()] : newQueue;
-    const next = { ...fresh, queue: refilledQueue, solvedCount };
-    await writePlayerState(roomCode, round, myId, next);
-    setPlayerStates((m) => ({ ...m, [myId]: next }));
+    const next = { ...cur, queue: refilledQueue, solvedCount };
+    setMyStateNow(next);
     setShowTargetPicker(true);
   };
 
-  // Procesa un click contra el estado MÁS FRESCO posible (recién leído del
-  // server), nunca contra la copia que teníamos en memoria — así, aunque el
-  // click anterior todavía no se haya reflejado en `myState`, este no lo pisa.
-  const processTap = async (idx) => {
-    const freshFull = (await readPlayerState(roomCode, round, myId)) || myState;
-    if (!freshFull || freshFull.alive === false) return;
-    const grid = freshFull.queue && freshFull.queue[0];
+  // Aplica el click YA sobre mi estado local (síncrono, instantáneo — nunca
+  // espera red) y pide que se guarde en segundo plano. myLiveStateRef es la
+  // fuente de verdad, así que aunque toques varias piezas rápido cada click
+  // parte del resultado real del anterior, no de una copia vieja.
+  const tapCell = (idx) => {
+    const cur = myLiveStateRef.current;
+    if (!cur || cur.alive === false || showTargetPicker) return;
+    const grid = cur.queue && cur.queue[0];
     if (!grid) return;
     const pieceId = grid.cellPiece[idx];
     if (pieceId == null || pieceId < 0) return;
     const piece = grid.pieces[pieceId];
-    if (piece.cleared) return; // ya la agarró un click anterior
+    if (piece.cleared) return;
     const activeColor = grid.colorOrder[grid.activeColorIndex];
     if (piece.color !== activeColor) {
       setWrongFlash(true);
@@ -1376,27 +1437,11 @@ function GameRoom({ roomCode, myId, onBack }) {
     const newGrid = { ...grid, pieces: newPieces, activeColorIndex: newIndex };
 
     if (newIndex >= grid.colorOrder.length) {
-      await completeCurrentGrid(freshFull);
+      completeCurrentGrid(cur);
       return;
     }
-    const freshQueue = [...freshFull.queue];
-    freshQueue[0] = newGrid;
-    const next = { ...freshFull, queue: freshQueue };
-    await writePlayerState(roomCode, round, myId, next);
-    setPlayerStates((m) => ({ ...m, [myId]: next }));
-  };
-
-  // Encola el click detrás de cualquier otro que todavía se esté guardando,
-  // para que el server los procese siempre de a uno y en orden.
-  const tapCell = (idx) => {
-    if (!myState || !iAmAlive || showTargetPicker) return;
-    pendingWritesRef.current += 1;
-    tapChainRef.current = tapChainRef.current
-      .then(() => processTap(idx))
-      .catch(() => {})
-      .then(() => {
-        pendingWritesRef.current = Math.max(0, pendingWritesRef.current - 1);
-      });
+    const nextQueue = [newGrid, ...cur.queue.slice(1)];
+    setMyStateNow({ ...cur, queue: nextQueue });
   };
 
   const currentGrid = myState && myState.queue && myState.queue[0];
