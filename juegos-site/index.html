@@ -139,46 +139,46 @@
   }
   .counter b { color: #FFD23F; font-family: 'Baloo 2', sans-serif; }
 
+  /* ---------- Cada juego es un botón 3D con relieve, el mismo lenguaje
+     que ya usan los botones adentro de cada juego (BigButton): fondo
+     sólido de color + un "labio" grueso hecho con box-shadow sin blur
+     (0 Npx 0), y al tocarlo se hunde (translateY) como un botón físico
+     de verdad. Nada de cortinas ni pantallas intermedias: el feedback
+     vive en el botón y ahí mismo navega. ---------- */
   .card {
     width: 100%; max-width: 380px;
     display: flex; align-items: center; gap: 14px;
-    background: rgba(12,6,32,0.55);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    border: 1px solid rgba(255,255,255,0.14);
+    background: var(--card-color);
+    border: none;
     border-radius: 18px;
     padding: 16px 18px;
-    margin-bottom: 14px;
+    margin-bottom: 18px;
     text-decoration: none;
-    color: inherit;
+    color: #1B1035;
     opacity: 0;
     transform: translateY(10px);
     animation: card-in 0.5s ease both;
-    transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+    box-shadow: 0 6px 0 rgba(0,0,0,0.28);
+    transition: transform 0.08s ease;
   }
-  .card:nth-child(1) { animation-delay: 0.05s; }
-  .card:nth-child(2) { animation-delay: 0.11s; }
-  .card:nth-child(3) { animation-delay: 0.17s; }
-  .card:nth-child(4) { animation-delay: 0.23s; }
-  .card:nth-child(5) { animation-delay: 0.29s; }
-  .card:nth-child(6) { animation-delay: 0.35s; }
+  .card:nth-of-type(1) { --card-color: #FF3E7F; animation-delay: 0.05s; }
+  .card:nth-of-type(2) { --card-color: #B983FF; animation-delay: 0.11s; }
+  .card:nth-of-type(3) { --card-color: #FF9F1C; animation-delay: 0.17s; }
+  .card:nth-of-type(4) { --card-color: #FF5D7A; animation-delay: 0.23s; }
+  .card:nth-of-type(5) { --card-color: #3DDC84; animation-delay: 0.29s; }
+  .card:nth-of-type(6) { --card-color: #FFD23F; animation-delay: 0.35s; }
   @keyframes card-in {
     to { opacity: 1; transform: translateY(0); }
   }
-  .card:hover {
-    background: rgba(20,10,48,0.7);
-    border-color: rgba(255,210,63,0.5);
-    transform: translateY(-2px);
-  }
-  .card:active { transform: translateY(1px) scale(0.99); }
+  .card:hover { filter: brightness(1.06); }
+  .card.pressed { transform: translateY(5px); box-shadow: 0 1px 0 rgba(0,0,0,0.28); }
   .card.disabled { opacity: 0.45; pointer-events: none; }
-  .emoji { font-size: 34px; transition: transform 0.15s ease; }
-  .card:hover .emoji { transform: scale(1.12) rotate(-4deg); }
-  .name { font-family: 'Baloo 2', sans-serif; font-weight: 700; font-size: 18px; color: #F3EEFF; }
-  .tag { font-size: 12px; color: #C9B8F0; }
+  .emoji { font-size: 34px; }
+  .name { font-family: 'Baloo 2', sans-serif; font-weight: 700; font-size: 18px; color: #1B1035; }
+  .tag { font-size: 12px; color: rgba(27,16,53,0.72); font-weight: 700; }
   @media (prefers-reduced-motion: reduce) {
     .card { opacity: 1; transform: none; animation: none; }
+    .card.pressed { transform: none; }
   }
 
 </style>
@@ -266,6 +266,29 @@
         // sin contador visible, no molesta a nadie
       }
     })();
+
+    // Feedback de botón 3D: se hunde al tocarlo, como un botón físico
+    // (mismo patrón que BigButton adentro de cada juego). La navegación
+    // del <a> sigue su curso normal en el click, sin delay artificial.
+    document.querySelectorAll(".card").forEach((card) => {
+      const press = () => {
+        if (card.classList.contains("disabled")) return;
+        // Si tocan el botón justo durante la animación de entrada, primero
+        // lo dejamos en su estado final (visible) y recién ahí cortamos la
+        // animación — si no, "animation: none" lo congela tal cual estaba
+        // a mitad de camino (a veces todavía en opacity 0, invisible).
+        card.style.opacity = "1";
+        card.style.animation = "none";
+        card.classList.add("pressed");
+      };
+      const release = () => card.classList.remove("pressed");
+      card.addEventListener("mousedown", press);
+      card.addEventListener("touchstart", press, { passive: true });
+      card.addEventListener("mouseup", release);
+      card.addEventListener("mouseleave", release);
+      card.addEventListener("touchend", release);
+      card.addEventListener("touchcancel", release);
+    });
   </script>
 </body>
 </html>
