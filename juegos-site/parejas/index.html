@@ -18,12 +18,14 @@
     inset: -15vh -15vw;
     z-index: 9999;
     pointer-events: none;
-    background: #D9E7FB;
+    background-color: #D9E7FB;
+    background-image: url("../cloud-mass.svg");
+    background-size: cover;
+    background-position: center;
     transform: translateX(0);
     transition: transform 0.6s cubic-bezier(.4, 0, .2, 1);
   }
   .cloud-wipe.cw-hidden-right { transform: translateX(125%); }
-  .cw-c { position: absolute; line-height: 1; }
   @media (prefers-reduced-motion: reduce) {
     .cloud-wipe { transition: none !important; }
   }
@@ -34,23 +36,7 @@
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js" defer></script>
 </head>
 <body>
-<div class="cloud-wipe" id="cloudWipe">
-  <span class="cw-c" style="left:-10%; top:-12%; font-size:38vmin;">☁️</span>
-  <span class="cw-c" style="left:12%; top:-8%; font-size:34vmin;">☁️</span>
-  <span class="cw-c" style="left:34%; top:-13%; font-size:38vmin;">☁️</span>
-  <span class="cw-c" style="left:56%; top:-7%; font-size:34vmin;">☁️</span>
-  <span class="cw-c" style="left:78%; top:-11%; font-size:36vmin;">☁️</span>
-  <span class="cw-c" style="left:-8%; top:26%; font-size:36vmin;">☁️</span>
-  <span class="cw-c" style="left:14%; top:30%; font-size:38vmin;">☁️</span>
-  <span class="cw-c" style="left:36%; top:24%; font-size:32vmin;">☁️</span>
-  <span class="cw-c" style="left:58%; top:32%; font-size:36vmin;">☁️</span>
-  <span class="cw-c" style="left:80%; top:26%; font-size:34vmin;">☁️</span>
-  <span class="cw-c" style="left:-10%; top:60%; font-size:38vmin;">☁️</span>
-  <span class="cw-c" style="left:12%; top:64%; font-size:34vmin;">☁️</span>
-  <span class="cw-c" style="left:34%; top:58%; font-size:36vmin;">☁️</span>
-  <span class="cw-c" style="left:56%; top:63%; font-size:32vmin;">☁️</span>
-  <span class="cw-c" style="left:78%; top:59%; font-size:38vmin;">☁️</span>
-</div>
+<div class="cloud-wipe" id="cloudWipe"></div>
 <script>
   // Corre la pared de nubes hacia la derecha para revelar el juego ya cargado.
   (function () {
