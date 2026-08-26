@@ -146,20 +146,42 @@
      de verdad. Nada de cortinas ni pantallas intermedias: el feedback
      vive en el botón y ahí mismo navega. ---------- */
   .card {
+    position: relative;
     width: 100%; max-width: 380px;
     display: flex; align-items: center; gap: 14px;
-    background: var(--card-color);
-    border: none;
+    background: color-mix(in srgb, var(--card-color) 50%, #1c1030);
+    border: 1px solid color-mix(in srgb, var(--card-color) 55%, transparent);
     border-radius: 18px;
     padding: 16px 18px;
     margin-bottom: 18px;
     text-decoration: none;
-    color: #1B1035;
+    color: #F3EEFF;
     opacity: 0;
     transform: translateY(10px);
     animation: card-in 0.5s ease both;
     box-shadow: 0 6px 0 rgba(0,0,0,0.28);
     transition: transform 0.08s ease;
+    counter-increment: game-num;
+  }
+  .page { counter-reset: game-num; }
+  .card::before {
+    content: counter(game-num);
+    position: absolute;
+    top: -8px;
+    left: -8px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1B1035;
+    color: #FFD23F;
+    font-family: 'Baloo 2', sans-serif;
+    font-weight: 800;
+    font-size: 12px;
+    border: 2px solid rgba(255,255,255,0.3);
+    box-shadow: 0 2px 0 rgba(0,0,0,0.3);
   }
   .card:nth-of-type(1) { --card-color: #FF3E7F; animation-delay: 0.05s; }
   .card:nth-of-type(2) { --card-color: #B983FF; animation-delay: 0.11s; }
@@ -174,8 +196,8 @@
   .card.pressed { transform: translateY(5px); box-shadow: 0 1px 0 rgba(0,0,0,0.28); }
   .card.disabled { opacity: 0.45; pointer-events: none; }
   .emoji { font-size: 34px; }
-  .name { font-family: 'Baloo 2', sans-serif; font-weight: 700; font-size: 18px; color: #1B1035; }
-  .tag { font-size: 12px; color: rgba(27,16,53,0.72); font-weight: 700; }
+  .name { font-family: 'Baloo 2', sans-serif; font-weight: 700; font-size: 18px; color: #F3EEFF; }
+  .tag { font-size: 12px; color: rgba(243,238,255,0.75); font-weight: 700; }
   @media (prefers-reduced-motion: reduce) {
     .card { opacity: 1; transform: none; animation: none; }
     .card.pressed { transform: none; }
