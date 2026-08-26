@@ -587,8 +587,12 @@ function BigButton({ children, onClick, color = C.rose, disabled, style }) {
       onClick={onClick}
       disabled={disabled}
       style={{
-        width: "100%", maxWidth: 400, padding: "16px 20px", borderRadius: 18, border: "none",
-        background: disabled ? "#5a3a42" : color, color: disabled ? "#9a7d82" : "#2B0F1E",
+        boxSizing: "border-box",
+        width: "100%", maxWidth: 400, padding: "16px 20px", borderRadius: 18,
+        border: disabled ? "none" : `1.5px solid color-mix(in srgb, ${color} 70%, transparent)`,
+        background: disabled ? "#5a3a42" : `color-mix(in srgb, ${color} 50%, transparent)`,
+        color: disabled ? "#9a7d82" : "#FBEEF0",
+        textShadow: disabled ? "none" : "0 1px 3px rgba(0,0,0,0.45)",
         fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17,
         boxShadow: disabled ? "none" : "0 6px 0 rgba(0,0,0,0.28)", cursor: disabled ? "default" : "pointer",
         marginBottom: 14, transition: "transform 0.08s ease", ...style,
@@ -1683,54 +1687,56 @@ function App() {
       <div style={{ position: "relative", zIndex: 1, width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
         <div style={{ fontSize: 60, marginBottom: 6 }}>{cfg.emoji}</div>
         <Title size={32}>{cfg.label}</Title>
-        <Sub>
-          {cfg.subtitle}
-          <br />Un juego para jugar en mesa, cada uno con su celu.
-        </Sub>
+        <Card style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <Sub>
+            {cfg.subtitle}
+            <br />Un juego para jugar en mesa, cada uno con su celu.
+          </Sub>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap", justifyContent: "center" }}>
-          {MODE_ORDER.map((key) => {
-            const m = MODES[key];
-            const active = key === gameMode;
-            return (
-              <button
-                key={key}
-                onClick={() => setGameMode(key)}
-                style={{
-                  padding: "8px 14px", borderRadius: 20, cursor: "pointer",
-                  background: active ? C.gold : "rgba(255,255,255,0.08)",
-                  color: active ? "#2B0F1E" : C.textMuted,
-                  border: `1px solid ${active ? C.gold : "rgba(255,255,255,0.16)"}`,
-                  fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 14,
-                }}
-              >
-                {m.emoji} {m.label}
-              </button>
-            );
-          })}
-        </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap", justifyContent: "center" }}>
+            {MODE_ORDER.map((key) => {
+              const m = MODES[key];
+              const active = key === gameMode;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setGameMode(key)}
+                  style={{
+                    padding: "8px 14px", borderRadius: 20, cursor: "pointer",
+                    background: active ? C.gold : "rgba(255,255,255,0.08)",
+                    color: active ? "#2B0F1E" : C.textMuted,
+                    border: `1px solid ${active ? C.gold : "rgba(255,255,255,0.16)"}`,
+                    fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 14,
+                  }}
+                >
+                  {m.emoji} {m.label}
+                </button>
+              );
+            })}
+          </div>
 
-        {resumable && (
-          <button
-            onClick={() => {
-              setRoomCode(resumable.code);
-              setMyId(resumable.playerId);
-              setScreen("room");
-            }}
-            style={{
-              width: "100%", maxWidth: 400, textAlign: "left", borderRadius: 18, padding: 16, marginBottom: 14,
-              cursor: "pointer", background: "rgba(255,184,77,0.16)", border: `1px solid ${C.gold}`,
-              color: "#FBEEF0", fontFamily: "'Nunito', sans-serif",
-            }}
-          >
-            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, color: C.gold, fontSize: 16 }}>
-              ↩️ Volver a tu sala ({resumable.code})
-            </div>
-            <div style={{ fontSize: 13.5, color: C.textMuted, marginTop: 2 }}>{resumable.roomName}</div>
-          </button>
-        )}
-        <BigButton onClick={() => setScreen("create")}>💌 Crear sala</BigButton>
-        <BigButton onClick={() => setScreen("join")} color={C.gold}>🔗 Unirme a una sala</BigButton>
+          {resumable && (
+            <button
+              onClick={() => {
+                setRoomCode(resumable.code);
+                setMyId(resumable.playerId);
+                setScreen("room");
+              }}
+              style={{
+                width: "100%", maxWidth: 400, textAlign: "left", borderRadius: 18, padding: 16, marginBottom: 14,
+                cursor: "pointer", background: "rgba(255,184,77,0.16)", border: `1px solid ${C.gold}`,
+                color: "#FBEEF0", fontFamily: "'Nunito', sans-serif",
+              }}
+            >
+              <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, color: C.gold, fontSize: 16 }}>
+                ↩️ Volver a tu sala ({resumable.code})
+              </div>
+              <div style={{ fontSize: 13.5, color: C.textMuted, marginTop: 2 }}>{resumable.roomName}</div>
+            </button>
+          )}
+          <BigButton onClick={() => setScreen("create")}>💌 Crear sala</BigButton>
+          <BigButton onClick={() => setScreen("join")} color={C.gold}>🔗 Unirme a una sala</BigButton>
+        </Card>
       </div>
     </Screen>
   );

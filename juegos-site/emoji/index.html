@@ -364,27 +364,32 @@ function Home({ onSelect }) {
           <h1 className="text-4xl font-black tracking-tight text-white">
             Adiviná el <span style={{ color: C.gold }}>Emoji</span>
           </h1>
-          <p className="mt-2 text-base" style={{ color: C.textMuted }}>
+        </div>
+        <div
+          className="rounded-3xl"
+          style={{ backgroundColor: C.card, border: `1px solid ${C.cardBorder}`, padding: 20, boxSizing: "border-box" }}
+        >
+          <p className="text-base text-center mb-4" style={{ color: C.textMuted }}>
             Elegí cómo quieren jugar
           </p>
-        </div>
-        <div className="space-y-3">
-          {cards.map((c) => (
-            <button
-              key={c.mode}
-              onClick={() => onSelect(c.mode)}
-              className="w-full text-left rounded-3xl p-5 transition"
-              style={{ backgroundColor: C.card, border: `1px solid ${C.cardBorder}` }}
-            >
-              <div className="flex items-center gap-3 mb-1">
-                <span className="text-3xl">{c.icon}</span>
-                <span className="font-black text-lg text-white">{c.title}</span>
-              </div>
-              <p className="text-base" style={{ color: C.textMuted }}>
-                {c.desc}
-              </p>
-            </button>
-          ))}
+          <div className="space-y-3">
+            {cards.map((c) => (
+              <button
+                key={c.mode}
+                onClick={() => onSelect(c.mode)}
+                className="w-full text-left rounded-3xl p-5 transition"
+                style={{ backgroundColor: "rgba(0,0,0,0.18)", border: `1px solid ${C.cardBorder}` }}
+              >
+                <div className="flex items-center gap-3 mb-1">
+                  <span className="text-3xl">{c.icon}</span>
+                  <span className="font-black text-lg text-white">{c.title}</span>
+                </div>
+                <p className="text-base" style={{ color: C.textMuted }}>
+                  {c.desc}
+                </p>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>

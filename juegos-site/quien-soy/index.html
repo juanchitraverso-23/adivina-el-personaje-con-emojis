@@ -271,13 +271,15 @@ function BigButton({ children, onClick, color = "#FF3E7F", disabled, style }) {
       onClick={onClick}
       disabled={disabled}
       style={{
+        boxSizing: "border-box",
         width: "100%",
         maxWidth: 380,
         padding: "16px 20px",
         borderRadius: 18,
-        border: "none",
-        background: disabled ? "#4a3d63" : color,
-        color: disabled ? "#8b7fa8" : "#1B1035",
+        border: disabled ? "none" : `1.5px solid color-mix(in srgb, ${color} 70%, transparent)`,
+        background: disabled ? "#4a3d63" : `color-mix(in srgb, ${color} 50%, transparent)`,
+        color: disabled ? "#8b7fa8" : "#F3EEFF",
+        textShadow: disabled ? "none" : "0 1px 3px rgba(0,0,0,0.45)",
         fontFamily: "'Baloo 2', sans-serif",
         fontWeight: 700,
         fontSize: 18,
@@ -416,19 +418,21 @@ function Home({ onSelect }) {
       <div style={{ position: "relative", zIndex: 1, width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
         <div style={{ fontSize: 64, marginBottom: 6 }}>🕵️‍♂️</div>
         <Title size={36}>¿Quién Soy?</Title>
-        <Sub>
-          Uno piensa una persona o personaje famoso y lo describe con emojis.
-          Los demás intentan adivinar. ¡Sin hablar!
-        </Sub>
-        <BigButton onClick={() => onSelect("offline")} color="#FF3E7F">
-          📴 Jugar Offline (pasando el celu)
-        </BigButton>
-        <BigButton onClick={() => onSelect("online")} color="#5B4B8A">
-          🌐 Jugar Online
-        </BigButton>
-        <BigButton onClick={() => onSelect("simultaneo")} color="#FFD23F" style={{ color: "#1B1035" }}>
-          🎉 Todos a la vez
-        </BigButton>
+        <Card style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <Sub>
+            Uno piensa una persona o personaje famoso y lo describe con emojis.
+            Los demás intentan adivinar. ¡Sin hablar!
+          </Sub>
+          <BigButton onClick={() => onSelect("offline")} color="#FF3E7F">
+            📴 Jugar Offline (pasando el celu)
+          </BigButton>
+          <BigButton onClick={() => onSelect("online")} color="#5B4B8A">
+            🌐 Jugar Online
+          </BigButton>
+          <BigButton onClick={() => onSelect("simultaneo")} color="#FFD23F">
+            🎉 Todos a la vez
+          </BigButton>
+        </Card>
       </div>
     </Screen>
   );
