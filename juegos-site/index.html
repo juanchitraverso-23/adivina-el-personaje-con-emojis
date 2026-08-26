@@ -180,6 +180,36 @@
   @media (prefers-reduced-motion: reduce) {
     .card { opacity: 1; transform: none; animation: none; }
   }
+
+  /* ---------- Transición al tocar un juego: una tapada de nubes bien
+     grandes cruza la pantalla de lado a lado; recién cuando ya tapó todo
+     navegamos — así el salto a la otra página queda escondido detrás.
+     Todo el movimiento es un solo "transform: translateX" en un elemento
+     que ya existe en el DOM (nada de escalar ni tocar blur), por eso es
+     mucho más simple y liviano que lo anterior. ---------- */
+  .cloud-wipe {
+    position: fixed;
+    inset: -15vh -15vw;
+    z-index: 70;
+    pointer-events: none;
+    transform: translateX(-125%);
+    transition: transform 0.7s cubic-bezier(.4, 0, .2, 1);
+  }
+  .cloud-wipe.active { transform: translateX(0); }
+  .cloud-wipe-fill {
+    position: absolute;
+    inset: 0;
+    background: #EDE7FB;
+  }
+  .cloud-wipe-emoji {
+    position: absolute;
+    font-size: 42vmin;
+    line-height: 1;
+    filter: drop-shadow(0 10px 0 rgba(0,0,0,0.06));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cloud-wipe { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -251,6 +281,16 @@
     </a>
   </div>
 
+  <div class="cloud-wipe" id="cloudWipe">
+    <div class="cloud-wipe-fill"></div>
+    <span class="cloud-wipe-emoji" style="left: -8%; top: -6%;">☁️</span>
+    <span class="cloud-wipe-emoji" style="left: 24%; top: 14%;">☁️</span>
+    <span class="cloud-wipe-emoji" style="left: 56%; top: -4%;">☁️</span>
+    <span class="cloud-wipe-emoji" style="left: 4%; top: 42%;">☁️</span>
+    <span class="cloud-wipe-emoji" style="left: 38%; top: 48%;">☁️</span>
+    <span class="cloud-wipe-emoji" style="left: 70%; top: 40%;">☁️</span>
+  </div>
+
   <script src="./storage.js"></script>
   <script>
     (async function () {
@@ -265,6 +305,26 @@
         // sin contador visible, no molesta a nadie
       }
     })();
+
+    // Transición al tocar un juego: la tapada de nubes cruza la pantalla
+    // (translateX de -125% a 0%, ya tapa todo bastante antes de terminar
+    // por el sobrante de "inset: -15vh -15vw") y recién cuando ya cubrió
+    // todo navegamos — el salto a la otra página queda escondido detrás.
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let leaving = false;
+    document.querySelectorAll(".card").forEach((card) => {
+      card.addEventListener("click", (e) => {
+        if (card.classList.contains("disabled") || leaving) return;
+        if (reduceMotion) return; // sin animación, navega directo como siempre
+        e.preventDefault();
+        leaving = true;
+        const href = card.getAttribute("href");
+        document.getElementById("cloudWipe").classList.add("active");
+        setTimeout(() => {
+          window.location.href = href;
+        }, 620);
+      });
+    });
   </script>
 </body>
 </html>
