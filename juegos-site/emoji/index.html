@@ -351,8 +351,8 @@ function BgScene() {
 
 function Home({ onSelect }) {
   const cards = [
-    { mode: "online", icon: "🌐", title: "Jugar en varios celus", desc: "Cada uno se conecta a la misma sala. El emoji gigante le aparece solo a quien actúa; los demás ven la cuenta regresiva." },
-    { mode: "offline", icon: "📱", title: "Sin conexión: un solo celu", desc: "Se van pasando el mismo celular. Vos actuás el emoji, y cuando termina el tiempo cada uno lo agarra y elige su respuesta." },
+    { mode: "online", icon: "🌐", title: "Jugar en varios celus", desc: "Cada uno se conecta a la misma sala. El emoji gigante le aparece solo a quien actúa; los demás ven la cuenta regresiva.", color: C.primary },
+    { mode: "offline", icon: "📱", title: "Sin conexión: un solo celu", desc: "Se van pasando el mismo celular. Vos actuás el emoji, y cuando termina el tiempo cada uno lo agarra y elige su respuesta.", color: "#FF6B72" },
   ];
   return (
     <div className="min-h-screen w-full flex items-center justify-center p-6" style={{ backgroundColor: C.bg }}>
@@ -378,13 +378,16 @@ function Home({ onSelect }) {
                 key={c.mode}
                 onClick={() => onSelect(c.mode)}
                 className="w-full text-left rounded-3xl p-5 transition"
-                style={{ backgroundColor: "rgba(0,0,0,0.18)", border: `1px solid ${C.cardBorder}` }}
+                style={{
+                  backgroundColor: `color-mix(in srgb, ${c.color} 50%, transparent)`,
+                  border: `1.5px solid color-mix(in srgb, ${c.color} 70%, transparent)`,
+                }}
               >
                 <div className="flex items-center gap-3 mb-1">
                   <span className="text-3xl">{c.icon}</span>
-                  <span className="font-black text-lg text-white">{c.title}</span>
+                  <span className="font-black text-lg text-white" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.45)" }}>{c.title}</span>
                 </div>
-                <p className="text-base" style={{ color: C.textMuted }}>
+                <p className="text-base" style={{ color: "#F3EEFF", textShadow: "0 1px 3px rgba(0,0,0,0.45)" }}>
                   {c.desc}
                 </p>
               </button>
