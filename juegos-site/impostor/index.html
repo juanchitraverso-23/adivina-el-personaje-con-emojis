@@ -177,73 +177,9 @@
   .resumeBanner .t { font-family: 'Baloo 2', sans-serif; font-weight: 800; color: #B983FF; font-size: 16px; }
   .resumeBanner .s { font-size: 12.5px; color: #C9B8F0; margin-top: 2px; }
 
-  /* ---------- Fondo animado estilo SNES (cielo + sol + nubes + piso Mode 7),
-     igual que la home — solo se muestra en la pantalla de entrada
-     (modeSelect); render() la prende/apaga según state.screen. ---------- */
-  .bg-scene { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
-  .bg-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #241249 0%, #4a2478 20%, #7a3390 42%, #c85a86 62%, #ef7a4f 80%, #ffcf6b 100%); }
-  .bg-sun {
-    position: absolute; left: 50%; top: 7%; width: 120px; height: 120px; margin-left: -60px;
-    border-radius: 50%; background: radial-gradient(circle at 34% 30%, #fff8d8, #ffd23f 55%, #ff9a1c 100%);
-    box-shadow: 0 0 80px 22px rgba(255, 199, 82, 0.5); animation: sun-pulse 3.2s ease-in-out infinite;
-  }
-  @keyframes sun-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
-  .bg-clouds { position: absolute; inset: 0; overflow: hidden; }
-  .bgcloud { position: absolute; font-size: 30px; opacity: 0.92; filter: drop-shadow(0 3px 0 rgba(0,0,0,0.18)); animation: bgdrift linear infinite; }
-  .bgcloud.c1 { top: 12%; font-size: 56px; animation-duration: 26s; }
-  .bgcloud.c2 { top: 24%; font-size: 34px; animation-duration: 34s; animation-delay: -11s; }
-  .bgcloud.c3 { top: 6%;  font-size: 26px; animation-duration: 30s; animation-delay: -21s; }
-  .bgcloud.c4 { top: 33%; font-size: 42px; animation-duration: 40s; animation-delay: -6s; }
-  @keyframes bgdrift { from { transform: translateX(115vw); } to { transform: translateX(-45vw); } }
-  .bg-floor {
-    position: absolute; left: -70%; right: -70%; bottom: -4%; height: 36vh;
-    background-color: #3a1665;
-    background-image: linear-gradient(90deg, rgba(255,255,255,0.16) 50%, transparent 50%), linear-gradient(rgba(255,255,255,0.16) 50%, transparent 50%);
-    background-size: 64px 64px;
-    transform: perspective(280px) rotateX(58deg); transform-origin: bottom;
-    animation: bgfloor-move 1.1s linear infinite;
-  }
-  @keyframes bgfloor-move { from { background-position: 0 0, 0 0; } to { background-position: 64px 0, 0 64px; } }
-  .bg-fade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(12,6,32,0) 0%, rgba(12,6,32,0.15) 40%, rgba(12,6,32,0.6) 75%, rgba(12,6,32,0.9) 100%); }
-  @media (prefers-reduced-motion: reduce) { .bg-sun, .bgcloud, .bg-floor { animation: none; } }
-  body.has-bg-scene .card { background: rgba(12,6,32,0.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); box-shadow: 0 14px 40px rgba(0,0,0,0.55); }
-  /* ---- Pared de nubes que llega ya cubriendo desde home (ver index.html) y
-     se corre hacia la derecha una vez que el juego está listo. Este juego
-     es vanilla JS y ya pinta rápido, pero mantiene la misma pared para que
-     la pasada de nubes se sienta continua entre home y cualquier juego. -- */
-  .cloud-wipe {
-    position: fixed;
-    inset: -15vh -15vw;
-    z-index: 9999;
-    pointer-events: none;
-    background-color: #D9E7FB;
-    background-image: url("../cloud-mass.svg");
-    background-size: cover;
-    background-position: center;
-    transform: translateX(0);
-    transition: transform 0.6s cubic-bezier(.4, 0, .2, 1);
-  }
-  .cloud-wipe.cw-hidden-right { transform: translateX(125%); }
-  @media (prefers-reduced-motion: reduce) {
-    .cloud-wipe { transition: none !important; }
-  }
 </style>
 </head>
 <body>
-<div class="cloud-wipe" id="cloudWipe"></div>
-<script>
-  // Corre la pared de nubes hacia la derecha para revelar el juego ya cargado.
-  (function () {
-    var el = document.getElementById("cloudWipe");
-    var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduceMotion) { el.style.display = "none"; return; }
-    window.addEventListener("load", function () {
-      setTimeout(function () {
-        el.classList.add("cw-hidden-right");
-      }, 260);
-    });
-  })();
-</script>
 <script src="../storage.js"></script>
 <div class="bg-scene" id="bgScene" style="display:none">
   <div class="bg-sky"></div>

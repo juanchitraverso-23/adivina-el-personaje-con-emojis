@@ -181,33 +181,6 @@
     .card { opacity: 1; transform: none; animation: none; }
   }
 
-  /* ---------- Transición al tocar un juego: una pared de 12 nubes bien
-     grandes y juntas cruza la pantalla de lado a lado. En esta página
-     (el origen) entran desde la izquierda hasta tapar todo, recién ahí
-     navegamos; en la página del juego (el destino) YA arrancan tapando
-     todo desde el primer pintado (mismo aspecto, sin salto) y a los
-     pocos milisegundos siguen de largo hacia la derecha, revelando el
-     juego ya cargado debajo — da la sensación de una sola pasada
-     continua de nubes de una pantalla a la otra. Solo se anima
-     "transform" sobre un elemento que ya vive en el DOM (nada de
-     escalar ni tocar blur), así que es liviano y no se traba. ---------- */
-  .cloud-wipe {
-    position: fixed;
-    inset: -15vh -15vw;
-    z-index: 9999;
-    pointer-events: none;
-    background-color: #D9E7FB;
-    background-image: url("./cloud-mass.svg");
-    background-size: cover;
-    background-position: center;
-    transform: translateX(-125%);
-    transition: transform 0.6s cubic-bezier(.4, 0, .2, 1);
-  }
-  .cloud-wipe.cw-cover { transform: translateX(0); }
-  .cloud-wipe.cw-hidden-right { transform: translateX(125%); }
-  @media (prefers-reduced-motion: reduce) {
-    .cloud-wipe { transition: none !important; }
-  }
 </style>
 </head>
 <body>
@@ -279,8 +252,6 @@
     </a>
   </div>
 
-  <div class="cloud-wipe" id="cloudWipe"></div>
-
   <script src="./storage.js"></script>
   <script>
     (async function () {
@@ -295,26 +266,6 @@
         // sin contador visible, no molesta a nadie
       }
     })();
-
-    // Transición al tocar un juego: la pared de nubes entra desde la
-    // izquierda hasta tapar todo, y recién ahí navegamos — el salto a la
-    // otra página (que arranca ya tapada por la misma pared, ver el
-    // <script> al principio del <body> de cada juego) queda escondido.
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let leaving = false;
-    document.querySelectorAll(".card").forEach((card) => {
-      card.addEventListener("click", (e) => {
-        if (card.classList.contains("disabled") || leaving) return;
-        if (reduceMotion) return; // sin animación, navega directo como siempre
-        e.preventDefault();
-        leaving = true;
-        const href = card.getAttribute("href");
-        document.getElementById("cloudWipe").classList.add("cw-cover");
-        setTimeout(() => {
-          window.location.href = href;
-        }, 560);
-      });
-    });
   </script>
 </body>
 </html>

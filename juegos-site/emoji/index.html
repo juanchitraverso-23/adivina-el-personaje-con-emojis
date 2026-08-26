@@ -19,24 +19,6 @@
      regla para que todo pase a Baloo 2 sin tocar cada componente. */
   .font-black { font-family: 'Baloo 2', sans-serif; }
   input::placeholder { color: #8b7fa8; opacity: 1; }
-  /* ---- Pared de nubes que llega ya cubriendo desde home (ver index.html) y
-     se corre hacia la derecha una vez que el juego está listo. ---------- */
-  .cloud-wipe {
-    position: fixed;
-    inset: -15vh -15vw;
-    z-index: 9999;
-    pointer-events: none;
-    background-color: #D9E7FB;
-    background-image: url("../cloud-mass.svg");
-    background-size: cover;
-    background-position: center;
-    transform: translateX(0);
-    transition: transform 0.6s cubic-bezier(.4, 0, .2, 1);
-  }
-  .cloud-wipe.cw-hidden-right { transform: translateX(125%); }
-  @media (prefers-reduced-motion: reduce) {
-    .cloud-wipe { transition: none !important; }
-  }
 </style>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" defer></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" defer></script>
@@ -44,20 +26,6 @@
 <script src="https://cdn.tailwindcss.com" defer></script>
 </head>
 <body>
-<div class="cloud-wipe" id="cloudWipe"></div>
-<script>
-  // Corre la pared de nubes hacia la derecha para revelar el juego ya cargado.
-  (function () {
-    var el = document.getElementById("cloudWipe");
-    var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduceMotion) { el.style.display = "none"; return; }
-    window.addEventListener("load", function () {
-      setTimeout(function () {
-        el.classList.add("cw-hidden-right");
-      }, 260);
-    });
-  })();
-</script>
 <div id="root"></div>
 <script src="../storage.js"></script>
 <script type="text/babel" data-presets="react">
