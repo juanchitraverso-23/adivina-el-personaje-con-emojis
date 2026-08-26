@@ -486,7 +486,30 @@ function GridInstruction() {
   );
 }
 
-function GridBoard({ task, progress, onTap, shake }) {
+// Cartelito que aparece mientras el modo "con penalidad" tiene los clicks
+// frenados (1s) por haberte equivocado.
+function PenaltyNotice() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        justifyContent: "center",
+        color: "#FF5D7A",
+        fontWeight: 800,
+        fontFamily: "'Baloo 2', sans-serif",
+        fontSize: 14,
+        marginTop: -8,
+        marginBottom: 12,
+      }}
+    >
+      🥶 Penalidad: esperá un segundo...
+    </div>
+  );
+}
+
+function GridBoard({ task, progress, onTap, shake, locked }) {
   const sorted = [...task.numbers].sort((a, b) => b - a);
   const fontSize = task.size >= 5 ? 22 : task.size === 4 ? 26 : 32;
   return (
@@ -501,6 +524,8 @@ function GridBoard({ task, progress, onTap, shake }) {
         padding: 8,
         borderRadius: 14,
         border: shake ? "2px solid #FF5D7A" : "2px solid transparent",
+        opacity: locked ? 0.55 : 1,
+        transition: "opacity 0.15s ease",
       }}
     >
       {task.numbers.map((v, i) => {
@@ -509,8 +534,8 @@ function GridBoard({ task, progress, onTap, shake }) {
         return (
           <button
             key={i}
-            onClick={() => !done && onTap(i)}
-            disabled={done}
+            onClick={() => !done && !locked && onTap(i)}
+            disabled={done || locked}
             style={{
               aspectRatio: "1",
               borderRadius: 12,
@@ -518,7 +543,7 @@ function GridBoard({ task, progress, onTap, shake }) {
               fontSize,
               fontWeight: 800,
               fontFamily: "'Baloo 2', sans-serif",
-              cursor: done ? "default" : "pointer",
+              cursor: done || locked ? "default" : "pointer",
               background: done ? "rgba(61,220,132,0.18)" : "rgba(255,255,255,0.08)",
               color: done ? "#3DDC84" : "#F3EEFF",
               textDecoration: done ? "line-through" : "none",
@@ -762,11 +787,32 @@ function Home({ onSelect }) {
 function PracticeGame({ onBack }) {
   const [taskType, setTaskType] = useState("seq");
   const [gridSize, setGridSize] = useState(3);
+  const [penalty, setPenalty] = useState(false);
   const [started, setStarted] = useState(false);
   const [task, setTask] = useState(null);
   const [progress, setProgress] = useState(0);
   const [typedDraft, setTypedDraft] = useState("");
   const [wrongFlash, setWrongFlash] = useState(false);
+  // Modo "con penalidad": cada error frena todo click/toque por 1s (en vez
+  // del flash rojo breve de siempre). wrongFlashTimerRef guarda el timeout
+  // en curso para poder cancelarlo si llega un error nuevo antes de que
+  // termine el anterior (si no, dos errores seguidos podrían "destrabar"
+  // antes de tiempo).
+  const [locked, setLocked] = useState(false);
+  const wrongFlashTimerRef = useRef(null);
+  const registerWrong = () => {
+    if (wrongFlashTimerRef.current) clearTimeout(wrongFlashTimerRef.current);
+    setWrongFlash(true);
+    if (penalty) {
+      setLocked(true);
+      wrongFlashTimerRef.current = setTimeout(() => {
+        setWrongFlash(false);
+        setLocked(false);
+      }, 1000);
+    } else {
+      wrongFlashTimerRef.current = setTimeout(() => setWrongFlash(false), 500);
+    }
+  };
   const [startTime, setStartTime] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [finished, setFinished] = useState(false);
@@ -803,6 +849,9 @@ function PracticeGame({ onBack }) {
     setElapsedMs(0);
     setStartTime(Date.now());
     setStarted(true);
+    if (wrongFlashTimerRef.current) clearTimeout(wrongFlashTimerRef.current);
+    setWrongFlash(false);
+    setLocked(false);
   };
 
   const finishTask = (ms) => {
@@ -821,7 +870,7 @@ function PracticeGame({ onBack }) {
   };
 
   const submitDigit = () => {
-    if (!task || finished || !typedDraft) return;
+    if (!task || finished || !typedDraft || locked) return;
     const answers = expectedAnswers(task);
     const expected = answers[progress];
     const typed = parseInt(typedDraft, 10);
@@ -831,20 +880,18 @@ function PracticeGame({ onBack }) {
       if (isLast) finishTask(Date.now() - startTime);
       else setProgress(progress + 1);
     } else {
-      setWrongFlash(true);
       setTypedDraft("");
-      setTimeout(() => setWrongFlash(false), 500);
+      registerWrong();
     }
   };
 
   const tapCell = (idx) => {
-    if (!task || finished) return;
+    if (!task || finished || locked) return;
     const answers = expectedAnswers(task);
     const expected = answers[progress];
     const value = task.numbers[idx];
     if (value !== expected) {
-      setWrongFlash(true);
-      setTimeout(() => setWrongFlash(false), 500);
+      registerWrong();
       return;
     }
     const isLast = progress + 1 >= answers.length;
@@ -876,6 +923,12 @@ function PracticeGame({ onBack }) {
               ))}
             </div>
           )}
+        </Card>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Dificultad</div>
+          <button onClick={() => setPenalty((v) => !v)} style={{ ...pillStyle(penalty), width: "100%" }}>
+            ⏱️ Con penalidad (1s frenado si te equivocás)
+          </button>
         </Card>
         {bestMs != null && (
           <Sub style={{ marginTop: -6 }}>
@@ -926,7 +979,8 @@ function PracticeGame({ onBack }) {
       ) : task.type === "grid" ? (
         <>
           <GridInstruction />
-          <GridBoard task={task} progress={progress} onTap={tapCell} shake={wrongFlash} />
+          <GridBoard task={task} progress={progress} onTap={tapCell} shake={wrongFlash} locked={locked} />
+          {locked && <PenaltyNotice />}
         </>
       ) : (
         <>
@@ -940,6 +994,7 @@ function PracticeGame({ onBack }) {
             onKeyDown={(e) => e.key === "Enter" && submitDigit()}
             inputMode="numeric"
             placeholder="?"
+            disabled={locked}
             style={{
               ...inputStyle,
               maxWidth: 300,
@@ -948,9 +1003,11 @@ function PracticeGame({ onBack }) {
               fontWeight: 800,
               fontFamily: "'Baloo 2', sans-serif",
               border: wrongFlash ? "2px solid #FF5D7A" : inputStyle.border,
+              opacity: locked ? 0.55 : 1,
             }}
           />
-          <NumericKeypad draft={typedDraft} setDraft={setTypedDraft} onEnter={submitDigit} disabled={false} />
+          <NumericKeypad draft={typedDraft} setDraft={setTypedDraft} onEnter={submitDigit} disabled={locked} />
+          {locked && <PenaltyNotice />}
         </>
       )}
       {!finished && (
@@ -1154,6 +1211,11 @@ function GameRoom({ roomCode, myId, onBack }) {
   const [typedDraft, setTypedDraft] = useState("");
   const [wrongFlash, setWrongFlash] = useState(false);
   const [showTargetPicker, setShowTargetPicker] = useState(false);
+  // Modo "con penalidad" (room.penalty, lo elige el anfitrión/a en el
+  // lobby): cada error frena todo click/toque por 1s en vez del flash
+  // rojo breve de siempre.
+  const [locked, setLocked] = useState(false);
+  const wrongFlashTimerRef = useRef(null);
   // Cada dígito/toque aplica YA en lo local (instantáneo, sin esperar red)
   // y el guardado real al servidor pasa en segundo plano — mismo esquema
   // que Bloques en Cadena. myLiveStateRef es la fuente de verdad de "mi
@@ -1290,6 +1352,20 @@ function GameRoom({ roomCode, myId, onBack }) {
   const isHost = !!effectiveHost && effectiveHost.id === myId;
   const roomTaskType = room.taskType === "grid" ? "grid" : "seq";
   const roomGridSize = room.gridSize || 3;
+  const roomPenalty = !!room.penalty;
+  const registerWrong = () => {
+    if (wrongFlashTimerRef.current) clearTimeout(wrongFlashTimerRef.current);
+    setWrongFlash(true);
+    if (roomPenalty) {
+      setLocked(true);
+      wrongFlashTimerRef.current = setTimeout(() => {
+        setWrongFlash(false);
+        setLocked(false);
+      }, 1000);
+    } else {
+      wrongFlashTimerRef.current = setTimeout(() => setWrongFlash(false), 500);
+    }
+  };
 
   const passControlTo = async (targetId) => {
     const fresh = await readRoom(roomCode);
@@ -1338,6 +1414,14 @@ function GameRoom({ roomCode, myId, onBack }) {
     const fresh = await readRoom(roomCode);
     if (!fresh) return;
     fresh.gridSize = gridSize;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  const setRoomPenalty = async (value) => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.penalty = value;
     await writeRoom(roomCode, fresh);
     setRoom(fresh);
   };
@@ -1395,6 +1479,18 @@ function GameRoom({ roomCode, myId, onBack }) {
           ) : (
             <div style={{ color: "#F3EEFF", fontWeight: 700 }}>
               {roomTaskType === "grid" ? `🔳 Grilla ${roomGridSize}x${roomGridSize}` : "🔢 Secuencias"}
+            </div>
+          )}
+        </Card>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Dificultad</div>
+          {isHost ? (
+            <button onClick={() => setRoomPenalty(!roomPenalty)} style={{ ...pillStyle(roomPenalty), width: "100%" }}>
+              ⏱️ Con penalidad (1s frenado si te equivocás)
+            </button>
+          ) : (
+            <div style={{ color: "#F3EEFF", fontWeight: 700 }}>
+              {roomPenalty ? "⏱️ Con penalidad" : "Sin penalidad"}
             </div>
           )}
         </Card>
@@ -1539,6 +1635,7 @@ function GameRoom({ roomCode, myId, onBack }) {
   // verdad, así que aunque tipees rápido cada dígito parte del resultado
   // real del anterior, no de una copia vieja.
   const submitDigit = () => {
+    if (locked) return;
     const cur = myLiveStateRef.current;
     if (!cur || cur.alive === false || !typedDraft) return;
     const task = cur.queue && cur.queue[0];
@@ -1552,13 +1649,13 @@ function GameRoom({ roomCode, myId, onBack }) {
       if (isLast) completeCurrentTask(cur);
       else setMyStateNow({ ...cur, progress: cur.progress + 1 });
     } else {
-      setWrongFlash(true);
       setTypedDraft("");
-      setTimeout(() => setWrongFlash(false), 500);
+      registerWrong();
     }
   };
 
   const tapCell = (idx) => {
+    if (locked) return;
     const cur = myLiveStateRef.current;
     if (!cur || cur.alive === false) return;
     const task = cur.queue && cur.queue[0];
@@ -1567,8 +1664,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     const expected = answers[cur.progress];
     const value = task.numbers[idx];
     if (value !== expected) {
-      setWrongFlash(true);
-      setTimeout(() => setWrongFlash(false), 500);
+      registerWrong();
       return;
     }
     const isLast = cur.progress + 1 >= answers.length;
@@ -1594,7 +1690,8 @@ function GameRoom({ roomCode, myId, onBack }) {
         myState.queue[0].type === "grid" ? (
           <>
             <GridInstruction />
-            <GridBoard task={myState.queue[0]} progress={myState.progress} onTap={tapCell} shake={wrongFlash} />
+            <GridBoard task={myState.queue[0]} progress={myState.progress} onTap={tapCell} shake={wrongFlash} locked={locked} />
+            {locked && <PenaltyNotice />}
           </>
         ) : (
           <>
@@ -1608,6 +1705,7 @@ function GameRoom({ roomCode, myId, onBack }) {
               onKeyDown={(e) => e.key === "Enter" && submitDigit()}
               inputMode="numeric"
               placeholder="?"
+              disabled={locked}
               style={{
                 ...inputStyle,
                 maxWidth: 300,
@@ -1616,9 +1714,11 @@ function GameRoom({ roomCode, myId, onBack }) {
                 fontWeight: 800,
                 fontFamily: "'Baloo 2', sans-serif",
                 border: wrongFlash ? "2px solid #FF5D7A" : inputStyle.border,
+                opacity: locked ? 0.55 : 1,
               }}
             />
-            <NumericKeypad draft={typedDraft} setDraft={setTypedDraft} onEnter={submitDigit} disabled={false} />
+            <NumericKeypad draft={typedDraft} setDraft={setTypedDraft} onEnter={submitDigit} disabled={locked} />
+            {locked && <PenaltyNotice />}
           </>
         )
       ) : (

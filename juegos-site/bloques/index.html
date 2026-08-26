@@ -514,7 +514,7 @@ const inputStyle = {
 // piezas "bloqueadas" en gris): el único indicador de qué color tocar es el
 // cuadrado grande de abajo. Tocar una pieza de otro color no hace nada más
 // que sacudir el tablero (shake).
-function GridBoard({ grid, onTap, shake, bw }) {
+function GridBoard({ grid, onTap, shake, bw, locked }) {
   const borders = useMemo(() => computeCellBorders(grid.size, grid.cellPiece), [grid.cellPiece]);
   return (
     <div
@@ -529,7 +529,8 @@ function GridBoard({ grid, onTap, shake, bw }) {
         borderRadius: 14,
         border: shake ? "2px solid #FF5D7A" : "2px solid transparent",
         filter: bw ? "grayscale(1)" : "none",
-        transition: "filter 0.6s ease",
+        opacity: locked ? 0.55 : 1,
+        transition: "filter 0.6s ease, opacity 0.15s ease",
         boxSizing: "border-box",
       }}
     >
@@ -542,13 +543,13 @@ function GridBoard({ grid, onTap, shake, bw }) {
         return (
           <button
             key={i}
-            onClick={() => !cleared && onTap(i)}
-            disabled={cleared}
+            onClick={() => !cleared && !locked && onTap(i)}
+            disabled={cleared || locked}
             style={{
               aspectRatio: "1",
               borderRadius: 4,
               padding: 0,
-              cursor: cleared ? "default" : "pointer",
+              cursor: cleared || locked ? "default" : "pointer",
               borderTop: b.top ? "2px solid " + borderColor : "2px solid transparent",
               borderLeft: b.left ? "2px solid " + borderColor : "2px solid transparent",
               borderRight: b.right ? "2px solid " + borderColor : "2px solid transparent",
@@ -600,6 +601,43 @@ function ColorIndicator({ grid, bw }) {
       >
         Tocá todas las {colorDef.name.toUpperCase()} · quedan {remaining}
       </div>
+    </div>
+  );
+}
+
+function pillStyle(active) {
+  return {
+    width: "100%",
+    padding: "10px 8px",
+    borderRadius: 12,
+    border: active ? "2px solid #FFD23F" : "1px solid rgba(255,255,255,0.15)",
+    background: active ? "rgba(255,210,63,0.15)" : "rgba(255,255,255,0.06)",
+    color: active ? "#FFD23F" : "#F3EEFF",
+    fontWeight: 800,
+    fontFamily: "'Baloo 2', sans-serif",
+    fontSize: 14,
+    cursor: "pointer",
+  };
+}
+
+// Cartelito que aparece mientras el modo "con penalidad" tiene los clicks
+// frenados (1s) por haberte equivocado de color.
+function PenaltyNotice() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        justifyContent: "center",
+        color: "#FF5D7A",
+        fontWeight: 800,
+        fontFamily: "'Baloo 2', sans-serif",
+        fontSize: 14,
+        marginTop: 12,
+      }}
+    >
+      🥶 Penalidad: esperá un segundo...
     </div>
   );
 }
@@ -783,6 +821,24 @@ function PracticeGame({ onBack }) {
   const [bestMs, setBestMs] = useState(null);
   const [isNewBest, setIsNewBest] = useState(false);
   const [wrongFlash, setWrongFlash] = useState(false);
+  const [penalty, setPenalty] = useState(false);
+  // Modo "con penalidad": cada color equivocado frena todo click por 1s
+  // (en vez del flash rojo breve de siempre).
+  const [locked, setLocked] = useState(false);
+  const wrongFlashTimerRef = useRef(null);
+  const registerWrong = () => {
+    if (wrongFlashTimerRef.current) clearTimeout(wrongFlashTimerRef.current);
+    setWrongFlash(true);
+    if (penalty) {
+      setLocked(true);
+      wrongFlashTimerRef.current = setTimeout(() => {
+        setWrongFlash(false);
+        setLocked(false);
+      }, 1000);
+    } else {
+      wrongFlashTimerRef.current = setTimeout(() => setWrongFlash(false), 400);
+    }
+  };
 
   useEffect(() => {
     try {
@@ -809,6 +865,9 @@ function PracticeGame({ onBack }) {
     setIsNewBest(false);
     setElapsedMs(0);
     setStartTime(Date.now());
+    if (wrongFlashTimerRef.current) clearTimeout(wrongFlashTimerRef.current);
+    setWrongFlash(false);
+    setLocked(false);
   };
 
   const finishRun = (ms) => {
@@ -824,7 +883,7 @@ function PracticeGame({ onBack }) {
   };
 
   const tapCell = (idx) => {
-    if (!queue || finished) return;
+    if (!queue || finished || locked) return;
     const grid = queue[0];
     const pieceId = grid.cellPiece[idx];
     if (pieceId < 0) return;
@@ -832,8 +891,7 @@ function PracticeGame({ onBack }) {
     if (piece.cleared) return;
     const activeColor = grid.colorOrder[grid.activeColorIndex];
     if (piece.color !== activeColor) {
-      setWrongFlash(true);
-      setTimeout(() => setWrongFlash(false), 400);
+      registerWrong();
       return;
     }
     const newPieces = grid.pieces.map((p) => (p.id === pieceId ? { ...p, cleared: true } : p));
@@ -863,6 +921,12 @@ function PracticeGame({ onBack }) {
         <Sub style={{ marginTop: -10 }}>
           Solo/a, contra el reloj — {WIN_TARGET} grillas seguidas, sin ataques ni rivales
         </Sub>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Dificultad</div>
+          <button onClick={() => setPenalty((v) => !v)} style={pillStyle(penalty)}>
+            ⏱️ Con penalidad (1s frenado si te equivocás de color)
+          </button>
+        </Card>
         {bestMs != null && (
           <Sub style={{ marginTop: -6 }}>
             🏆 Tu mejor tiempo: <b style={{ color: "#FFD23F" }}>{fmt(bestMs)}</b>
@@ -913,8 +977,9 @@ function PracticeGame({ onBack }) {
             Grilla <b style={{ color: "#FFD23F" }}>{solvedCount + 1}</b> de {WIN_TARGET}
             {isLastGrid ? " · ¡última! 🏁" : ""}
           </Sub>
-          <GridBoard grid={currentGrid} onTap={tapCell} shake={wrongFlash} bw={bwPhase} />
+          <GridBoard grid={currentGrid} onTap={tapCell} shake={wrongFlash} bw={bwPhase} locked={locked} />
           <ColorIndicator grid={currentGrid} bw={bwPhase} />
+          {locked && <PenaltyNotice />}
         </>
       )}
       {!finished && (
@@ -1151,6 +1216,11 @@ function GameRoom({ roomCode, myId, onBack }) {
   const [wrongFlash, setWrongFlash] = useState(false);
   const [showTargetPicker, setShowTargetPicker] = useState(false);
   const [now, setNow] = useState(Date.now());
+  // Modo "con penalidad" (room.penalty, lo elige el anfitrión/a en el
+  // lobby): cada color equivocado frena todo click por 1s en vez del
+  // flash rojo breve de siempre.
+  const [locked, setLocked] = useState(false);
+  const wrongFlashTimerRef = useRef(null);
   // Cada click aplica YA en lo local (instantáneo, sin esperar red) y el
   // guardado real al servidor pasa en segundo plano por acá. myLiveStateRef
   // es la fuente de verdad de "mi estado" en todo momento (se lee y escribe
@@ -1306,6 +1376,28 @@ function GameRoom({ roomCode, myId, onBack }) {
     [...players].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0] ||
     null;
   const isHost = !!effectiveHost && effectiveHost.id === myId;
+  const roomPenalty = !!room.penalty;
+  const registerWrong = () => {
+    if (wrongFlashTimerRef.current) clearTimeout(wrongFlashTimerRef.current);
+    setWrongFlash(true);
+    if (roomPenalty) {
+      setLocked(true);
+      wrongFlashTimerRef.current = setTimeout(() => {
+        setWrongFlash(false);
+        setLocked(false);
+      }, 1000);
+    } else {
+      wrongFlashTimerRef.current = setTimeout(() => setWrongFlash(false), 400);
+    }
+  };
+
+  const setRoomPenalty = async (value) => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.penalty = value;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
 
   const passControlTo = async (targetId) => {
     const fresh = await readRoom(roomCode);
@@ -1384,6 +1476,18 @@ function GameRoom({ roomCode, myId, onBack }) {
             🏁 Al quedar 2, es la final: sin ataques, y la grilla parpadea entre colores y blanco y
             negro cada 5 segundos hasta que haya ganador/a.
           </div>
+        </Card>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Dificultad</div>
+          {isHost ? (
+            <button onClick={() => setRoomPenalty(!roomPenalty)} style={pillStyle(roomPenalty)}>
+              ⏱️ Con penalidad (1s frenado si te equivocás de color)
+            </button>
+          ) : (
+            <div style={{ color: "#F3EEFF", fontWeight: 700 }}>
+              {roomPenalty ? "⏱️ Con penalidad" : "Sin penalidad"}
+            </div>
+          )}
         </Card>
         {isHost ? (
           <>
@@ -1547,6 +1651,7 @@ function GameRoom({ roomCode, myId, onBack }) {
   // fuente de verdad, así que aunque toques varias piezas rápido cada click
   // parte del resultado real del anterior, no de una copia vieja.
   const tapCell = (idx) => {
+    if (locked) return;
     const cur = myLiveStateRef.current;
     if (!cur || cur.alive === false || showTargetPicker) return;
     const grid = cur.queue && cur.queue[0];
@@ -1557,8 +1662,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     if (piece.cleared) return;
     const activeColor = grid.colorOrder[grid.activeColorIndex];
     if (piece.color !== activeColor) {
-      setWrongFlash(true);
-      setTimeout(() => setWrongFlash(false), 400);
+      registerWrong();
       return;
     }
     const newPieces = grid.pieces.map((p) => (p.id === pieceId ? { ...p, cleared: true } : p));
@@ -1621,8 +1725,9 @@ function GameRoom({ roomCode, myId, onBack }) {
             <b style={{ color: "#FFD23F" }}>{myState.queue.length}</b>
             {(myState.solvedCount || 0) >= WIN_TARGET ? " · ✅ ya calificaste" : ""}
           </Sub>
-          <GridBoard grid={currentGrid} onTap={tapCell} shake={wrongFlash} bw={bwPhase} />
+          <GridBoard grid={currentGrid} onTap={tapCell} shake={wrongFlash} bw={bwPhase} locked={locked} />
           <ColorIndicator grid={currentGrid} bw={bwPhase} />
+          {locked && <PenaltyNotice />}
         </>
       ) : (
         <Sub>Esperando la próxima grilla...</Sub>
