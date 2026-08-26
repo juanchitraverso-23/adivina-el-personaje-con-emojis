@@ -28,6 +28,7 @@
     background: radial-gradient(circle at 20% -10%, #3a2166 0%, #170b2e 45%, #0c0620 100%);
     min-height: 100vh;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     padding: 20px;
@@ -237,6 +238,7 @@
   <div class="bg-fade"></div>
 </div>
 <a href="../" class="homeBtn" onclick="return confirmLeaveIfNeeded()" title="Volver al menú de juegos"><span class="homeBtnIcon">🏠</span> Menú</a>
+<div id="modeHeader" style="position:relative; z-index:1; text-align:center;"></div>
 <div class="card" id="card" style="position:relative; z-index:1;"></div>
 
 <script>
@@ -943,14 +945,20 @@ function localChangePlayers() {
 /* ================= RENDER ================= */
 function render() {
   const card = document.getElementById("card");
+  const modeHeader = document.getElementById("modeHeader");
   const bgScene = document.getElementById("bgScene");
   const showBg = state.screen === "modeSelect";
   bgScene.style.display = showBg ? "" : "none";
   document.body.classList.toggle("has-bg-scene", showBg);
 
   if (state.screen === "modeSelect") {
+    // Ícono + título afuera de la tarjeta, igual que en los otros 5 juegos
+    // (ahí solo va la explicación + los botones, contenidos y translúcidos).
+    modeHeader.innerHTML = `
+      <div style="font-size:64px; margin-bottom:6px;">🕵️</div>
+      <h1>El Impostor</h1>
+    `;
     card.innerHTML = `
-      <h1>🕵️ El Impostor</h1>
       <div class="sub">¿Cómo quieren jugar?</div>
       <button class="btn btnPrimary" onclick="chooseMode('online')">🌐 Online (cada uno con su celular, desde donde sea)</button>
       <button class="btn btnPastel" onclick="chooseMode('local')">📱 Pasamanos (un solo celular, todos juntos)</button>
@@ -958,6 +966,7 @@ function render() {
     `;
     return;
   }
+  modeHeader.innerHTML = "";
 
   /* ---------- ONLINE ---------- */
   if (state.mode === "online") { renderOnline(card); return; }
