@@ -180,47 +180,6 @@
   @media (prefers-reduced-motion: reduce) {
     .card { opacity: 1; transform: none; animation: none; }
   }
-
-  /* ---------- Transición al tocar un juego: zoom de cámara metiéndose
-     adentro del botón tocado (no un círculo aparte, ni el botón "viniendo"
-     hacia nosotros). La otra vez esto se trababa porque escalaba un
-     elemento con backdrop-filter (blur) — recalcular ese blur en cada
-     frame mientras crece es carísimo. Acá, al entrar en .zooming, se
-     reemplaza el blur por un fondo sólido (mismo look, sin el costo) y
-     recién ahí se anima el "transform: scale()" — con fondo sólido eso lo
-     hace la GPU sin repintar nada, por eso corre suave aunque sea lento. ---------- */
-  .card.zooming {
-    position: fixed;
-    z-index: 55;
-    margin: 0;
-    background: rgba(16, 8, 36, 0.98);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    box-shadow: none;
-    transform-origin: center center;
-    transform: scale(1);
-    /* Sin esto, la animación de entrada "card-in" (que .card ya trae, con
-       fill-mode:both) sigue sosteniendo su transform por encima de
-       cualquier transform inline o transition — quedaba pisando el zoom. */
-    animation: none;
-    transition: transform 1.3s cubic-bezier(.6, 0, .8, 1);
-    pointer-events: none;
-    will-change: transform;
-  }
-  .warp-flash {
-    position: fixed;
-    inset: 0;
-    z-index: 60;
-    background: #fff;
-    opacity: 0;
-    pointer-events: none;
-    animation: warp-flash 1.3s ease forwards;
-  }
-  @keyframes warp-flash {
-    0%, 80% { opacity: 0; }
-    93%     { opacity: 0.9; }
-    100%    { opacity: 0; }
-  }
 </style>
 </head>
 <body>
@@ -306,51 +265,6 @@
         // sin contador visible, no molesta a nadie
       }
     })();
-
-    // Transición al tocar un juego: la cámara hace zoom metiéndose adentro
-    // del botón tocado (no navega directo). Se fija el botón en su rect
-    // actual y se escala desde su propio centro; el factor de escala se
-    // calcula para que, aunque el botón no esté centrado en la pantalla,
-    // llegue a cubrir hasta la esquina más lejana sin dejar bordes.
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let diving = false;
-    document.querySelectorAll(".card").forEach((card) => {
-      card.addEventListener("click", (e) => {
-        if (card.classList.contains("disabled") || diving) return;
-        if (reduceMotion) return; // sin animación, navega directo como siempre
-        e.preventDefault();
-        diving = true;
-        const href = card.getAttribute("href");
-        const rect = card.getBoundingClientRect();
-        const cx = rect.left + rect.width / 2;
-        const cy = rect.top + rect.height / 2;
-        const maxDx = Math.max(cx, window.innerWidth - cx);
-        const maxDy = Math.max(cy, window.innerHeight - cy);
-        const scale = Math.max((maxDx * 2) / rect.width, (maxDy * 2) / rect.height) * 1.15;
-
-        card.style.top = rect.top + "px";
-        card.style.left = rect.left + "px";
-        card.style.width = rect.width + "px";
-        card.classList.add("zooming");
-        // Forzamos un reflow síncrono leyendo un valor de layout: así el
-        // navegador "graba" el estado inicial (scale(1), recién fijado)
-        // antes de que cambiemos el transform. Sin esto (o con
-        // requestAnimationFrame, que en pestañas no visibles puede no
-        // dispararse nunca) el cambio de transform cae en el mismo tick que
-        // el estado inicial y no hay nada que transicionar: salta directo
-        // al final en vez de animar.
-        void card.offsetWidth;
-        card.style.transform = "scale(" + scale + ")";
-
-        const flash = document.createElement("div");
-        flash.className = "warp-flash";
-        document.body.appendChild(flash);
-
-        setTimeout(() => {
-          window.location.href = href;
-        }, 1250);
-      });
-    });
   </script>
 </body>
 </html>
