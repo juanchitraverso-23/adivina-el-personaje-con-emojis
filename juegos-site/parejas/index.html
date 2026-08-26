@@ -9,7 +9,11 @@
 <meta name="apple-mobile-web-app-title" content="Parejas Actuales" />
 <meta name="theme-color" content="#2B0F1E" />
 <style>
-  html, body { margin:0; padding:0; background:#1A0A11; }
+  /* El fondo real (sol + nubes + piso) lo pinta React recién al montar;
+     hasta entonces se ve este mismo degradé de cielo (idéntico al de
+     BgScene) en vez de un color plano, para que la llegada desde la home
+     se sienta continua y no como un salto a "página negra". */
+  html, body { margin:0; padding:0; background: linear-gradient(180deg, #241249 0%, #4a2478 20%, #7a3390 42%, #c85a86 62%, #ef7a4f 80%, #ffcf6b 100%); background-attachment: fixed; }
   #root { min-height: 100vh; }
 </style>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" defer></script>

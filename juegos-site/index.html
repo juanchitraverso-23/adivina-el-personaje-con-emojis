@@ -149,8 +149,10 @@
     position: relative;
     width: 100%; max-width: 380px;
     display: flex; align-items: center; gap: 14px;
-    background: color-mix(in srgb, var(--card-color) 50%, #1c1030);
-    border: 1px solid color-mix(in srgb, var(--card-color) 55%, transparent);
+    background: color-mix(in srgb, var(--card-color) 34%, transparent);
+    border: 1.5px solid color-mix(in srgb, var(--card-color) 65%, transparent);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
     border-radius: 18px;
     padding: 16px 18px;
     margin-bottom: 18px;
@@ -196,8 +198,8 @@
   .card.pressed { transform: translateY(5px); box-shadow: 0 1px 0 rgba(0,0,0,0.28); }
   .card.disabled { opacity: 0.45; pointer-events: none; }
   .emoji { font-size: 34px; }
-  .name { font-family: 'Baloo 2', sans-serif; font-weight: 700; font-size: 18px; color: #F3EEFF; }
-  .tag { font-size: 12px; color: rgba(243,238,255,0.75); font-weight: 700; }
+  .name { font-family: 'Baloo 2', sans-serif; font-weight: 700; font-size: 18px; color: #F3EEFF; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+  .tag { font-size: 12px; color: rgba(243,238,255,0.85); font-weight: 700; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
   @media (prefers-reduced-motion: reduce) {
     .card { opacity: 1; transform: none; animation: none; }
     .card.pressed { transform: none; }

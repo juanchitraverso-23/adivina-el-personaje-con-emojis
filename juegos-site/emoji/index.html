@@ -10,7 +10,11 @@
 <meta name="theme-color" content="#0c0620" />
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
-  html, body { margin:0; padding:0; background:#0c0620; }
+  /* El fondo real (sol + nubes + piso) lo pinta React recién al montar;
+     hasta entonces se ve este mismo degradé de cielo (idéntico al de
+     BgScene) en vez de un color plano, para que la llegada desde la home
+     se sienta continua y no como un salto a "página negra". */
+  html, body { margin:0; padding:0; background: linear-gradient(180deg, #241249 0%, #4a2478 20%, #7a3390 42%, #c85a86 62%, #ef7a4f 80%, #ffcf6b 100%); background-attachment: fixed; }
   #root { min-height: 100vh; }
   body { font-family: 'Nunito', sans-serif; }
   /* Mismo lenguaje visual que el resto del sitio (violeta oscuro + Baloo 2

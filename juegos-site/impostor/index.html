@@ -19,7 +19,9 @@
      continuo (no tienen un "primer frame" raro) y feedback de click.
    */
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html { background: #0c0620; }
+  /* Mismo degradé de cielo que BgScene mientras arranca el JS, para que
+     la llegada desde la home no se sienta como un salto a "página negra". */
+  html { background: linear-gradient(180deg, #241249 0%, #4a2478 20%, #7a3390 42%, #c85a86 62%, #ef7a4f 80%, #ffcf6b 100%); background-attachment: fixed; }
   body {
     margin: 0;
     font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
