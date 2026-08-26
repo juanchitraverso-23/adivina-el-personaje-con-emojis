@@ -33,14 +33,22 @@
   @keyframes jxpre-sun-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
   .jxpre-clouds { position: absolute; inset: 0; overflow: hidden; }
   .jxpre-cloud { position: absolute; font-size: 30px; opacity: 0.92; filter: drop-shadow(0 3px 0 rgba(0,0,0,0.18)); animation: jxpre-drift linear infinite; }
-  .jxpre-cloud.c1 { top: 4%;  font-size: 44px; animation-duration: 24s; }
-  .jxpre-cloud.c2 { top: -3%; font-size: 26px; animation-duration: 36s; animation-delay: -9s; }
-  .jxpre-cloud.c3 { top: 12%; font-size: 54px; animation-duration: 28s; animation-delay: -19s; }
-  .jxpre-cloud.c4 { top: 20%; font-size: 30px; animation-duration: 40s; animation-delay: -3s; }
-  .jxpre-cloud.c5 { top: 28%; font-size: 46px; animation-duration: 26s; animation-delay: -15s; }
-  .jxpre-cloud.c6 { top: 36%; font-size: 24px; animation-duration: 34s; animation-delay: -23s; }
-  .jxpre-cloud.c7 { top: 44%; font-size: 38px; animation-duration: 30s; animation-delay: -6s; }
-  .jxpre-cloud.c8 { top: 8%;  font-size: 32px; animation-duration: 44s; animation-delay: -27s; }
+  .jxpre-cloud.c1 { top: -5.6%; font-size: 38px; animation-duration: 48s; animation-delay: -25s; }
+  .jxpre-cloud.c2 { top: -3.9%; font-size: 52px; animation-duration: 32s; animation-delay: -34s; }
+  .jxpre-cloud.c3 { top: 0.3%; font-size: 40px; animation-duration: 40s; animation-delay: -23s; }
+  .jxpre-cloud.c4 { top: 3.7%; font-size: 24px; animation-duration: 30s; animation-delay: -28s; }
+  .jxpre-cloud.c5 { top: 8.7%; font-size: 34px; animation-duration: 46s; animation-delay: -2s; }
+  .jxpre-cloud.c6 { top: 12.0%; font-size: 50px; animation-duration: 22s; animation-delay: -9s; }
+  .jxpre-cloud.c7 { top: 16.2%; font-size: 44px; animation-duration: 44s; animation-delay: -12s; }
+  .jxpre-cloud.c8 { top: 17.3%; font-size: 40px; animation-duration: 36s; animation-delay: -3s; }
+  .jxpre-cloud.c9 { top: 21.8%; font-size: 32px; animation-duration: 38s; animation-delay: -9s; }
+  .jxpre-cloud.c10 { top: 24.1%; font-size: 36px; animation-duration: 24s; animation-delay: -4s; }
+  .jxpre-cloud.c11 { top: 28.2%; font-size: 44px; animation-duration: 34s; animation-delay: -11s; }
+  .jxpre-cloud.c12 { top: 32.5%; font-size: 30px; animation-duration: 24s; animation-delay: -25s; }
+  .jxpre-cloud.c13 { top: 34.6%; font-size: 28px; animation-duration: 38s; animation-delay: -15s; }
+  .jxpre-cloud.c14 { top: 38.6%; font-size: 48px; animation-duration: 30s; animation-delay: -15s; }
+  .jxpre-cloud.c15 { top: 43.4%; font-size: 30px; animation-duration: 48s; animation-delay: -8s; }
+  .jxpre-cloud.c16 { top: 46.6%; font-size: 46px; animation-duration: 42s; animation-delay: -11s; }
   @keyframes jxpre-drift { from { transform: translateX(115vw); } to { transform: translateX(-45vw); } }
   .jxpre-floor {
     position: absolute; left: -70%; right: -70%; bottom: -4%; height: 36vh;
@@ -74,6 +82,14 @@
     <span class="jxpre-cloud c6">☁️</span>
     <span class="jxpre-cloud c7">☁️</span>
     <span class="jxpre-cloud c8">☁️</span>
+    <span class="jxpre-cloud c9">☁️</span>
+    <span class="jxpre-cloud c10">☁️</span>
+    <span class="jxpre-cloud c11">☁️</span>
+    <span class="jxpre-cloud c12">☁️</span>
+    <span class="jxpre-cloud c13">☁️</span>
+    <span class="jxpre-cloud c14">☁️</span>
+    <span class="jxpre-cloud c15">☁️</span>
+    <span class="jxpre-cloud c16">☁️</span>
   </div>
   <div class="jxpre-floor"></div>
   <div class="jxpre-fade"></div>
@@ -759,14 +775,22 @@ function BgScene() {
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, #2A0F5E 0%, #5A1F94 20%, #9435B0 42%, #E84F8C 62%, #FF6B3D 80%, #FFC93D 100%)" }} />
         <div className="bgscene-sun" style={{ position: "absolute", left: "50%", top: "7%", width: 120, height: 120, marginLeft: -60, borderRadius: "50%", background: "radial-gradient(circle at 34% 30%, #fff8d8, #ffd23f 55%, #ff9a1c 100%)", boxShadow: "0 0 80px 22px rgba(255,199,82,0.5)" }} />
         <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-          <span className="bgscene-cloud" style={{ position: "absolute", top: "4%", fontSize: 44, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "24s" }}>☁️</span>
-          <span className="bgscene-cloud" style={{ position: "absolute", top: "-3%", fontSize: 26, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "36s", animationDelay: "-9s" }}>☁️</span>
-          <span className="bgscene-cloud" style={{ position: "absolute", top: "12%", fontSize: 54, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "28s", animationDelay: "-19s" }}>☁️</span>
-          <span className="bgscene-cloud" style={{ position: "absolute", top: "20%", fontSize: 30, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "40s", animationDelay: "-3s" }}>☁️</span>
-          <span className="bgscene-cloud" style={{ position: "absolute", top: "28%", fontSize: 46, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "26s", animationDelay: "-15s" }}>☁️</span>
-          <span className="bgscene-cloud" style={{ position: "absolute", top: "36%", fontSize: 24, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "34s", animationDelay: "-23s" }}>☁️</span>
-          <span className="bgscene-cloud" style={{ position: "absolute", top: "44%", fontSize: 38, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "30s", animationDelay: "-6s" }}>☁️</span>
-          <span className="bgscene-cloud" style={{ position: "absolute", top: "8%", fontSize: 32, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "44s", animationDelay: "-27s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "-5.6%", fontSize: 38, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "48s", animationDelay: "-25s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "-3.9%", fontSize: 52, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "32s", animationDelay: "-34s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "0.3%", fontSize: 40, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "40s", animationDelay: "-23s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "3.7%", fontSize: 24, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "30s", animationDelay: "-28s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "8.7%", fontSize: 34, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "46s", animationDelay: "-2s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "12.0%", fontSize: 50, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "22s", animationDelay: "-9s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "16.2%", fontSize: 44, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "44s", animationDelay: "-12s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "17.3%", fontSize: 40, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "36s", animationDelay: "-3s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "21.8%", fontSize: 32, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "38s", animationDelay: "-9s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "24.1%", fontSize: 36, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "24s", animationDelay: "-4s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "28.2%", fontSize: 44, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "34s", animationDelay: "-11s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "32.5%", fontSize: 30, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "24s", animationDelay: "-25s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "34.6%", fontSize: 28, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "38s", animationDelay: "-15s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "38.6%", fontSize: 48, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "30s", animationDelay: "-15s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "43.4%", fontSize: 30, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "48s", animationDelay: "-8s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "46.6%", fontSize: 46, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "42s", animationDelay: "-11s" }}>☁️</span>
         </div>
         <div className="bgscene-floor" style={{ position: "absolute", left: "-70%", right: "-70%", bottom: "-4%", height: "36vh", backgroundColor: "#3a1665", backgroundImage: "linear-gradient(90deg, rgba(255,255,255,0.16) 50%, transparent 50%), linear-gradient(rgba(255,255,255,0.16) 50%, transparent 50%)", backgroundSize: "64px 64px", transform: "perspective(280px) rotateX(58deg)", transformOrigin: "bottom" }} />
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(12,6,32,0) 0%, rgba(12,6,32,0.15) 40%, rgba(12,6,32,0.6) 75%, rgba(12,6,32,0.9) 100%)" }} />
