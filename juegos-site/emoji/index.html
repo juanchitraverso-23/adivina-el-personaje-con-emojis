@@ -23,6 +23,43 @@
      regla para que todo pase a Baloo 2 sin tocar cada componente. */
   .font-black { font-family: 'Baloo 2', sans-serif; }
   input::placeholder { color: #8b7fa8; opacity: 1; }
+
+  /* ---------- Escena estática (sol+nubes+piso) idéntica a BgScene, pero en
+     HTML/CSS puro: pinta YA, sin esperar a que cargue React, para que la
+     llegada desde la home se sienta tan fluida como la vuelta al menú
+     (que es 100% estática). En cuanto React monta algo en #root, un
+     script la saca y queda la escena real. ---------- */
+  .jxpre-scene { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+  .jxpre-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #241249 0%, #4a2478 20%, #7a3390 42%, #c85a86 62%, #ef7a4f 80%, #ffcf6b 100%); }
+  .jxpre-sun {
+    position: absolute; left: 50%; top: 7%; width: 120px; height: 120px; margin-left: -60px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 34% 30%, #fff8d8, #ffd23f 55%, #ff9a1c 100%);
+    box-shadow: 0 0 80px 22px rgba(255,199,82,0.5);
+    animation: jxpre-sun-pulse 3.2s ease-in-out infinite;
+  }
+  @keyframes jxpre-sun-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  .jxpre-clouds { position: absolute; inset: 0; overflow: hidden; }
+  .jxpre-cloud { position: absolute; font-size: 30px; opacity: 0.92; filter: drop-shadow(0 3px 0 rgba(0,0,0,0.18)); animation: jxpre-drift linear infinite; }
+  .jxpre-cloud.c1 { top: 12%; font-size: 56px; animation-duration: 26s; }
+  .jxpre-cloud.c2 { top: 24%; font-size: 34px; animation-duration: 34s; animation-delay: -11s; }
+  .jxpre-cloud.c3 { top: 6%;  font-size: 26px; animation-duration: 30s; animation-delay: -21s; }
+  .jxpre-cloud.c4 { top: 33%; font-size: 42px; animation-duration: 40s; animation-delay: -6s; }
+  @keyframes jxpre-drift { from { transform: translateX(115vw); } to { transform: translateX(-45vw); } }
+  .jxpre-floor {
+    position: absolute; left: -70%; right: -70%; bottom: -4%; height: 36vh;
+    background-color: #3a1665;
+    background-image: linear-gradient(90deg, rgba(255,255,255,0.16) 50%, transparent 50%), linear-gradient(rgba(255,255,255,0.16) 50%, transparent 50%);
+    background-size: 64px 64px;
+    transform: perspective(280px) rotateX(58deg);
+    transform-origin: bottom;
+    animation: jxpre-floor-move 1.1s linear infinite;
+  }
+  @keyframes jxpre-floor-move { from { background-position: 0 0, 0 0; } to { background-position: 64px 0, 0 64px; } }
+  .jxpre-fade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(12,6,32,0) 0%, rgba(12,6,32,0.15) 40%, rgba(12,6,32,0.6) 75%, rgba(12,6,32,0.9) 100%); }
+  @media (prefers-reduced-motion: reduce) {
+    .jxpre-sun, .jxpre-cloud, .jxpre-floor { animation: none; }
+  }
 </style>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" defer></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" defer></script>
@@ -30,7 +67,38 @@
 <script src="https://cdn.tailwindcss.com" defer></script>
 </head>
 <body>
+<div class="jxpre-scene" id="jxPreScene">
+  <div class="jxpre-sky"></div>
+  <div class="jxpre-sun"></div>
+  <div class="jxpre-clouds">
+    <span class="jxpre-cloud c1">☁️</span>
+    <span class="jxpre-cloud c2">☁️</span>
+    <span class="jxpre-cloud c3">☁️</span>
+    <span class="jxpre-cloud c4">☁️</span>
+  </div>
+  <div class="jxpre-floor"></div>
+  <div class="jxpre-fade"></div>
+</div>
 <div id="root"></div>
+<script>
+  // Apenas React mete el primer contenido en #root, sacamos esta escena
+  // estática (ya cumplió su función) y queda la real. OJO: este script
+  // tiene que ir DESPUÉS del <div id="root">, si no getElementById("root")
+  // da null (el parser todavía no llegó a esa línea) y el observer nunca
+  // se arma.
+  (function () {
+    var root = document.getElementById("root");
+    var pre = document.getElementById("jxPreScene");
+    if (!root || !pre) return;
+    var obs = new MutationObserver(function () {
+      if (root.childElementCount > 0) {
+        pre.remove();
+        obs.disconnect();
+      }
+    });
+    obs.observe(root, { childList: true });
+  })();
+</script>
 <script src="../storage.js"></script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef } = React;
