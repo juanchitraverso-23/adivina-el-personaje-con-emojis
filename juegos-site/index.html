@@ -185,12 +185,15 @@
     border: 2px solid rgba(255,255,255,0.3);
     box-shadow: 0 2px 0 rgba(0,0,0,0.3);
   }
-  .card:nth-of-type(1) { --card-color: #FF3E7F; animation-delay: 0.05s; }
-  .card:nth-of-type(2) { --card-color: #B983FF; animation-delay: 0.11s; }
-  .card:nth-of-type(3) { --card-color: #FF9F1C; animation-delay: 0.17s; }
+  /* Progresión de color 1→6 (y la que siga después): amarillo, naranja,
+     rojo, rojizo/rosa, violeta, azul — cada juego usa SOLO tonos de este
+     color como acento interno (ver BigButton en cada juego). */
+  .card:nth-of-type(1) { --card-color: #FFD23F; animation-delay: 0.05s; }
+  .card:nth-of-type(2) { --card-color: #FF9F1C; animation-delay: 0.11s; }
+  .card:nth-of-type(3) { --card-color: #F0454B; animation-delay: 0.17s; }
   .card:nth-of-type(4) { --card-color: #FF5D7A; animation-delay: 0.23s; }
-  .card:nth-of-type(5) { --card-color: #3DDC84; animation-delay: 0.29s; }
-  .card:nth-of-type(6) { --card-color: #FFD23F; animation-delay: 0.35s; }
+  .card:nth-of-type(5) { --card-color: #B983FF; animation-delay: 0.29s; }
+  .card:nth-of-type(6) { --card-color: #3E9EFF; animation-delay: 0.35s; }
   @keyframes card-in {
     to { opacity: 1; transform: translateY(0); }
   }

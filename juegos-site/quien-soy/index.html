@@ -265,7 +265,7 @@ function joinNames(names) {
   return `${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}`;
 }
 
-function BigButton({ children, onClick, color = "#FF3E7F", disabled, style }) {
+function BigButton({ children, onClick, color = "#FFD23F", disabled, style }) {
   return (
     <button
       onClick={onClick}
@@ -423,13 +423,13 @@ function Home({ onSelect }) {
             Uno piensa una persona o personaje famoso y lo describe con emojis.
             Los demás intentan adivinar. ¡Sin hablar!
           </Sub>
-          <BigButton onClick={() => onSelect("offline")} color="#FF3E7F">
+          <BigButton onClick={() => onSelect("offline")} color="#FFD23F">
             📴 Jugar Offline (pasando el celu)
           </BigButton>
-          <BigButton onClick={() => onSelect("online")} color="#5B4B8A">
+          <BigButton onClick={() => onSelect("online")} color="#C9971F">
             🌐 Jugar Online
           </BigButton>
-          <BigButton onClick={() => onSelect("simultaneo")} color="#FFD23F">
+          <BigButton onClick={() => onSelect("simultaneo")} color="#E8A400">
             🎉 Todos a la vez
           </BigButton>
         </Card>
@@ -836,7 +836,7 @@ function OfflineGame({ onBack }) {
         <BigButton onClick={confirmRoundResults} disabled={selectedWinners.length === 0}>
           Confirmar ganadores ✅
         </BigButton>
-        <BigButton onClick={nobodyGuessed} color="#5B4B8A">
+        <BigButton onClick={nobodyGuessed} color="#C9971F">
           Nadie acertó, doy otra pista 🔁
         </BigButton>
       </Screen>
@@ -1443,7 +1443,7 @@ function OnlineGame({ onBack }) {
                 width: 44,
                 borderRadius: 12,
                 border: "none",
-                background: "#FF3E7F",
+                background: "#FFD23F",
                 color: "#1B1035",
                 fontSize: 22,
                 fontWeight: 800,
@@ -1813,7 +1813,7 @@ function OnlineGame({ onBack }) {
         <BigButton onClick={confirmWinners} disabled={selected.length === 0}>
           Confirmar ganadores ✅
         </BigButton>
-        <BigButton onClick={nobodyGuessedOnline} color="#5B4B8A">
+        <BigButton onClick={nobodyGuessedOnline} color="#C9971F">
           Nadie acertó, doy otra pista 🔁
         </BigButton>
       </Screen>
@@ -2090,7 +2090,7 @@ function EmojiSequenceInput({ clues, setClues }) {
           onClick={addCustom}
           disabled={clues.length >= SIM_MAX_CLUES}
           style={{
-            background: "#5B4B8A",
+            background: "#C9971F",
             color: "#F3EEFF",
             border: "none",
             borderRadius: 10,
@@ -2325,7 +2325,7 @@ function SimGuessingScreen({ room, myId, secrets, progressMap, setProgressMap, i
         />
       ))}
       {isHost ? (
-        <BigButton onClick={onEndRound} color="#5B4B8A" style={{ marginTop: 6 }}>
+        <BigButton onClick={onEndRound} color="#C9971F" style={{ marginTop: 6 }}>
           🏁 Terminar ronda y ver resultados
         </BigButton>
       ) : (
@@ -2686,7 +2686,7 @@ function SimultaneousGame({ onBack }) {
             <Sub style={{ marginTop: 0 }}>
               Ya estabas en la sala <b>{resumable.code}</b> como {resumable.name}
             </Sub>
-            <BigButton onClick={resumeSession} color="#5B4B8A">
+            <BigButton onClick={resumeSession} color="#C9971F">
               Volver a esa sala
             </BigButton>
           </Card>
@@ -2851,7 +2851,7 @@ const counterBtnStyle = {
   height: 52,
   borderRadius: "50%",
   border: "none",
-  background: "#FF3E7F",
+  background: "#FFD23F",
   color: "#1B1035",
   fontSize: 28,
   fontWeight: 800,

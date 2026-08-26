@@ -123,8 +123,8 @@ const C = {
   textFaint: "#8b7fa8",
   gold: "#FFD23F",
   goldHover: "#ffdd66",
-  primary: "#FF3E7F",
-  pink: "#FF3E7F",
+  primary: "#F0454B",
+  pink: "#F0454B",
   pinkSoft: "#FF5D7A",
   teal: "#3DDC84",
 };
@@ -270,7 +270,7 @@ function PrimaryButton({ children, onClick, disabled, style, ...rest }) {
       onClick={onClick}
       disabled={disabled}
       className="w-full rounded-2xl py-4 font-black text-lg transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-40"
-      style={{ backgroundColor: C.primary, color: C.textDark, ...style }}
+      style={{ backgroundColor: `color-mix(in srgb, ${C.primary} 50%, transparent)`, border: `1.5px solid color-mix(in srgb, ${C.primary} 70%, transparent)`, color: "#F3EEFF", textShadow: "0 1px 3px rgba(0,0,0,0.45)", ...style }}
       {...rest}
     >
       {children}
@@ -510,7 +510,7 @@ function HandoffScreen({ playerName, subtitle, onReady }) {
           </p>
         )}
       </div>
-      <button onClick={onReady} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.primary, color: C.textDark }}>
+      <button onClick={onReady} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: `color-mix(in srgb, ${C.primary} 50%, transparent)`, border: `1.5px solid color-mix(in srgb, ${C.primary} 70%, transparent)`, color: "#F3EEFF", textShadow: "0 1px 3px rgba(0,0,0,0.45)" }}>
         Listo, soy yo
       </button>
     </div>
@@ -640,7 +640,7 @@ function OfflineGame({ onBack }) {
                 style={{ backgroundColor: C.inputBg, color: C.inputText, border: `1px solid ${C.inputBorder}` }}
                 maxLength={16}
               />
-              <button onClick={addPlayer} className="rounded-xl px-4 font-black" style={{ backgroundColor: C.primary, color: C.textDark }}>
+              <button onClick={addPlayer} className="rounded-xl px-4 font-black" style={{ backgroundColor: `color-mix(in srgb, ${C.primary} 50%, transparent)`, border: `1.5px solid color-mix(in srgb, ${C.primary} 70%, transparent)`, color: "#F3EEFF", textShadow: "0 1px 3px rgba(0,0,0,0.45)" }}>
                 +
               </button>
             </div>
@@ -688,7 +688,7 @@ function OfflineGame({ onBack }) {
             <button
               onClick={nextRound}
               className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95 flex items-center gap-2"
-              style={{ backgroundColor: C.primary, color: C.textDark }}
+              style={{ backgroundColor: `color-mix(in srgb, ${C.primary} 50%, transparent)`, border: `1.5px solid color-mix(in srgb, ${C.primary} 70%, transparent)`, color: "#F3EEFF", textShadow: "0 1px 3px rgba(0,0,0,0.45)" }}
             >
               <Icon name="Shuffle" size={20} /> Siguiente ronda
             </button>
@@ -712,7 +712,7 @@ function OfflineGame({ onBack }) {
             <div className="leading-none select-none" style={{ fontSize: "min(45vw, 220px)" }}>
               {emoji}
             </div>
-            <button onClick={startTimer} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.primary, color: C.textDark }}>
+            <button onClick={startTimer} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: `color-mix(in srgb, ${C.primary} 50%, transparent)`, border: `1.5px solid color-mix(in srgb, ${C.primary} 70%, transparent)`, color: "#F3EEFF", textShadow: "0 1px 3px rgba(0,0,0,0.45)" }}>
               OK, ¡empezar!
             </button>
           </div>
@@ -1371,7 +1371,7 @@ function ReadyView({ isActor, actor, onBegin }) {
             Te vamos a mostrar tu emoji en privado. Los demás no deben ver tu pantalla.
           </p>
         </div>
-        <button onClick={onBegin} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.primary, color: C.textDark }}>
+        <button onClick={onBegin} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: `color-mix(in srgb, ${C.primary} 50%, transparent)`, border: `1.5px solid color-mix(in srgb, ${C.primary} 70%, transparent)`, color: "#F3EEFF", textShadow: "0 1px 3px rgba(0,0,0,0.45)" }}>
           Mostrame el emoji
         </button>
       </div>
@@ -1396,7 +1396,7 @@ function PreviewView({ isActor, actor, emoji, onStartTimer }) {
         <div className="leading-none select-none" style={{ fontSize: "min(45vw, 220px)" }}>
           {emoji}
         </div>
-        <button onClick={onStartTimer} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: C.primary, color: C.textDark }}>
+        <button onClick={onStartTimer} className="rounded-2xl px-10 py-4 font-black text-xl transition active:scale-95" style={{ backgroundColor: `color-mix(in srgb, ${C.primary} 50%, transparent)`, border: `1.5px solid color-mix(in srgb, ${C.primary} 70%, transparent)`, color: "#F3EEFF", textShadow: "0 1px 3px rgba(0,0,0,0.45)" }}>
           OK, ¡empezar!
         </button>
       </div>

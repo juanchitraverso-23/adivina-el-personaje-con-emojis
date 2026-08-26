@@ -345,7 +345,7 @@ function Sub({ children, style }) {
   );
 }
 
-function BigButton({ children, onClick, color = "#FF3E7F", disabled, style }) {
+function BigButton({ children, onClick, color = "#B983FF", disabled, style }) {
   return (
     <button
       onClick={onClick}
@@ -776,10 +776,10 @@ function Home({ onSelect }) {
             resolvés le mandás una secuencia extra a un rival, como una línea de Tetris. Si a alguien
             se le acumulan demasiadas, queda eliminado. ¡Gana el último en pie!
           </Sub>
-          <BigButton onClick={() => onSelect("game")} color="#FF3E7F">
+          <BigButton onClick={() => onSelect("game")} color="#B983FF">
             🎮 Jugar con otros
           </BigButton>
-          <BigButton onClick={() => onSelect("practice")} color="#5B4B8A">
+          <BigButton onClick={() => onSelect("practice")} color="#6D3FD1">
             🏋️ Practicar solo/a
           </BigButton>
         </Card>
@@ -1165,7 +1165,7 @@ function JoinScreen({ onJoined, onBack }) {
           <Sub style={{ marginTop: 0 }}>
             Ya estabas en la sala <b>{resumable.code}</b> como {resumable.name}
           </Sub>
-          <BigButton onClick={() => onJoined(resumable.code, resumable.playerId)} color="#5B4B8A">
+          <BigButton onClick={() => onJoined(resumable.code, resumable.playerId)} color="#6D3FD1">
             Volver a esa sala
           </BigButton>
         </Card>

@@ -435,7 +435,7 @@ function Sub({ children, style }) {
   );
 }
 
-function BigButton({ children, onClick, color = "#FF3E7F", disabled, style }) {
+function BigButton({ children, onClick, color = "#3E9EFF", disabled, style }) {
   return (
     <button
       onClick={onClick}
@@ -800,10 +800,10 @@ function Home({ onSelect }) {
             rival. Cada 1 minuto queda afuera quien tenga más grillas pendientes. Al quedar 2, es la
             final: sin ataques, y la grilla parpadea entre colores y blanco y negro. ¡Ganá la final!
           </Sub>
-          <BigButton onClick={() => onSelect("game")} color="#FF3E7F">
+          <BigButton onClick={() => onSelect("game")} color="#3E9EFF">
             🎮 Jugar con otros
           </BigButton>
-          <BigButton onClick={() => onSelect("practice")} color="#5B4B8A">
+          <BigButton onClick={() => onSelect("practice")} color="#1D5FB8">
             🏋️ Practicar solo/a
           </BigButton>
         </Card>
@@ -1137,7 +1137,7 @@ function JoinScreen({ onJoined, onBack }) {
           <Sub style={{ marginTop: 0 }}>
             Ya estabas en la sala <b>{resumable.code}</b> como {resumable.name}
           </Sub>
-          <BigButton onClick={() => onJoined(resumable.code, resumable.playerId)} color="#5B4B8A">
+          <BigButton onClick={() => onJoined(resumable.code, resumable.playerId)} color="#1D5FB8">
             Volver a esa sala
           </BigButton>
         </Card>
