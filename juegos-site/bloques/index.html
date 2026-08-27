@@ -135,7 +135,7 @@ const { useState, useEffect, useMemo, useRef } = React;
 const STORAGE_PREFIX = "bloques:sala:";
 const POLL_MS = 1000;
 const SESSION_KEY = "bloques:sesion";
-const MAX_PLAYERS = 8;
+const MAX_PLAYERS = 16;
 const GRID_SIZE = 10;
 const PRACTICE_BEST_KEY = "bloques:practica:mejorTiempo";
 const DEFAULT_GRID_COUNT = 3; // cantidad de grillas por defecto en Práctica (elegible ahí, ver PracticeGame)
@@ -156,7 +156,12 @@ const SPIN_PERIOD_MS = 16000; // Final: la grilla atacada gira, una vuelta cada 
 // la final son 3.
 const STAGE_GRID_COUNT = { elim: 3, semifinal: 4, final: 3 };
 
-const PLAYER_COLORS = ["#FF3E7F", "#5B4B8A", "#FFD23F", "#3DDC84", "#4FC3F7", "#FF9F1C", "#B983FF", "#FF6B6B"];
+const PLAYER_COLORS = [
+  "#FF3E7F", "#5B4B8A", "#FFD23F", "#3DDC84",
+  "#4FC3F7", "#FF9F1C", "#B983FF", "#FF6B6B",
+  "#2EC4B6", "#C9E265", "#FF8AD8", "#7C9BFF",
+  "#F4A261", "#8DE0A0", "#C77DFF", "#FF6FA0",
+];
 
 const PIECE_COLORS = [
   { key: "red", hex: "#FF5D7A", name: "Rojo" },
@@ -692,7 +697,14 @@ function PenaltyNotice() {
   );
 }
 
-function PlayerBadgeRow({ players, playerStates, myId }) {
+function PlayerBadgeRow({ players, playerStates, myId, eliminationOrder }) {
+  // A quién ya eliminamos es autoridad de la sala (room.eliminationOrder),
+  // no algo que se pueda inferir de si playerStates trae su id: alguien
+  // eliminado en una etapa anterior no tiene estado en la ronda actual
+  // (cada etapa tiene su propio namespace), así que "sin estado" no es lo
+  // mismo que "sigue vivo" — sin esto, un eliminado volvía a mostrarse
+  // como si siguiera jugando en las etapas siguientes.
+  const eliminatedIds = new Set(eliminationOrder || []);
   return (
     <div
       style={{
@@ -706,7 +718,7 @@ function PlayerBadgeRow({ players, playerStates, myId }) {
     >
       {players.map((p, i) => {
         const st = playerStates[p.id];
-        const alive = st ? st.alive !== false : true;
+        const alive = !eliminatedIds.has(p.id);
         const qLen = st ? (st.queue || []).length : 0;
         const qualified = st && !!st.finishedAt; // ya terminó esta etapa, espera a que terminen los demás
         return (
@@ -750,8 +762,13 @@ function PlayerBadgeRow({ players, playerStates, myId }) {
 // color que su ficha en PlayerBadgeRow), con el nombre grande adentro —
 // "cuadrados de colores con el nombre de cada uno grande, en el medio de
 // la pantalla", como pidieron después de jugarlo en familia.
-function TargetPicker({ players, playerStates, myId, myLastAttacked, title, subtitle, onAttack, onSkip }) {
-  const aliveList = players.filter((p) => (playerStates[p.id] || {}).alive !== false);
+function TargetPicker({ players, playerStates, myId, myLastAttacked, eliminationOrder, title, subtitle, onAttack, onSkip }) {
+  // Igual que en PlayerBadgeRow: quién sigue vivo se decide con
+  // room.eliminationOrder, no con playerStates — alguien eliminado en una
+  // etapa anterior no tiene estado en la ronda actual, así que "sin
+  // estado" no puede leerse como "vivo" o se lo podría volver a atacar.
+  const eliminatedIds = new Set(eliminationOrder || []);
+  const aliveList = players.filter((p) => !eliminatedIds.has(p.id));
   const aliveCount = aliveList.length;
   const candidates = aliveList.filter((p) => {
     if (p.id === myId) return false;
@@ -1176,8 +1193,11 @@ function JoinScreen({ onJoined, onBack }) {
           phase: "lobby",
           round: 1,
           stage: null,
+          mode: "torneo",
           winnerId: null,
           countdownEndsAt: null,
+          eliminationOrder: [],
+          finishOrder: [],
           createdAt: Date.now(),
         };
       } else {
@@ -1207,7 +1227,7 @@ function JoinScreen({ onJoined, onBack }) {
   return (
     <Screen>
       <Title size={26}>Bloques en Cadena</Title>
-      <Sub style={{ marginTop: -10 }}>Hasta 8 jugadores, cada uno en su celu</Sub>
+      <Sub style={{ marginTop: -10 }}>Hasta 16 jugadores, cada uno en su celu</Sub>
       <Card style={{ width: "100%", maxWidth: 420 }}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Tu nombre" style={inputStyle} />
         <input
@@ -1289,18 +1309,30 @@ function JoinScreen({ onJoined, onBack }) {
 //    "freeze" de 5s (se acumula si te mandan varios). El que queda sin
 //    terminar la carrera, queda afuera; los otros 2 pasan a la Final. Si
 //    la sala arrancó con exactamente 2, esta etapa también se saltea.
-//  - "final": siempre 2 jugadores, 3 grillas. Tocar mal frena los clicks
-//    3s (grilla 3 es distinto, ver abajo). Grilla 2: parpadea sola
-//    (blanco/negro 5s, color 2s) hasta resolverla, y quien la resuelve le
-//    manda al otro un ataque "grilla girando" (una vuelta cada 10s) hasta
-//    que la termine. Grilla 3: 5 tonos de gris en vez de colores, y tocar
-//    mal pausa el cronómetro 2s (no frena los clicks). Gana quien termina
-//    primero sus 3 grillas.
+//  - "final": 3 grillas. Tocar mal frena los clicks 3s (grilla 3 es
+//    distinto, ver abajo). Grilla 2: parpadea sola (blanco/negro 5s,
+//    color 2s) hasta resolverla, y quien la resuelve le manda a un rival
+//    (elegido con el mismo selector de cuadrados si hay más de uno; si
+//    solo queda un rival, va directo a él) el ataque "grilla girando"
+//    (una vuelta cada 16s) hasta que la termine. Grilla 3: 4 tonos de
+//    gris en vez de colores, y tocar mal pausa el cronómetro 2s (no
+//    frena los clicks). No termina la partida apenas alguien gana sus 3
+//    grillas: se sigue jugando hasta que TODOS terminan, y quedan
+//    ordenados por el orden real en que van terminando (el primero, el
+//    torneo entero o quien eligió la Final directa, es el ganador).
+//
+// El anfitrión/a elige en el lobby el "modo" de la sala (room.mode):
+//  - "torneo" (por defecto): arranca en la etapa que corresponda según
+//    cuántos jugadores hay (ver initialStageFor) y va bajando de a una
+//    hasta la Final.
+//  - "final": todos (de 2 a 16) arrancan directo en la Final, sin pasar
+//    por Eliminación ni Semifinal — una carrera grupal con las reglas de
+//    la Final de siempre, generalizadas a cualquier cantidad de gente.
 // ============================================================
 
-// Etapa inicial según cuántos jugadores hay al arrancar: con 2 se saltean
-// "elim" y "semifinal" y arrancan directo en la Final; con 3, se saltea
-// solo "elim".
+// Etapa inicial según cuántos jugadores hay al arrancar (solo aplica en
+// modo "torneo"): con 2 se saltean "elim" y "semifinal" y arrancan
+// directo en la Final; con 3, se saltea solo "elim".
 function initialStageFor(playerCount) {
   if (playerCount <= 2) return "final";
   if (playerCount === 3) return "semifinal";
@@ -1312,7 +1344,7 @@ function initialStageFor(playerCount) {
 function freshStateForStage(stage) {
   const count = STAGE_GRID_COUNT[stage] || 3;
   const queue = Array.from({ length: count }, (_, i) => {
-    // La última grilla de la Final no tiene colores: son 5 tonos de gris.
+    // La última grilla de la Final no tiene colores: son 4 tonos de gris.
     const useGray = stage === "final" && i === count - 1;
     return newQueuedGrid(useGray ? GRAYSCALE_COLOR_KEYS : PIECE_COLOR_KEYS);
   });
@@ -1347,13 +1379,17 @@ async function startStage(roomCode, freshRoom, stage, alivePlayers) {
   return newStates;
 }
 
-// Se llama desde el tick de sondeo de cualquier cliente. Detecta si la
-// carrera de la etapa actual ya terminó (todos menos uno resolvieron su
-// cola) y, si es así, elimina a quien quedó sin terminar y arranca la
-// siguiente etapa (o la sala entera si ya estábamos en la Final). Vuelve
-// a leer todo fresco y compara freshRoom.round contra el round con el que
-// se llamó como guarda de idempotencia: si alguien más ya lo procesó, el
-// round ya cambió y no hace nada.
+// Se llama desde el tick de sondeo de cualquier cliente, para las etapas
+// "elim"/"semifinal". Detecta si la carrera de la etapa actual ya
+// terminó (todos menos uno resolvieron su cola) y, si es así, elimina a
+// quien quedó sin terminar (queda registrado en freshRoom.eliminationOrder,
+// que vive en la sala y no en el estado por-ronda, así sobrevive aunque
+// el jugador eliminado ya no tenga estado en las rondas siguientes — eso
+// es lo que usa la pantalla de fin de partida para armar el ranking) y
+// arranca la siguiente etapa. Vuelve a leer todo fresco y compara
+// freshRoom.round contra el round con el que se llamó como guarda de
+// idempotencia: si alguien más ya lo procesó, el round ya cambió y no
+// hace nada.
 async function checkHeatCompletion(roomCode, round, stage) {
   const freshRoom = await readRoom(roomCode);
   if (!freshRoom || freshRoom.phase !== "playing") return;
@@ -1371,6 +1407,7 @@ async function checkHeatCompletion(roomCode, round, stage) {
   const loserId = unfinished[0].id;
   const loserState = states[loserId];
   await writePlayerState(roomCode, round, loserId, { ...loserState, alive: false, eliminatedAt: Date.now() });
+  freshRoom.eliminationOrder = [...(freshRoom.eliminationOrder || []), loserId];
 
   const stillAlive = activePlayers.filter((p) => p.id !== loserId);
   if (stage === "elim") {
@@ -1382,8 +1419,34 @@ async function checkHeatCompletion(roomCode, round, stage) {
   } else if (stage === "semifinal") {
     await startStage(roomCode, freshRoom, "final", stillAlive);
   }
-  // En "final" no hace falta: ahí gana quien termina primero, ver
-  // completeCurrentGrid (se decide al instante, sin esperar el sondeo).
+}
+
+// Se llama desde el tick de sondeo de cualquier cliente, solo en la
+// etapa "final". A diferencia de "elim"/"semifinal", acá nadie queda
+// eliminado a mitad de carrera: se sigue jugando hasta que TODOS
+// terminan sus 3 grillas, y quedan ordenados por el momento real en que
+// cada uno terminó (freshRoom.finishOrder, primero = ganador). Misma
+// guarda de idempotencia que checkHeatCompletion.
+async function checkFinalCompletion(roomCode, round) {
+  const freshRoom = await readRoom(roomCode);
+  if (!freshRoom || freshRoom.phase !== "playing") return;
+  if (freshRoom.round !== round || freshRoom.stage !== "final") return; // ya lo procesó otro cliente
+  const states = await listPlayerStates(roomCode, round);
+  const activePlayers = (freshRoom.players || []).filter((p) => {
+    const st = states[p.id];
+    return st && st.alive !== false;
+  });
+  if (activePlayers.length < 1) return;
+  const stillPlaying = activePlayers.some((p) => !states[p.id].finishedAt);
+  if (stillPlaying) return; // todavía falta alguien
+
+  const finishOrder = [...activePlayers]
+    .sort((a, b) => (states[a.id].finishedAt || 0) - (states[b.id].finishedAt || 0))
+    .map((p) => p.id);
+  freshRoom.finishOrder = finishOrder;
+  freshRoom.winnerId = finishOrder[0] || null;
+  freshRoom.phase = "ended";
+  await writeRoom(roomCode, freshRoom);
 }
 
 function GameRoom({ roomCode, myId, onBack }) {
@@ -1466,6 +1529,13 @@ function GameRoom({ roomCode, myId, onBack }) {
           lastAttacked: liveNow.lastAttacked,
           alive: liveNow.alive === false || fresh.alive === false ? false : true,
           eliminatedAt: liveNow.eliminatedAt || fresh.eliminatedAt || null,
+          // Sin esto, terminar una carrera (queue vacía, finishedAt puesto
+          // localmente en completeCurrentGrid) se perdía en el próximo
+          // sync: el merge partía de `fresh` (lo último leído del server,
+          // todavía sin mi finishedAt) y nunca lo pisaba con mi valor
+          // local, así que el servidor jamás se enteraba de que terminé.
+          finishedAt: liveNow.finishedAt || fresh.finishedAt || null,
+          spinning: liveNow.spinning,
         };
         await writePlayerState(roomCode, round, myId, merged);
         lastKnownServerQueueLenRef.current = merged.queue.length;
@@ -1522,12 +1592,12 @@ function GameRoom({ roomCode, myId, onBack }) {
           pendingWritesRef.current > 0 && prev[myId] ? { ...states, [myId]: prev[myId] } : states
         );
 
-        // La Final se decide al instante del lado de quien gana (ver
-        // completeCurrentGrid) — acá solo hace falta procesar el fin de
-        // carrera de las etapas "elim"/"semifinal" (nunca en la Final,
-        // ahí "sin terminar" es normal hasta que alguien gana).
-        if (r.phase === "playing" && r.stage !== "final" && Date.now() >= (r.countdownEndsAt || 0)) {
-          await checkHeatCompletion(roomCode, round, r.stage);
+        if (r.phase === "playing" && Date.now() >= (r.countdownEndsAt || 0)) {
+          if (r.stage === "final") {
+            await checkFinalCompletion(roomCode, round);
+          } else {
+            await checkHeatCompletion(roomCode, round, r.stage);
+          }
         }
       }
     };
@@ -1553,6 +1623,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     [...players].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0] ||
     null;
   const isHost = !!effectiveHost && effectiveHost.id === myId;
+  const roomMode = room.mode || "torneo";
   const stage = room.stage || "elim";
   const countdownEndsAt = room.countdownEndsAt || 0;
   const inCountdown = room.phase === "playing" && now < countdownEndsAt;
@@ -1595,7 +1666,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     const fresh = await readRoom(roomCode);
     if (!fresh || fresh.players.length < 2) return;
     const round = fresh.round || 1;
-    const initialStage = initialStageFor(fresh.players.length);
+    const initialStage = fresh.mode === "final" ? "final" : initialStageFor(fresh.players.length);
     const newStates = {};
     fresh.players.forEach((p) => {
       newStates[p.id] = freshStateForStage(initialStage);
@@ -1605,11 +1676,21 @@ function GameRoom({ roomCode, myId, onBack }) {
     fresh.stage = initialStage;
     fresh.winnerId = null;
     fresh.countdownEndsAt = Date.now() + COUNTDOWN_MS;
+    fresh.eliminationOrder = [];
+    fresh.finishOrder = [];
     await writeRoom(roomCode, fresh);
     setRoom(fresh);
     myLiveStateRef.current = newStates[myId] || null;
     lastKnownServerQueueLenRef.current = (newStates[myId] && newStates[myId].queue || []).length;
     setPlayerStates(newStates);
+  };
+
+  const setRoomMode = async (value) => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.mode = value;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
   };
 
   const playAgain = async () => {
@@ -1620,6 +1701,8 @@ function GameRoom({ roomCode, myId, onBack }) {
     fresh.stage = null;
     fresh.winnerId = null;
     fresh.countdownEndsAt = null;
+    fresh.eliminationOrder = [];
+    fresh.finishOrder = [];
     await writeRoom(roomCode, fresh);
     setRoom(fresh);
     setPlayerStates({});
@@ -1643,26 +1726,65 @@ function GameRoom({ roomCode, myId, onBack }) {
           ))}
         </Card>
         <Card style={{ width: "100%", maxWidth: 420 }}>
-          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Cómo se juega — torneo por etapas</div>
-          <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "#F3EEFF" }}>
-            ⏱️ Cada etapa arranca con una cuenta regresiva de 5s — todos empiezan a la vez, sin ventajas.
-            <br />
-            ⚔️ <b style={{ color: "#FFD23F" }}>Eliminación:</b> 3 grillas (la última parpadea). Al terminar
-            la 2da se habilita mandar una grilla extra a un rival. El último en terminar la carrera queda
-            afuera; se repite hasta llegar a 3 jugadores.
-            <br />
-            🥈 <b style={{ color: "#FFD23F" }}>Semifinal (3 jugadores):</b> 4 grillas. Al terminar la 1ra se
-            habilita "blanco y negro" (2 seguidos al mismo rival se cancelan); al terminar la 2da, la
-            grilla extra clásica (se acumula); al terminar la 3ra, "freeze" de 5s (se acumula). El que
-            queda sin terminar la carrera queda afuera; los otros 2 pasan a la Final.
-            <br />
-            🏁 <b style={{ color: "#FFD23F" }}>Final (2 jugadores):</b> 3 grillas. Tocar mal frena los
-            clicks 3s. La 2da parpadea sola hasta resolverla, y quien la resuelve le manda al otro un
-            ataque "grilla girando" hasta que la termine. La 3ra es en escala de grises (tocar mal pausa
-            el cronómetro 2s en vez de frenar). Gana quien termina primero sus 3 grillas.
-            <br />
-            <span style={{ color: "#8b7fa8" }}>Con 3 jugadores se arranca directo en la Semifinal; con 2, directo en la Final.</span>
-          </div>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Modo de juego</div>
+          {isHost ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setRoomMode("torneo")} style={{ ...pillStyle(roomMode === "torneo"), flex: 1 }}>
+                🏆 Torneo por etapas
+              </button>
+              <button onClick={() => setRoomMode("final")} style={{ ...pillStyle(roomMode === "final"), flex: 1 }}>
+                🏁 Final directa
+              </button>
+            </div>
+          ) : (
+            <div style={{ color: "#F3EEFF", fontWeight: 700 }}>
+              {roomMode === "final" ? "🏁 Final directa" : "🏆 Torneo por etapas"}
+            </div>
+          )}
+        </Card>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          {roomMode === "final" ? (
+            <>
+              <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Cómo se juega — Final directa</div>
+              <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "#F3EEFF" }}>
+                Todos (de 2 a 16) juegan la Final directamente, sin etapas de eliminación previas.
+                <br />
+                ⏱️ Arranca con una cuenta regresiva de 5s — todos empiezan a la vez, sin ventajas.
+                <br />
+                🏁 3 grillas. Tocar mal frena los clicks 3s. La 2da parpadea sola hasta resolverla, y
+                quien la resuelve le manda a un rival (elegís a quién si hay más de uno) el ataque
+                "grilla girando" hasta que la termine. La 3ra es en escala de grises (tocar mal pausa el
+                cronómetro 2s en vez de frenar).
+                <br />
+                No se corta cuando alguien gana: se sigue jugando hasta que todos terminan sus 3
+                grillas, y quedan ordenados por el orden real en que van terminando.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Cómo se juega — torneo por etapas</div>
+              <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "#F3EEFF" }}>
+                ⏱️ Cada etapa arranca con una cuenta regresiva de 5s — todos empiezan a la vez, sin ventajas.
+                <br />
+                ⚔️ <b style={{ color: "#FFD23F" }}>Eliminación:</b> 3 grillas (la última parpadea). Al terminar
+                la 2da se habilita mandar una grilla extra a un rival. El último en terminar la carrera queda
+                afuera; se repite hasta llegar a 3 jugadores.
+                <br />
+                🥈 <b style={{ color: "#FFD23F" }}>Semifinal (3 jugadores):</b> 4 grillas. Al terminar la 1ra se
+                habilita "blanco y negro" (2 seguidos al mismo rival se cancelan); al terminar la 2da, la
+                grilla extra clásica (se acumula); al terminar la 3ra, "freeze" de 5s (se acumula). El que
+                queda sin terminar la carrera queda afuera; los otros 2 pasan a la Final.
+                <br />
+                🏁 <b style={{ color: "#FFD23F" }}>Final:</b> 3 grillas. Tocar mal frena los
+                clicks 3s. La 2da parpadea sola hasta resolverla, y quien la resuelve le manda al otro un
+                ataque "grilla girando" hasta que la termine. La 3ra es en escala de grises (tocar mal pausa
+                el cronómetro 2s en vez de frenar). No se corta cuando alguien gana: se sigue jugando hasta
+                que terminan los 2, y queda primero quien terminó antes.
+                <br />
+                <span style={{ color: "#8b7fa8" }}>Con 3 jugadores se arranca directo en la Semifinal; con 2, directo en la Final.</span>
+              </div>
+            </>
+          )}
         </Card>
         {isHost ? (
           <>
@@ -1709,12 +1831,27 @@ function GameRoom({ roomCode, myId, onBack }) {
 
   // ---------- ENDED ----------
   if (room.phase === "ended") {
-    const ranked = [...players].sort((a, b) => {
-      const sa = playerStates[a.id] || {};
-      const sb = playerStates[b.id] || {};
-      if (a.id === room.winnerId) return -1;
-      if (b.id === room.winnerId) return 1;
-      return (sb.eliminatedAt || 0) - (sa.eliminatedAt || 0);
+    // El ranking se arma con el historial que vive en la sala (no con el
+    // estado por-ronda, que para alguien eliminado hace rato quedó en una
+    // ronda vieja y ya no aparece en el listPlayerStates de la ronda
+    // actual): primero los que terminaron la Final, en el orden real en
+    // que fueron terminando (finishOrder, ya viene ordenado); después los
+    // eliminados en Eliminación/Semifinal, del último eliminado (mejor
+    // puesto) al primero (eliminationOrder viene en orden cronológico, así
+    // que se recorre al revés).
+    const orderedIds = [...(room.finishOrder || []), ...[...(room.eliminationOrder || [])].reverse()];
+    const seen = new Set();
+    const ranked = [];
+    orderedIds.forEach((id) => {
+      if (seen.has(id)) return;
+      const p = players.find((pp) => pp.id === id);
+      if (p) {
+        ranked.push(p);
+        seen.add(id);
+      }
+    });
+    players.forEach((p) => {
+      if (!seen.has(p.id)) ranked.push(p);
     });
     const medals = ["🥇", "🥈", "🥉"];
     return (
@@ -1772,26 +1909,14 @@ function GameRoom({ roomCode, myId, onBack }) {
   const finalG3 = stage === "final" && mySolvedCount === STAGE_GRID_COUNT.final - 1;
   const timerPaused = stage === "final" && now < timerPauseUntil;
 
-  // Le manda al rival (el único otro jugador vivo, en la Final) el ataque
-  // "grilla girando" — no hace falta elegir a quién, solo hay uno.
-  const triggerSpinAttack = () => {
-    const opponent = players.find((p) => p.id !== myId && (playerStates[p.id] || {}).alive !== false);
-    if (!opponent) return;
-    (async () => {
-      const freshTarget = await readPlayerState(roomCode, round, opponent.id);
-      if (!freshTarget) return;
-      const nextTargetState = { ...freshTarget, spinning: true };
-      await writePlayerState(roomCode, round, opponent.id, nextTargetState);
-      setPlayerStates((m) => ({ ...m, [opponent.id]: nextTargetState }));
-    })();
-  };
-
   // El picker se cierra YA (no espera red); el guardado real al rival (la
-  // grilla extra, el debuff de blanco y negro, o el freeze — según
-  // attackCtx.type) pasa en segundo plano. El rival lo va a ver en su
-  // próximo sondeo.
-  const performAttack = (targetId) => {
-    const type = attackCtx ? attackCtx.type : "grid";
+  // grilla extra, el debuff de blanco y negro, el freeze, o el giro —
+  // según forcedType o attackCtx.type) pasa en segundo plano. El rival lo
+  // va a ver en su próximo sondeo. forcedType se usa para el ataque
+  // "grilla girando" de la Final cuando solo hay un rival posible: se
+  // manda directo, sin abrir el selector.
+  const performAttack = (targetId, forcedType) => {
+    const type = forcedType || (attackCtx ? attackCtx.type : "grid");
     setAttackCtx(null);
     const cur = myLiveStateRef.current;
     if (cur) setMyStateNow({ ...cur, lastAttacked: targetId });
@@ -1803,6 +1928,8 @@ function GameRoom({ roomCode, myId, onBack }) {
       } else if (type === "freeze") {
         const base = Math.max(freshTarget.freezeUntil || 0, Date.now());
         nextTargetState = { ...freshTarget, freezeUntil: base + SEMI_FREEZE_MS };
+      } else if (type === "spin") {
+        nextTargetState = { ...freshTarget, spinning: true };
       } else {
         const newQueue = [...(freshTarget.queue || []), newQueuedGrid()];
         nextTargetState = { ...freshTarget, queue: newQueue };
@@ -1814,9 +1941,11 @@ function GameRoom({ roomCode, myId, onBack }) {
 
   // Se llama cuando se completaron los colores de la grilla que está
   // primera en la cola: la saca de la cola YA (instantáneo).
-  //  - Final: si no queda nada en la cola, gané (se decide al instante,
-  //    sin esperar sondeo); si recién terminé la grilla 2, le mando al
-  //    rival el ataque "girando".
+  //  - Final: si no queda nada en la cola, terminé mis 3 grillas —
+  //    finishedAt YA (no gano al instante: se sigue jugando hasta que
+  //    todos terminan, ver checkFinalCompletion). Si recién terminé la
+  //    grilla 2, ataco "girando" a un rival: si solo queda uno posible,
+  //    directo; si hay más de uno, abro el selector para elegir.
   //  - elim/semifinal: si no queda nada, terminé esta carrera y espero a
   //    los demás (checkHeatCompletion se encarga del resto); si no, se
   //    habilita el ataque que corresponda según cuántas llevo resueltas.
@@ -1826,20 +1955,22 @@ function GameRoom({ roomCode, myId, onBack }) {
 
     if (stage === "final") {
       if (newQueue.length === 0) {
-        setRoom((r) => (r ? { ...r, phase: "ended", winnerId: myId } : r));
-        setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: false });
-        (async () => {
-          const freshRoom = await readRoom(roomCode);
-          if (freshRoom && freshRoom.phase === "playing") {
-            freshRoom.phase = "ended";
-            freshRoom.winnerId = myId;
-            await writeRoom(roomCode, freshRoom);
-          }
-        })();
+        setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: false, finishedAt: Date.now() });
         return;
       }
       setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: false });
-      if (solvedCount === 2) triggerSpinAttack();
+      if (solvedCount === 2) {
+        const opponents = players.filter((p) => {
+          if (p.id === myId) return false;
+          const st = playerStates[p.id] || {};
+          return st.alive !== false && !st.finishedAt;
+        });
+        if (opponents.length === 1) {
+          performAttack(opponents[0].id, "spin");
+        } else if (opponents.length > 1) {
+          setAttackCtx({ type: "spin", title: "🌀 ¡Grilla resuelta! ¿A quién le hacés girar la grilla?" });
+        }
+      }
       return;
     }
 
@@ -1906,7 +2037,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     stage === "final" ? "🏁 Final" : stage === "semifinal" ? "🥈 Semifinal (quedan 3)" : "⚔️ Eliminación";
   const stageDesc =
     stage === "final"
-      ? "3 grillas. Ganás si termina primero las 3."
+      ? "3 grillas. Se sigue jugando hasta que todos terminan; queda primero quien las resuelve antes."
       : stage === "semifinal"
       ? "4 grillas. El último en terminar queda afuera; los otros 2 pasan a la Final."
       : "3 grillas. El último en terminar queda afuera.";
@@ -1951,7 +2082,7 @@ function GameRoom({ roomCode, myId, onBack }) {
       )}
 
       <Title size={22}>Sala {room.code}</Title>
-      <PlayerBadgeRow players={players} playerStates={playerStates} myId={myId} />
+      <PlayerBadgeRow players={players} playerStates={playerStates} myId={myId} eliminationOrder={room.eliminationOrder} />
 
       <div
         style={{
@@ -2017,14 +2148,14 @@ function GameRoom({ roomCode, myId, onBack }) {
           )}
           {finalG3 && (
             <div style={{ textAlign: "center", color: "#8b7fa8", fontWeight: 700, fontSize: 13, marginTop: 12 }}>
-              Última grilla: 5 tonos de gris. Tocar mal pausa el cronómetro 2s.
+              Última grilla: 4 tonos de gris. Tocar mal pausa el cronómetro 2s.
             </div>
           )}
         </>
       ) : (
         <Card style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
           <div style={{ fontSize: 40, marginBottom: 6 }}>✅</div>
-          <Title size={18}>¡Terminaste esta etapa!</Title>
+          <Title size={18}>{stage === "final" ? "¡Terminaste tus 3 grillas!" : "¡Terminaste esta etapa!"}</Title>
           <Sub style={{ marginBottom: 0 }}>Esperando a que terminen los demás...</Sub>
         </Card>
       )}
@@ -2035,6 +2166,7 @@ function GameRoom({ roomCode, myId, onBack }) {
           playerStates={playerStates}
           myId={myId}
           myLastAttacked={myState ? myState.lastAttacked : null}
+          eliminationOrder={room.eliminationOrder}
           title={attackCtx.title}
           subtitle={attackCtx.subtitle}
           onAttack={performAttack}
