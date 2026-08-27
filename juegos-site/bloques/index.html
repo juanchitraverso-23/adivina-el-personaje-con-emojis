@@ -134,6 +134,13 @@ const { useState, useEffect, useMemo, useRef } = React;
 // ============================================================
 const STORAGE_PREFIX = "bloques:sala:";
 const POLL_MS = 1000;
+// El listado de "salas abiertas ahora" (JoinScreen, antes de entrar a
+// jugar) usa list() de Workers KV, que en el plan gratuito tiene una
+// cuota diaria mucho más chica que get() (1.000/día contra 100.000/día,
+// compartida por todo el sitio). No hace falta que se actualice cada
+// segundo — nadie necesita precisión al segundo para ver qué salas hay
+// abiertas — así que sondea bastante más espaciado.
+const LOBBY_LIST_POLL_MS = 8000;
 const SESSION_KEY = "bloques:sesion";
 const MAX_PLAYERS = 16;
 const GRID_SIZE = 10;
@@ -243,6 +250,25 @@ async function listPlayerStates(code, round) {
     try {
       map[playerId] = JSON.parse(e.value);
     } catch {}
+  });
+  return map;
+}
+// Igual que listPlayerStates, pero sin usar list(): pide el estado de
+// cada jugador por su key exacta (readPlayerState), en paralelo. Se usa
+// en el sondeo de cada segundo porque list() tiene una cuota diaria
+// gratuita de Workers KV mucho más chica que get() (1.000/día contra
+// 100.000/día) — con 1 sondeo por segundo por jugador, list() se agota
+// en minutos, y cuando eso pasa las llamadas fallan y devuelven vacío,
+// lo que antes hacía que el sondeo pisara el progreso local de cada
+// uno con "no hay nadie". playerIds sale de room.players, que ya
+// tenemos siempre a mano (no hace falta descubrir las keys).
+async function readAllPlayerStates(code, round, playerIds) {
+  const entries = await Promise.all(
+    (playerIds || []).map(async (id) => [id, await readPlayerState(code, round, id)])
+  );
+  const map = {};
+  entries.forEach(([id, state]) => {
+    if (state) map[id] = state;
   });
   return map;
 }
@@ -1130,7 +1156,7 @@ function JoinScreen({ onJoined, onBack }) {
       } catch {}
     };
     tick();
-    const id = setInterval(tick, POLL_MS);
+    const id = setInterval(tick, LOBBY_LIST_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -1394,7 +1420,7 @@ async function checkHeatCompletion(roomCode, round, stage) {
   const freshRoom = await readRoom(roomCode);
   if (!freshRoom || freshRoom.phase !== "playing") return;
   if (freshRoom.round !== round || freshRoom.stage !== stage) return; // ya lo procesó otro cliente
-  const states = await listPlayerStates(roomCode, round);
+  const states = await readAllPlayerStates(roomCode, round, (freshRoom.players || []).map((p) => p.id));
   // Quién sigue activo se decide con freshRoom.players + eliminationOrder
   // (una lectura de UNA sola key, fuerte), no con qué aparece en `states`
   // (list() sobre un prefijo, con consistencia más floja en Workers KV:
@@ -1438,7 +1464,7 @@ async function checkFinalCompletion(roomCode, round) {
   const freshRoom = await readRoom(roomCode);
   if (!freshRoom || freshRoom.phase !== "playing") return;
   if (freshRoom.round !== round || freshRoom.stage !== "final") return; // ya lo procesó otro cliente
-  const states = await listPlayerStates(roomCode, round);
+  const states = await readAllPlayerStates(roomCode, round, (freshRoom.players || []).map((p) => p.id));
   // Mismo motivo que en checkHeatCompletion: quién sigue en carrera sale
   // de freshRoom.players (lectura fuerte), no de `states` (list(), más
   // floja) — si no, a alguien cuya key todavía no propagó lo dejaba
@@ -1589,8 +1615,17 @@ function GameRoom({ roomCode, myId, onBack }) {
       setNow(Date.now());
       const round = r.round || 1;
       if (r.phase === "playing" || r.phase === "ended") {
-        const states = await listPlayerStates(roomCode, round);
+        const states = await readAllPlayerStates(roomCode, round, (r.players || []).map((p) => p.id));
         if (cancelled) return;
+        // Si el sondeo no trajo NADA (falló el pedido — por ejemplo, se
+        // agotó alguna cuota diaria de Workers KV — o la sala genuinamente
+        // no tiene estado todavía), no lo tratamos como "no hay nadie
+        // jugando": se descarta este sondeo entero y se mantiene lo que ya
+        // se sabía. Sin este chequeo, un sondeo fallido pisaba mi propio
+        // progreso (y el de todos) con un objeto vacío, mostrando "ya
+        // terminaste, esperando a los demás" sin haber tocado nada.
+        const hasData = states && Object.keys(states).length > 0;
+        if (!hasData) return;
         // Mientras tengo una sincronización propia en vuelo, no piso mi
         // estado local (ni la referencia síncrona que usan los clicks) con
         // esta lectura del server, que puede no reflejar todavía el último
