@@ -197,6 +197,10 @@ const AVATARS = ["🐶", "🐱", "🐭", "🐹", "🦊", "🐻", "🐼", "🐨",
 
 const STORAGE_PREFIX = "emoji-charadas:sala:";
 const POLL_MS = 1200;
+// list() es una operación mucho más limitada que get() en la cuota diaria de Cloudflare
+// (compartida entre todos los juegos del sitio), así que el listado de salas abiertas
+// se revisa más espaciado: nadie necesita precisión de menos de un segundo para eso.
+const LOBBY_LIST_POLL_MS = 8000;
 const SESSION_KEY = "emoji-charadas:session";
 
 function randomId() {
@@ -867,7 +871,7 @@ function OnlineGame({ onBack }) {
       }
     };
     tick();
-    const id = setInterval(tick, POLL_MS);
+    const id = setInterval(tick, LOBBY_LIST_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(id);

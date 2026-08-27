@@ -127,6 +127,13 @@ const { useState, useEffect, useRef } = React;
 // ============================================================
 const STORAGE_PREFIX = "secuencias:sala:";
 const POLL_MS = 1000;
+// El listado de "salas abiertas ahora" (JoinScreen, antes de entrar a
+// jugar) usa list() de Workers KV, que en el plan gratuito tiene una
+// cuota diaria mucho más chica que get() (1.000/día contra 100.000/día,
+// compartida por todo el sitio). No hace falta que se actualice cada
+// segundo — nadie necesita precisión al segundo para ver qué salas hay
+// abiertas — así que sondea bastante más espaciado.
+const LOBBY_LIST_POLL_MS = 8000;
 const SESSION_KEY = "secuencias:sesion";
 const MAX_PLAYERS = 8;
 const DEFAULT_MAX_QUEUE = 8;
@@ -183,20 +190,22 @@ async function readPlayerState(code, round, playerId) {
 async function writePlayerState(code, round, playerId, state) {
   await window.storage.set(playerKey(code, round, playerId), JSON.stringify(state), true);
 }
-async function listPlayerStates(code, round) {
-  const prefix = playerKey(code, round, "");
-  let entries = [];
-  try {
-    entries = await window.storage.list(prefix);
-  } catch {
-    entries = [];
-  }
+// Antes esto usaba list() de Workers KV (pedir todas las keys bajo el
+// prefijo de la ronda y parsear cada una). list() tiene una cuota diaria
+// gratuita mucho más chica que get() (1.000/día contra 100.000/día,
+// compartida por todo el sitio) — con 1 sondeo por segundo por jugador se
+// agota en minutos, y cuando eso pasa las llamadas fallan y devuelven
+// vacío, lo que hacía que el sondeo pisara el progreso local de cada uno
+// con "no hay nadie". playerIds sale de room.players, que ya tenemos
+// siempre a mano (no hace falta descubrir las keys con list()), así que
+// pedimos cada estado por su key exacta con readPlayerState, en paralelo.
+async function readAllPlayerStates(code, round, playerIds) {
+  const entries = await Promise.all(
+    (playerIds || []).map(async (id) => [id, await readPlayerState(code, round, id)])
+  );
   const map = {};
-  entries.forEach((e) => {
-    const playerId = e.key.slice(prefix.length);
-    try {
-      map[playerId] = JSON.parse(e.value);
-    } catch {}
+  entries.forEach(([id, state]) => {
+    if (state) map[id] = state;
   });
   return map;
 }
@@ -1088,7 +1097,7 @@ function JoinScreen({ onJoined, onBack }) {
       } catch {}
     };
     tick();
-    const id = setInterval(tick, POLL_MS);
+    const id = setInterval(tick, LOBBY_LIST_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -1345,8 +1354,17 @@ function GameRoom({ roomCode, myId, onBack }) {
       setRoom(r);
       const round = r.round || 1;
       if (r.phase === "playing" || r.phase === "ended") {
-        const states = await listPlayerStates(roomCode, round);
+        const states = await readAllPlayerStates(roomCode, round, (r.players || []).map((p) => p.id));
         if (cancelled) return;
+        // Si el sondeo no trajo NADA (falló el pedido — por ejemplo, se
+        // agotó alguna cuota diaria de Workers KV — o la sala genuinamente
+        // no tiene estado todavía), no lo tratamos como "no hay nadie
+        // jugando": se descarta este sondeo entero y se mantiene lo que ya
+        // se sabía. Sin este chequeo, un sondeo fallido pisaba mi propio
+        // progreso (y el de todos) con un objeto vacío, mostrando "ya
+        // terminaste, esperando a los demás" sin haber tocado nada.
+        const hasData = states && Object.keys(states).length > 0;
+        if (!hasData) return;
         if (pendingWritesRef.current === 0) {
           myLiveStateRef.current = states[myId] || myLiveStateRef.current;
           lastKnownServerQueueLenRef.current = (myLiveStateRef.current && myLiveStateRef.current.queue || []).length;

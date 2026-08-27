@@ -590,6 +590,12 @@ function backToModeSelect() {
 
 /* ---- Salas abiertas: listado para no depender de pasarse el código ---- */
 const ROOM_PREFIX = "room:";
+// storage.list() usa una cuota diaria de Cloudflare KV mucho más chica que
+// storage.get() (~1000/día vs ~100000/día) y esa cuota es compartida por
+// TODO el sitio (los 6 juegos). Este es el único list() de todo el juego,
+// así que alcanza con un sondeo bien espaciado: a nadie le hace falta
+// precisión de menos de un segundo para ver qué salas hay abiertas.
+const LOBBY_LIST_POLL_MS = 8000;
 
 function stopOpenRoomsPolling() {
   if (state.openRoomsPollHandle) clearInterval(state.openRoomsPollHandle);
@@ -632,7 +638,7 @@ function startOpenRoomsPolling() {
     } catch (e) { /* sin salas visibles, no molesta al jugador con un error */ }
   };
   tick();
-  state.openRoomsPollHandle = setInterval(tick, 1800);
+  state.openRoomsPollHandle = setInterval(tick, LOBBY_LIST_POLL_MS);
 }
 
 async function quickJoinRoom(code) {

@@ -121,6 +121,13 @@ const { useState, useEffect, useRef } = React;
 // ---- Salas online: mismo patrón de KV vía storage.js que los otros juegos ----
 const STORAGE_PREFIX = "quien-soy:sala:";
 const POLL_MS = 1200;
+// El listado de "salas abiertas ahora" (JoinScreen, antes de entrar a
+// jugar) usa list() de Workers KV, que en el plan gratuito tiene una
+// cuota diaria mucho más chica que get() (1.000/día contra 100.000/día,
+// compartida por todo el sitio). No hace falta que se actualice cada
+// segundo — nadie necesita precisión al segundo para ver qué salas hay
+// abiertas — así que sondea bastante más espaciado.
+const LOBBY_LIST_POLL_MS = 8000;
 const SESSION_KEY = "quien-soy:session";
 
 function randomId() {
@@ -1063,7 +1070,7 @@ function OnlineGame({ onBack }) {
       }
     };
     tick();
-    const id = setInterval(tick, POLL_MS);
+    const id = setInterval(tick, LOBBY_LIST_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -1982,6 +1989,45 @@ async function simListProgress(code, round) {
   });
   return map;
 }
+async function simReadSecret(code, round, playerId) {
+  try {
+    const res = await window.storage.get(simSecretKey(code, round, playerId), true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+// Iguales que simListSecrets/simListProgress, pero sin usar list(): piden
+// el secreto/progreso de cada jugador por su key exacta (simReadSecret /
+// simReadProgress), en paralelo. Se usan en el sondeo de cada ronda
+// porque list() tiene una cuota diaria gratuita de Workers KV mucho más
+// chica que get() (1.000/día contra 100.000/día, compartida por todo el
+// sitio) — con un sondeo por segundo por sala, list() se agota rápido, y
+// cuando eso pasa las llamadas fallan y devuelven vacío, lo que antes
+// hacía que el sondeo pisara los secretos/progreso ya cargados con "no
+// hay nada". playerIds sale de room.players, que ya tenemos siempre a
+// mano (no hace falta descubrir las keys).
+async function simReadAllSecrets(code, round, playerIds) {
+  const entries = await Promise.all(
+    (playerIds || []).map(async (id) => [id, await simReadSecret(code, round, id)])
+  );
+  const map = {};
+  entries.forEach(([id, secret]) => {
+    if (secret) map[id] = secret;
+  });
+  return map;
+}
+async function simReadAllProgress(code, round, playerIds) {
+  const entries = await Promise.all(
+    (playerIds || []).map(async (id) => [id, await simReadProgress(code, round, id)])
+  );
+  const map = {};
+  entries.forEach(([id, progress]) => {
+    if (progress && Object.keys(progress).length > 0) map[id] = progress;
+  });
+  return map;
+}
 
 // -- coincidencia tolerante a errores de tipeo --
 function simNormalize(s) {
@@ -2513,7 +2559,7 @@ function SimultaneousGame({ onBack }) {
       } catch {}
     };
     tick();
-    const id = setInterval(tick, POLL_MS);
+    const id = setInterval(tick, LOBBY_LIST_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -2626,10 +2672,19 @@ function SimultaneousGame({ onBack }) {
       if (cancelled || !r) return;
       setRoom(r);
       const round = r.round || 1;
+      const ids = (r.players || []).map((pl) => pl.id);
       if (r.phase === "setup" || r.phase === "guessing") {
-        const s = await simListSecrets(roomCode, round);
+        const s = await simReadAllSecrets(roomCode, round, ids);
         if (cancelled) return;
-        setSecrets(s);
+        // Si el sondeo no trajo NINGÚN secreto pero ya teníamos alguno
+        // cargado, probablemente falló algún get() (cuota agotada) y no
+        // que de repente nadie mandó su personaje: se descarta este
+        // sondeo en vez de pisar lo que ya se veía en pantalla.
+        setSecrets((prev) => {
+          const hadSecrets = Object.keys(prev).length > 0;
+          const gotSecrets = Object.keys(s).length > 0;
+          return gotSecrets || !hadSecrets ? s : prev;
+        });
         if (r.phase === "setup" && r.players.length >= 2 && Object.keys(s).length >= r.players.length) {
           const fresh = await simReadRoom(roomCode);
           if (fresh && fresh.phase === "setup") {
@@ -2639,8 +2694,15 @@ function SimultaneousGame({ onBack }) {
         }
       }
       if (r.phase === "guessing" || r.phase === "results") {
-        const p = await simListProgress(roomCode, round);
-        if (!cancelled) setProgressMap(p);
+        const p = await simReadAllProgress(roomCode, round, ids);
+        if (cancelled) return;
+        // Mismo cuidado que con los secretos: un sondeo vacío no debe
+        // pisar el progreso de adivinanza ya cargado.
+        setProgressMap((prev) => {
+          const hadProgress = Object.keys(prev).length > 0;
+          const gotProgress = Object.keys(p).length > 0;
+          return gotProgress || !hadProgress ? p : prev;
+        });
       }
     };
     tick();

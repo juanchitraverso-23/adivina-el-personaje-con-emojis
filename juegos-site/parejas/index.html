@@ -132,6 +132,12 @@ const REVIEW_SECONDS = 60;     // tiempo de revisión final (brief §15)
 // entre los muchos jugadores contestando al mismo tiempo.
 const STORAGE_PREFIX = "parejas:sala:";
 const POLL_MS = 1500;
+// El sondeo de "salas abiertas" (JoinScreen) todavía usa window.storage.list(),
+// que comparte una cuota diaria muy chica entre los 6 juegos del sitio (a
+// diferencia de get(), mucho más generosa). Nadie necesita precisión de
+// segundo para ver salas para unirse, así que este sondeo va bastante más
+// lento que POLL_MS para no gastar esa cuota de arriba.
+const LOBBY_LIST_POLL_MS = 8000;
 const SESSION_KEY = "parejas:session";
 
 function randomId() {
@@ -167,16 +173,19 @@ async function readProgress(code, playerId) {
 async function writeProgress(code, playerId, data) {
   await window.storage.set(STORAGE_PREFIX + code + ":progress:" + playerId, JSON.stringify(data), true);
 }
-async function listProgress(code) {
-  const entries = await window.storage.list(STORAGE_PREFIX + code + ":progress:");
+// NOTA KV: acá usábamos window.storage.list() para descubrir el progreso de
+// TODOS los jugadores de una sola pedida. El problema es que list() comparte
+// una cuota diaria muy chica (~1000/día) entre los 6 juegos del sitio,
+// mientras que get() tiene una cuota mucho más generosa (~100000/día). Como
+// esta función se llama desde el sondeo de cada segundo, alcanzaba con una
+// sola sala jugando un rato para agotar la cuota del sitio entero. Como ya
+// sabemos los IDs de los jugadores de la sala (room.players), pedimos cada
+// progreso individual con get() en paralelo en vez de listar.
+async function readProgressForIds(code, playerIds) {
+  const results = await Promise.all(playerIds.map((id) => readProgress(code, id)));
   const map = {};
-  entries.forEach((e) => {
-    const playerId = e.key.slice((STORAGE_PREFIX + code + ":progress:").length);
-    try {
-      map[playerId] = JSON.parse(e.value);
-    } catch {
-      /* ignorar entradas corruptas */
-    }
+  playerIds.forEach((id, i) => {
+    if (results[i] != null) map[id] = results[i];
   });
   return map;
 }
@@ -192,16 +201,14 @@ async function readJudgments(code, coupleId) {
 async function writeJudgments(code, coupleId, data) {
   await window.storage.set(STORAGE_PREFIX + code + ":judgments:" + coupleId, JSON.stringify(data), true);
 }
-async function listJudgments(code) {
-  const entries = await window.storage.list(STORAGE_PREFIX + code + ":judgments:");
+// Mismo motivo que readProgressForIds: en vez de listar todas las claves de
+// juicios de la sala, pedimos con get() solo las parejas que ya conocemos
+// (derivadas de room.players), en paralelo.
+async function readJudgmentsForCoupleIds(code, coupleIds) {
+  const results = await Promise.all(coupleIds.map((id) => readJudgments(code, id)));
   const map = {};
-  entries.forEach((e) => {
-    const coupleId = e.key.slice((STORAGE_PREFIX + code + ":judgments:").length);
-    try {
-      map[coupleId] = JSON.parse(e.value);
-    } catch {
-      /* ignorar */
-    }
+  coupleIds.forEach((id, i) => {
+    if (Object.keys(results[i]).length > 0) map[id] = results[i];
   });
   return map;
 }
@@ -692,7 +699,7 @@ function JoinScreen({ mode, gameMode, onBack, onEntered }) {
       }
     };
     tick();
-    const id = setInterval(tick, POLL_MS);
+    const id = setInterval(tick, LOBBY_LIST_POLL_MS);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
@@ -1543,10 +1550,21 @@ function RoomView({ code, myId, onBack }) {
       const r = await readRoom(code);
       if (!cancelled && r) setRoom(r);
       if (r && r.phase === "playing") {
-        const [pm, jm] = await Promise.all([listProgress(code), listJudgments(code)]);
+        const allIds = r.players.map((p) => p.id);
+        const coupleIds = [...new Set(r.players.map((p) => p.coupleId).filter(Boolean))];
+        const [pm, jm] = await Promise.all([
+          readProgressForIds(code, allIds),
+          readJudgmentsForCoupleIds(code, coupleIds),
+        ]);
         if (!cancelled) {
-          setProgressMap(pm);
-          setJudgmentsMap(jm);
+          // Si un sondeo no trae NADA (falló el pedido —p.ej. se agotó
+          // alguna cuota diaria de Workers KV— o la ronda recién arranca y
+          // todavía nadie escribió nada), no lo tratamos como "no hay
+          // progreso": se descarta esa parte del sondeo y se mantiene lo
+          // que ya había, para no pisar mi propio progreso ya visible (o
+          // los juicios ya cargados) con un objeto vacío.
+          if (Object.keys(pm).length > 0) setProgressMap(pm);
+          if (Object.keys(jm).length > 0) setJudgmentsMap(jm);
         }
       }
     };
