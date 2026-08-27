@@ -504,6 +504,7 @@ let state = {
   pollHandle: null,
   revealedRole: false,
   clueLoading: false,
+  turnAdvancing: false,
   joinError: "",
   openRooms: [],
   openRoomsPollHandle: null,
@@ -702,6 +703,17 @@ function syncScreenFromRoom() {
   else if (r.phase === "voting") state.screen = "voting";
 }
 
+// Mismo patrón que en los demás juegos: si quien tenía el mando ya no está
+// en la sala (se fue), el mando pasa solo a quien sigue en la lista (el/la
+// más antiguo/a que quede) — sin escrituras extra que se puedan pisar entre
+// varios celus. Si no existiera esto, un host que se va deja la sala
+// bloqueada para siempre (nadie más puede tocar nada).
+function effectiveHostId(room) {
+  if (!room || !room.players || room.players.length === 0) return null;
+  const host = room.players.find(p => p.id === room.hostId);
+  return host ? host.id : room.players[0].id;
+}
+
 async function createRoom() {
   const nameInput = document.getElementById("nameInput");
   const name = (nameInput ? nameInput.value : "").trim();
@@ -753,15 +765,23 @@ async function joinRoom() {
 }
 
 async function setBotCountOnline(n) {
-  if (!state.room || state.room.hostId !== myId) return;
-  state.room.botCount = n;
-  await saveRoom(state.room);
+  if (!state.room || effectiveHostId(state.room) !== myId) return;
+  // Relee la sala antes de pisarla: si mientras tanto se unió alguien más,
+  // guardar la copia vieja de state.room lo borraría de la lista de todos.
+  const fresh = await loadRoom(state.roomCode);
+  if (!fresh || effectiveHostId(fresh) !== myId) return;
+  fresh.botCount = n;
+  await saveRoom(fresh);
+  state.room = fresh;
   render();
 }
 async function setRoomFlag(key, val) {
-  if (!state.room || state.room.hostId !== myId) return;
-  state.room[key] = val;
-  await saveRoom(state.room);
+  if (!state.room || effectiveHostId(state.room) !== myId) return;
+  const fresh = await loadRoom(state.roomCode);
+  if (!fresh || effectiveHostId(fresh) !== myId) return;
+  fresh[key] = val;
+  await saveRoom(fresh);
+  state.room = fresh;
   render();
 }
 function totalPlayersCountOnline() {
@@ -770,8 +790,13 @@ function totalPlayersCountOnline() {
 }
 
 async function startGameOnline() {
-  const room = state.room;
-  if (!room || room.hostId !== myId) return;
+  if (!state.room || effectiveHostId(state.room) !== myId) return;
+  // Relee la sala antes de arrancar: si mientras tanto se unió alguien más
+  // (o el host tocó otro ajuste desde otra pestaña), arrancar con la copia
+  // vieja de state.room lo dejaría afuera de la ronda sin darse cuenta.
+  const room = await loadRoom(state.roomCode);
+  if (!room || effectiveHostId(room) !== myId) return;
+  state.room = room;
   const total = totalPlayersCountOnline();
   if (total < 3) return;
 
@@ -812,7 +837,7 @@ async function startGameOnline() {
 }
 
 async function goToCluesOnline() {
-  if (!state.room || state.room.hostId !== myId) return;
+  if (!state.room || effectiveHostId(state.room) !== myId) return;
   state.room.phase = "clues";
   await saveRoom(state.room);
   state.screen = "clues";
@@ -834,22 +859,41 @@ async function fetchBotClueOnline(botId, botName, isImpostor) {
 
 async function advanceTurnOnline() {
   const room = state.room; if (!room) return;
+  // Guarda sincrónica contra doble-tap: si no estuviera, dos clicks
+  // seguidos en "Siguiente" (antes de que el primero termine de guardar)
+  // suman turnIndex dos veces y se saltean el turno de alguien.
+  if (state.turnAdvancing) return;
+  state.turnAdvancing = true;
   room.turnIndex += 1;
   if (room.turnIndex >= room.turnOrder.length) { room.phase = "voting"; room.revealed = false; }
   await saveRoom(room);
   state.screen = room.phase === "voting" ? "voting" : "clues";
+  state.turnAdvancing = false;
   render();
 }
 async function revealAnswerOnline() {
-  if (!state.room || state.room.hostId !== myId) return;
+  if (!state.room || effectiveHostId(state.room) !== myId) return;
   state.room.revealed = true; await saveRoom(state.room); render();
 }
 async function newRoundOnline() {
-  if (!state.room || state.room.hostId !== myId) return;
+  if (!state.room || effectiveHostId(state.room) !== myId) return;
   state.room.phase = "lobby"; await saveRoom(state.room);
   state.screen = "lobby"; state.revealedRole = false; render();
 }
-function leaveRoom() {
+async function leaveRoom() {
+  // Mismo patrón que en los demás juegos: sacar al jugador de la sala en el
+  // server, no solo olvidar la sesión local — si no, queda un fantasma
+  // ocupando un lugar en el lobby de todos los demás para siempre (y si era
+  // el host, sin el fallback de effectiveHostId nadie más podría controlar
+  // la sala).
+  const code = state.roomCode;
+  try {
+    const fresh = code ? await loadRoom(code) : null;
+    if (fresh) {
+      fresh.players = (fresh.players || []).filter(p => p.id !== myId);
+      await saveRoom(fresh);
+    }
+  } catch { /* si falla, igual dejamos salir a la persona */ }
   if (state.pollHandle) clearInterval(state.pollHandle);
   state.pollHandle = null; state.room = null; state.roomCode = null;
   clearSession();
@@ -1040,10 +1084,11 @@ function renderOnline(card) {
   }
 
   if (!room) { card.innerHTML = `<h1>😵 Sala perdida</h1><button class="btn btnSecondary" onclick="leaveRoom()">Volver</button>`; return; }
-  const isHost = room.hostId === myId;
+  const hostId = effectiveHostId(room);
+  const isHost = hostId === myId;
 
   if (state.screen === "lobby") {
-    const humanItems = room.players.map(p => `<div class="playerItem"><span>${p.name}</span><span class="tag hostTag">${p.id === room.hostId ? 'HOST' : ''}</span></div>`).join("");
+    const humanItems = room.players.map(p => `<div class="playerItem"><span>${p.name}</span><span class="tag hostTag">${p.id === hostId ? 'HOST' : ''}</span></div>`).join("");
     const botButtons = [0, 1, 2, 3, 4].map(n => `<button class="botOption ${room.botCount === n ? 'botOptionActive' : ''}" ${isHost ? `onclick="setBotCountOnline(${n})"` : "disabled"}>${n}</button>`).join("");
     const total = totalPlayersCountOnline();
     const canStart = total >= 3;

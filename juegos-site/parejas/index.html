@@ -722,6 +722,11 @@ function JoinScreen({ mode, gameMode, onBack, onEntered }) {
     try {
       const code = codeMaybe || (codeInput.trim() ? codeInput.trim().toUpperCase() : randomCode());
       let existing = await readRoom(code);
+      if (existing && existing.phase !== "lobby") {
+        setError("Esa sala ya está jugando. Esperá a la próxima partida.");
+        setBusy(false);
+        return;
+      }
       const players = existing ? existing.players : [];
       if (players.some((p) => p.name.toLowerCase() === trimmedName.toLowerCase())) {
         setError(`Ya hay alguien llamado "${trimmedName}" en esa sala. Probá con otro nombre.`);
@@ -1590,7 +1595,23 @@ function RoomView({ code, myId, onBack }) {
     );
   }
 
-  const leaveRoom = () => {
+  const leaveRoom = async () => {
+    // Mismo patrón que en los demás juegos: sacar al jugador de la sala en
+    // el server, no solo olvidar la sesión local — si no, queda un
+    // fantasma ocupando un lugar de soltero/a o de pareja en el lobby de
+    // todos los demás para siempre. Si ya tenía pareja armada, a esa
+    // persona la volvemos a soltero/a (mismo efecto que "Desarmar") para
+    // no dejar una pareja de un solo integrante, que rompería el listado.
+    try {
+      const fresh = await readRoom(room.code);
+      if (fresh) {
+        const me = (fresh.players || []).find((p) => p.id === myId);
+        fresh.players = (fresh.players || [])
+          .filter((p) => p.id !== myId)
+          .map((p) => (me && me.coupleId && p.coupleId === me.coupleId ? { ...p, coupleId: null } : p));
+        await writeRoom(room.code, fresh);
+      }
+    } catch {}
     localStorage.removeItem(SESSION_KEY);
     onBack();
   };

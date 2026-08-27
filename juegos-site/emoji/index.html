@@ -237,6 +237,21 @@ async function writeRoom(code, room) {
   await window.storage.set(STORAGE_PREFIX + code, JSON.stringify(room), true);
 }
 
+// Se llama desde el tick de sondeo de cualquier cliente mientras la sala
+// está en "acting" y ya se venció el tiempo de la ronda. A diferencia de
+// un intento único con guarda local (si la lectura/escritura fallara por
+// red quedaría pegado para siempre, porque nada volvería a intentarlo),
+// esto se reintenta solo en cada sondeo siguiente. roundStartTime funciona
+// como guarda de idempotencia: si para cuando se lee fresco la sala ya
+// cambió de fase o de ronda, quiere decir que otro cliente (o un sondeo
+// anterior de este mismo) ya lo procesó, y no hace nada.
+async function checkRoundEnd(roomCode, roundStartTime) {
+  const fresh = await readRoom(roomCode);
+  if (!fresh || fresh.phase !== "acting" || fresh.roundStartTime !== roundStartTime) return;
+  fresh.phase = "scoring";
+  await writeRoom(roomCode, fresh);
+}
+
 // ---- Iconos (SVG inline, mismo trazo que lucide-react, sin depender de un CDN de íconos) ----
 const ICON_PATHS = {
   ArrowLeft: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
@@ -851,7 +866,6 @@ function OnlineGame({ onBack }) {
   const [now, setNow] = useState(Date.now());
   const [checked, setChecked] = useState({});
   const [openRooms, setOpenRooms] = useState([]);
-  const transitionGuard = useRef(false);
 
   // Salas abiertas: se listan solo mientras estamos en la pantalla de unirse,
   // para no seguir gastando pedidos una vez adentro de una sala.
@@ -990,7 +1004,16 @@ function OnlineGame({ onBack }) {
     let cancelled = false;
     const tick = async () => {
       const r = await readRoom(roomCode);
-      if (!cancelled && r) setRoom(r);
+      if (cancelled || !r) return;
+      setRoom(r);
+      // Si el tiempo de la ronda ya venció, cualquier cliente (no solo el
+      // que actúa) intenta pasar la sala a "scoring" en este mismo sondeo.
+      // Al estar acá adentro, se reintenta solo en el próximo tick si esta
+      // vuelta falla por red, en vez de depender de un único intento que
+      // podía quedar pegado para siempre (ver checkRoundEnd).
+      if (r.phase === "acting" && r.roundStartTime && Date.now() - r.roundStartTime >= ROUND_SECONDS * 1000) {
+        await checkRoundEnd(roomCode, r.roundStartTime);
+      }
     };
     tick();
     const id = setInterval(tick, POLL_MS);
@@ -1033,24 +1056,6 @@ function OnlineGame({ onBack }) {
 
   const elapsed = room?.roundStartTime ? (now - room.roundStartTime) / 1000 : 0;
   const remaining = Math.max(0, ROUND_SECONDS - elapsed);
-
-  useEffect(() => {
-    if (!room || room.phase !== "acting") {
-      transitionGuard.current = false;
-      return;
-    }
-    if (remaining <= 0 && !transitionGuard.current) {
-      transitionGuard.current = true;
-      (async () => {
-        const fresh = await readRoom(roomCode);
-        if (fresh && fresh.phase === "acting") {
-          fresh.phase = "scoring";
-          await writeRoom(roomCode, fresh);
-          setRoom(fresh);
-        }
-      })();
-    }
-  }, [remaining, room, roomCode]);
 
   const handleJoin = async () => {
     const trimmedName = name.trim();

@@ -1661,7 +1661,13 @@ function GameRoom({ roomCode, myId, onBack }) {
   const performAttack = (targetId, useJoker) => {
     setShowTargetPicker(false);
     const cur = myLiveStateRef.current;
-    if (cur) setMyStateNow({ ...cur, lastAttacked: targetId });
+    // Puede pasar que, entre completar la tarea (que abrió este selector) y
+    // tocar a quién atacar, me haya llegado un ataque ajeno que desbordó mi
+    // cola y me eliminó — el selector seguía abierto igual (showTargetPicker
+    // no depende de "alive"). Sin este chequeo, alguien ya eliminado podía
+    // mandar un último ataque igual.
+    if (!cur || cur.alive === false) return;
+    setMyStateNow({ ...cur, lastAttacked: targetId });
     const howMany = useJoker && isJoker ? 2 : 1;
     (async () => {
       const freshTarget = (await readPlayerState(roomCode, round, targetId)) || {
@@ -1791,7 +1797,7 @@ function GameRoom({ roomCode, myId, onBack }) {
         <Sub>Esperando la próxima tarea...</Sub>
       )}
 
-      {showTargetPicker && (
+      {showTargetPicker && iAmAlive && (
         <TargetPicker
           players={players}
           playerStates={playerStates}

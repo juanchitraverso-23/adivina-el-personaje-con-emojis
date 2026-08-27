@@ -1606,7 +1606,7 @@ function OnlineGame({ onBack }) {
   // ---------- LOBBY ----------
   if (room.phase === "lobby") {
     return (
-      <Screen style={{ justifyContent: "center" }}>
+      <Screen style={{ justifyContent: "center" }} homeConfirm="¿Salir de la sala?">
         <div style={{ display: "flex", justifyContent: "space-between", width: "100%", maxWidth: 420, marginBottom: 10 }}>
           <span style={{ color: "#C9B8F0", fontSize: 14 }}>
             Este celu: <b style={{ color: "#F3EEFF" }}>{joinNames(myPlayers.map((p) => p.name))}</b>
@@ -1662,7 +1662,7 @@ function OnlineGame({ onBack }) {
     const isAgain = room.phase === "clueInputAgain";
     if (!isMyDeviceClueGiver) {
       return (
-        <Screen style={{ justifyContent: "center" }}>
+        <Screen style={{ justifyContent: "center" }} homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
           <div style={{ fontSize: 56, marginBottom: 10 }}>🤫</div>
           <Title size={22}>{isAgain ? "Nadie adivinó..." : `${clueGiver?.name || "..."} está pensando`}</Title>
           <Sub>
@@ -1673,7 +1673,7 @@ function OnlineGame({ onBack }) {
       );
     }
     return (
-      <Screen>
+      <Screen homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
         <Title size={24}>{isAgain ? "Pistas extra" : `Pensá a alguien, ${clueGiver?.name}`}</Title>
         <Sub>{isAgain ? "Agregá otro emoji como pista" : "Elegí una persona famosa y escribila (queda guardada)"}</Sub>
         <ClueTrail clues={room.clues || []} />
@@ -1733,7 +1733,7 @@ function OnlineGame({ onBack }) {
     if (pendingLocal.length > 0) {
       const current = pendingLocal[0];
       return (
-        <Screen>
+        <Screen homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
           <Title size={22}>¿Quién es, {current.name}?</Title>
           {myPlayers.length > 1 && (
             <Sub style={{ marginTop: -12 }}>Pasale el celu a {current.name} si no lo tiene ya</Sub>
@@ -1760,7 +1760,7 @@ function OnlineGame({ onBack }) {
       const missing = players.filter((p) => p.id !== room.clueGiverId && !(room.guesses || {})[p.id]);
       const allAnswered = answered >= total;
       return (
-        <Screen>
+        <Screen homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
           <Title size={22}>Esperando respuestas</Title>
           <Sub>
             {answered} de {total} ya contestaron
@@ -1804,7 +1804,7 @@ function OnlineGame({ onBack }) {
     }
 
     return (
-      <Screen style={{ justifyContent: "center" }}>
+      <Screen style={{ justifyContent: "center" }} homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
         <div style={{ fontSize: 56, marginBottom: 10 }}>✅</div>
         <Title size={22}>
           {myPlayers.length > 1 ? "¡Ya mandaron sus respuestas!" : "¡Mandaste tu respuesta!"}
@@ -1819,7 +1819,7 @@ function OnlineGame({ onBack }) {
   if (room.phase === "review") {
     if (!isMyDeviceClueGiver) {
       return (
-        <Screen style={{ justifyContent: "center" }}>
+        <Screen style={{ justifyContent: "center" }} homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
           <div style={{ fontSize: 56, marginBottom: 10 }}>🎯</div>
           <Title size={22}>{clueGiver?.name} está revisando</Title>
           <Sub>Ya se mandaron las respuestas, esperá el resultado...</Sub>
@@ -1828,7 +1828,7 @@ function OnlineGame({ onBack }) {
     }
     const pool = Math.max(0, 10 - ((room.clues || []).length - 1));
     return (
-      <Screen>
+      <Screen homeConfirm={"¿Salir? Se pierde el progreso de esta partida."}>
         <Title size={22}>Respuestas — vos decidís</Title>
         <Sub>Tocá a todos los que acertaron (puede ser más de uno)</Sub>
         <ClueTrail clues={room.clues || []} />
@@ -1876,7 +1876,7 @@ function OnlineGame({ onBack }) {
     const lr = room.lastRound || {};
     const winnersLabel = joinNames(lr.winnerNames || []);
     return (
-      <Screen style={{ justifyContent: "center" }}>
+      <Screen style={{ justifyContent: "center" }} homeConfirm="¿Salir de la sala?">
         <div style={{ fontSize: 70, marginBottom: 6 }}>🎉</div>
         <Title size={28}>
           {(lr.winnerNames || []).length > 1 ? `¡${winnersLabel} acertaron!` : `¡${winnersLabel} acertó!`}
@@ -2201,11 +2201,17 @@ function SimSetupScreen({ room, myId, secrets, onBack }) {
   const [aliasDraft, setAliasDraft] = useState("");
   const [clues, setClues] = useState([]);
   const [saving, setSaving] = useState(false);
+  // Se pone en true apenas termina el guardado, sin esperar a que el
+  // sondeo del padre (hasta POLL_MS después) traiga `secrets[myId]` de
+  // vuelta: si no, entre que se guarda y llega ese sondeo el formulario
+  // queda habilitado de nuevo y un segundo toque mandaría otro personaje,
+  // pisando el que ya se guardó.
+  const [submitted, setSubmitted] = useState(false);
   const mySecret = secrets[myId];
 
-  if (mySecret) {
+  if (mySecret || submitted) {
     const total = (room.players || []).length;
-    const doneCount = Object.keys(secrets).length;
+    const doneCount = Object.keys(secrets).length + (submitted && !mySecret ? 1 : 0);
     return (
       <Screen homeConfirm="¿Salir? Se pierde tu personaje para esta ronda.">
         <div style={{ fontSize: 52, marginBottom: 10 }}>✅</div>
@@ -2225,6 +2231,7 @@ function SimSetupScreen({ room, myId, secrets, onBack }) {
       .filter(Boolean);
     await simWriteSecret(room.code, room.round || 1, myId, { answers: [name, ...aliases], clues });
     setSaving(false);
+    setSubmitted(true);
   };
 
   return (
