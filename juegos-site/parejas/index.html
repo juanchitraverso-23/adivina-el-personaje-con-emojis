@@ -8,6 +8,13 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Parejas Actuales" />
 <meta name="theme-color" content="#2B0F1E" />
+<!-- Adelanta la conexión (DNS + TLS) a los dos hosts externos de los que
+     depende esta página para arrancar — la tipografía y React/Babel —
+     así cuando el HTML llega a pedirlos de verdad, la conexión ya está
+     lista y se ahorra esa ida y vuelta. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="preconnect" href="https://unpkg.com" crossorigin />
 <style>
   /* El fondo real (sol + nubes + piso) lo pinta React recién al montar;
      hasta entonces se ve este mismo degradé de cielo (idéntico al de

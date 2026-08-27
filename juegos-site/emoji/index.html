@@ -8,6 +8,12 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Adiviná el Emoji" />
 <meta name="theme-color" content="#0c0620" />
+<!-- Adelanta la conexión (DNS + TLS) a los hosts externos de los que
+     depende esta página para arrancar — así cuando el HTML llega a
+     pedirlos de verdad, la conexión ya está lista. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="preconnect" href="https://unpkg.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   /* El fondo real (sol + nubes + piso) lo pinta React recién al montar;
