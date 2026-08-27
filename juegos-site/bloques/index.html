@@ -1395,17 +1395,24 @@ async function checkHeatCompletion(roomCode, round, stage) {
   if (!freshRoom || freshRoom.phase !== "playing") return;
   if (freshRoom.round !== round || freshRoom.stage !== stage) return; // ya lo procesó otro cliente
   const states = await listPlayerStates(roomCode, round);
-  const activePlayers = (freshRoom.players || []).filter((p) => {
-    const st = states[p.id];
-    return st && st.alive !== false;
-  });
+  // Quién sigue activo se decide con freshRoom.players + eliminationOrder
+  // (una lectura de UNA sola key, fuerte), no con qué aparece en `states`
+  // (list() sobre un prefijo, con consistencia más floja en Workers KV:
+  // una key recién escrita puede tardar en aparecer en un list() desde
+  // otro cliente/edge). Si activePlayers saliera de `states`, a alguien
+  // cuya key todavía no propagó lo dejaba afuera de la cuenta entera —
+  // no "todavía no terminó", directamente "no existe" — y eso podía
+  // declarar perdedor a otro jugador por error, mucho antes de que la
+  // carrera realmente terminara.
+  const eliminatedIds = new Set(freshRoom.eliminationOrder || []);
+  const activePlayers = (freshRoom.players || []).filter((p) => !eliminatedIds.has(p.id));
   if (activePlayers.length < 2) return; // nada que resolver todavía
-  const finished = activePlayers.filter((p) => !!states[p.id].finishedAt);
-  const unfinished = activePlayers.filter((p) => !states[p.id].finishedAt);
+  const finished = activePlayers.filter((p) => states[p.id] && !!states[p.id].finishedAt);
+  const unfinished = activePlayers.filter((p) => !(states[p.id] && states[p.id].finishedAt));
   if (unfinished.length !== 1 || finished.length < 1) return; // la carrera sigue
 
   const loserId = unfinished[0].id;
-  const loserState = states[loserId];
+  const loserState = states[loserId] || {};
   await writePlayerState(roomCode, round, loserId, { ...loserState, alive: false, eliminatedAt: Date.now() });
   freshRoom.eliminationOrder = [...(freshRoom.eliminationOrder || []), loserId];
 
@@ -1432,12 +1439,16 @@ async function checkFinalCompletion(roomCode, round) {
   if (!freshRoom || freshRoom.phase !== "playing") return;
   if (freshRoom.round !== round || freshRoom.stage !== "final") return; // ya lo procesó otro cliente
   const states = await listPlayerStates(roomCode, round);
-  const activePlayers = (freshRoom.players || []).filter((p) => {
-    const st = states[p.id];
-    return st && st.alive !== false;
-  });
+  // Mismo motivo que en checkHeatCompletion: quién sigue en carrera sale
+  // de freshRoom.players (lectura fuerte), no de `states` (list(), más
+  // floja) — si no, a alguien cuya key todavía no propagó lo dejaba
+  // afuera de la cuenta y la partida podía darse por terminada con
+  // gente que en realidad seguía jugando (el bug que reportó el usuario:
+  // "empieza y ya dice terminaste, como si esperara a un tercero").
+  const eliminatedIds = new Set(freshRoom.eliminationOrder || []);
+  const activePlayers = (freshRoom.players || []).filter((p) => !eliminatedIds.has(p.id));
   if (activePlayers.length < 1) return;
-  const stillPlaying = activePlayers.some((p) => !states[p.id].finishedAt);
+  const stillPlaying = activePlayers.some((p) => !(states[p.id] && states[p.id].finishedAt));
   if (stillPlaying) return; // todavía falta alguien
 
   const finishOrder = [...activePlayers]
