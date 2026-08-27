@@ -150,7 +150,7 @@ const FINAL_G2_COLOR_MS = 2000; // Final, grilla 2: fase a color (se alternan si
 const FINAL_WRONG_FREEZE_MS = 3000; // Final, grillas 1 y 2: tocar mal frena los clicks 3s
 const FINAL_G3_WRONG_PAUSE_MS = 2000; // Final, grilla 3 (escala de grises): tocar mal pausa el cronómetro 2s (no frena clicks)
 const SEMI_FREEZE_MS = 5000; // etapa de 3: cada ataque de freeze suma 5s (se acumulan)
-const SPIN_PERIOD_MS = 10000; // Final: la grilla atacada gira, una vuelta cada 10s
+const SPIN_PERIOD_MS = 16000; // Final: la grilla atacada gira, una vuelta cada 16s
 // Cantidad de grillas por etapa: fija (no elegible), así quedó después de
 // jugarlo en familia — de entrada son 3, la etapa de 3 jugadores son 4, y
 // la final son 3.
@@ -166,14 +166,13 @@ const PIECE_COLORS = [
   { key: "purple", hex: "#B983FF", name: "Violeta" },
   { key: "orange", hex: "#FF9F1C", name: "Naranja" },
 ];
-// La última grilla de la Final no usa colores: son 5 tonos de gris (blanco
-// a negro) en vez de los 6 colores de siempre.
+// La última grilla de la Final no usa colores: son 4 tonos de gris (blanco
+// a negro, bien separados entre sí) en vez de los 6 colores de siempre.
 const GRAYSCALE_COLORS = [
   { key: "gray1", hex: "#F4F4F6", name: "Blanco" },
-  { key: "gray2", hex: "#BFC0C6", name: "Gris claro" },
-  { key: "gray3", hex: "#7D7E85", name: "Gris" },
-  { key: "gray4", hex: "#45464C", name: "Gris oscuro" },
-  { key: "gray5", hex: "#17171A", name: "Negro" },
+  { key: "gray2", hex: "#9A9BA3", name: "Gris claro" },
+  { key: "gray3", hex: "#4E4F56", name: "Gris oscuro" },
+  { key: "gray4", hex: "#17171A", name: "Negro" },
 ];
 const PIECE_COLOR_KEYS = PIECE_COLORS.map((c) => c.key);
 const GRAYSCALE_COLOR_KEYS = GRAYSCALE_COLORS.map((c) => c.key);
@@ -1397,10 +1396,10 @@ function GameRoom({ roomCode, myId, onBack }) {
   // jugadores (y el clásico de la etapa de eliminación).
   const [attackCtx, setAttackCtx] = useState(null);
   const [now, setNow] = useState(Date.now());
-  // Modo "con penalidad" (room.penalty, lo elige el anfitrión/a en el
-  // lobby): cada color equivocado frena todo click por 1s en vez del
-  // flash rojo breve de siempre. En la Final este freeze pasa a ser fijo
-  // (3s), ver registerWrong más abajo.
+  // El modo online siempre tiene penalidad: cada color equivocado frena
+  // todo click por 1s (en vez del flash rojo breve de Práctica sin
+  // penalidad). En la Final este freeze pasa a ser fijo (3s), ver
+  // registerWrong más abajo.
   const [locked, setLocked] = useState(false);
   // Final, grilla 3 (escala de grises): tocar mal no frena clicks, pausa
   // el cronómetro mostrado hasta este timestamp.
@@ -1554,13 +1553,12 @@ function GameRoom({ roomCode, myId, onBack }) {
     [...players].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0] ||
     null;
   const isHost = !!effectiveHost && effectiveHost.id === myId;
-  const roomPenalty = !!room.penalty;
   const stage = room.stage || "elim";
   const countdownEndsAt = room.countdownEndsAt || 0;
   const inCountdown = room.phase === "playing" && now < countdownEndsAt;
-  // Fuera de la Final, "tocar mal" respeta el toggle "con penalidad" del
-  // lobby (1s frenado); en la Final el freeze de 3s (o la pausa de 2s en
-  // la grilla de grises) es fijo, no depende de ese toggle.
+  // El online siempre tiene penalidad activa: fuera de la Final, "tocar
+  // mal" frena los clicks 1s; en la Final el freeze de 3s (o la pausa de
+  // 2s en la grilla de grises) es fijo, con su propia duración.
   const registerWrong = (finalGrid3 = false) => {
     if (wrongFlashTimerRef.current) clearTimeout(wrongFlashTimerRef.current);
     setWrongFlash(true);
@@ -1576,23 +1574,13 @@ function GameRoom({ roomCode, myId, onBack }) {
           setLocked(false);
         }, FINAL_WRONG_FREEZE_MS);
       }
-    } else if (roomPenalty) {
+    } else {
       setLocked(true);
       wrongFlashTimerRef.current = setTimeout(() => {
         setWrongFlash(false);
         setLocked(false);
       }, 1000);
-    } else {
-      wrongFlashTimerRef.current = setTimeout(() => setWrongFlash(false), 400);
     }
-  };
-
-  const setRoomPenalty = async (value) => {
-    const fresh = await readRoom(roomCode);
-    if (!fresh) return;
-    fresh.penalty = value;
-    await writeRoom(roomCode, fresh);
-    setRoom(fresh);
   };
 
   const passControlTo = async (targetId) => {
@@ -1676,18 +1664,6 @@ function GameRoom({ roomCode, myId, onBack }) {
             <span style={{ color: "#8b7fa8" }}>Con 3 jugadores se arranca directo en la Semifinal; con 2, directo en la Final.</span>
           </div>
         </Card>
-        <Card style={{ width: "100%", maxWidth: 420 }}>
-          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Dificultad</div>
-          {isHost ? (
-            <button onClick={() => setRoomPenalty(!roomPenalty)} style={pillStyle(roomPenalty)}>
-              ⏱️ Con penalidad (1s frenado si te equivocás de color)
-            </button>
-          ) : (
-            <div style={{ color: "#F3EEFF", fontWeight: 700 }}>
-              {roomPenalty ? "⏱️ Con penalidad" : "Sin penalidad"}
-            </div>
-          )}
-        </Card>
         {isHost ? (
           <>
             <BigButton onClick={startGame} disabled={players.length < 2}>
@@ -1767,7 +1743,7 @@ function GameRoom({ roomCode, myId, onBack }) {
             </div>
           ))}
         </Card>
-        {isHost && <BigButton onClick={playAgain}>🔁 Jugar otra ronda</BigButton>}
+        <BigButton onClick={playAgain}>🔁 Jugar otra ronda</BigButton>
         <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
           Salir de la sala
         </BigButton>
