@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Diccionario Trucho — Inventá la definición</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Diccionario Trucho" />
+<meta name="theme-color" content="#0d2118" />
+<!-- Adelanta la conexión (DNS + TLS) a los dos hosts externos de los que
+     depende esta página para arrancar — la tipografía y React/Babel —
+     así cuando el HTML llega a pedirlos de verdad, la conexión ya está
+     lista y se ahorra esa ida y vuelta. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="preconnect" href="https://unpkg.com" crossorigin />
+<style>
+  /* El fondo real (sol + nubes + piso) lo pinta React recién al montar;
+     hasta entonces se ve este mismo degradé de cielo (idéntico al de
+     BgScene) en vez de un color plano, para que la llegada desde la home
+     se sienta continua y no como un salto a "página negra". */
+  html, body { margin:0; padding:0; background: linear-gradient(180deg, #2A0F5E 0%, #5A1F94 20%, #9435B0 42%, #E84F8C 62%, #FF6B3D 80%, #FFC93D 100%); background-attachment: fixed; }
+  #root { min-height: 100vh; }
+
+  /* ---------- Escena estática (sol+nubes+piso) idéntica a BgScene, pero en
+     HTML/CSS puro: pinta YA, sin esperar a que cargue React, para que la
+     llegada desde la home se sienta tan fluida como la vuelta al menú
+     (que es 100% estática). En cuanto React monta algo en #root, un
+     script la saca y queda la escena real. ---------- */
+  .jxpre-scene { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+  .jxpre-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #2A0F5E 0%, #5A1F94 20%, #9435B0 42%, #E84F8C 62%, #FF6B3D 80%, #FFC93D 100%); }
+  .jxpre-sun {
+    position: absolute; left: 50%; top: 7%; width: 120px; height: 120px; margin-left: -60px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 34% 30%, #fff8d8, #ffd23f 55%, #ff9a1c 100%);
+    box-shadow: 0 0 80px 22px rgba(255,199,82,0.5);
+    animation: jxpre-sun-pulse 3.2s ease-in-out infinite;
+  }
+  @keyframes jxpre-sun-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  .jxpre-clouds { position: absolute; inset: 0; overflow: hidden; }
+  .jxpre-cloud { position: absolute; font-size: 30px; opacity: 0.92; filter: drop-shadow(0 3px 0 rgba(0,0,0,0.18)); animation: jxpre-drift linear infinite; }
+  .jxpre-cloud.c1 { top: -5.6%; font-size: 38px; animation-duration: 48s; animation-delay: -25s; }
+  .jxpre-cloud.c2 { top: -3.9%; font-size: 52px; animation-duration: 32s; animation-delay: -34s; }
+  .jxpre-cloud.c3 { top: 0.3%; font-size: 40px; animation-duration: 40s; animation-delay: -23s; }
+  .jxpre-cloud.c4 { top: 3.7%; font-size: 24px; animation-duration: 30s; animation-delay: -28s; }
+  .jxpre-cloud.c5 { top: 8.7%; font-size: 34px; animation-duration: 46s; animation-delay: -2s; }
+  .jxpre-cloud.c6 { top: 12.0%; font-size: 50px; animation-duration: 22s; animation-delay: -9s; }
+  .jxpre-cloud.c7 { top: 16.2%; font-size: 44px; animation-duration: 44s; animation-delay: -12s; }
+  .jxpre-cloud.c8 { top: 17.3%; font-size: 40px; animation-duration: 36s; animation-delay: -3s; }
+  .jxpre-cloud.c9 { top: 21.8%; font-size: 32px; animation-duration: 38s; animation-delay: -9s; }
+  .jxpre-cloud.c10 { top: 24.1%; font-size: 36px; animation-duration: 24s; animation-delay: -4s; }
+  .jxpre-cloud.c11 { top: 28.2%; font-size: 44px; animation-duration: 34s; animation-delay: -11s; }
+  .jxpre-cloud.c12 { top: 32.5%; font-size: 30px; animation-duration: 24s; animation-delay: -25s; }
+  .jxpre-cloud.c13 { top: 34.6%; font-size: 28px; animation-duration: 38s; animation-delay: -15s; }
+  .jxpre-cloud.c14 { top: 38.6%; font-size: 48px; animation-duration: 30s; animation-delay: -15s; }
+  .jxpre-cloud.c15 { top: 43.4%; font-size: 30px; animation-duration: 48s; animation-delay: -8s; }
+  .jxpre-cloud.c16 { top: 46.6%; font-size: 46px; animation-duration: 42s; animation-delay: -11s; }
+  @keyframes jxpre-drift { from { transform: translateX(115vw); } to { transform: translateX(-45vw); } }
+  .jxpre-floor {
+    position: absolute; left: -70%; right: -70%; bottom: -4%; height: 36vh;
+    background-color: #3a1665;
+    background-image: linear-gradient(90deg, rgba(255,255,255,0.16) 50%, transparent 50%), linear-gradient(rgba(255,255,255,0.16) 50%, transparent 50%);
+    background-size: 64px 64px;
+    transform: perspective(280px) rotateX(58deg);
+    transform-origin: bottom;
+    animation: jxpre-floor-move 1.1s linear infinite;
+  }
+  @keyframes jxpre-floor-move { from { background-position: 0 0, 0 0; } to { background-position: 64px 0, 0 64px; } }
+  .jxpre-fade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(12,6,32,0) 0%, rgba(12,6,32,0.15) 40%, rgba(12,6,32,0.6) 75%, rgba(12,6,32,0.9) 100%); }
+  @media (prefers-reduced-motion: reduce) {
+    .jxpre-sun, .jxpre-cloud, .jxpre-floor { animation: none; }
+  }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" defer></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" defer></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js" defer></script>
+</head>
+<body>
+<div class="jxpre-scene" id="jxPreScene">
+  <div class="jxpre-sky"></div>
+  <div class="jxpre-sun"></div>
+  <div class="jxpre-clouds">
+    <span class="jxpre-cloud c1">☁️</span>
+    <span class="jxpre-cloud c2">☁️</span>
+    <span class="jxpre-cloud c3">☁️</span>
+    <span class="jxpre-cloud c4">☁️</span>
+    <span class="jxpre-cloud c5">☁️</span>
+    <span class="jxpre-cloud c6">☁️</span>
+    <span class="jxpre-cloud c7">☁️</span>
+    <span class="jxpre-cloud c8">☁️</span>
+    <span class="jxpre-cloud c9">☁️</span>
+    <span class="jxpre-cloud c10">☁️</span>
+    <span class="jxpre-cloud c11">☁️</span>
+    <span class="jxpre-cloud c12">☁️</span>
+    <span class="jxpre-cloud c13">☁️</span>
+    <span class="jxpre-cloud c14">☁️</span>
+    <span class="jxpre-cloud c15">☁️</span>
+    <span class="jxpre-cloud c16">☁️</span>
+  </div>
+  <div class="jxpre-floor"></div>
+  <div class="jxpre-fade"></div>
+</div>
+<div id="root"></div>
+<script>
+  // Apenas React mete el primer contenido en #root, sacamos esta escena
+  // estática (ya cumplió su función) y queda la real. OJO: este script
+  // tiene que ir DESPUÉS del <div id="root">, si no getElementById("root")
+  // da null (el parser todavía no llegó a esa línea) y el observer nunca
+  // se arma.
+  (function () {
+    var root = document.getElementById("root");
+    var pre = document.getElementById("jxPreScene");
+    if (!root || !pre) return;
+    var obs = new MutationObserver(function () {
+      if (root.childElementCount > 0) {
+        pre.remove();
+        obs.disconnect();
+      }
+    });
+    obs.observe(root, { childList: true });
+  })();
+</script>
+<script src="../storage.js"></script>
+<script src="../critter.js"></script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+// ==================== CONFIG DEL JUEGO ====================
+// Diccionario Trucho: sale una palabra rara con su definición real (que
+// solo conoce el sistema). Todos escriben una definición inventada pero
+// creíble. Se mezclan todas las definiciones (las inventadas + la real,
+// de incógnito) y todos votan cuál creen que es la verdadera. Se ganan
+// puntos por adivinar la verdadera Y por lograr que voten tu mentira.
+
+const STORAGE_PREFIX = "dicc:sala:";
+const SESSION_KEY = "dicc:sesion";
+const POLL_MS = 1200;
+// El listado de "salas abiertas" (JoinScreen) usa list() de Workers KV,
+// que en el plan gratuito tiene una cuota diaria mucho más chica que
+// get() (1.000/día contra 100.000/día, compartida por todo el sitio).
+// No hace falta que se actualice cada segundo, así que sondea más
+// espaciado. El resto del juego (sondeo de la sala en curso) nunca usa
+// list() — lee cada jugador por su clave exacta, conociendo sus ids de
+// antemano por room.players.
+const LOBBY_LIST_POLL_MS = 8000;
+const MIN_PLAYERS = 3;
+const MAX_PLAYERS = 12;
+const ROUND_OPTIONS = [5, 8, 12];
+const DEFAULT_ROUNDS = 8;
+const WRITING_MS = 75000; // tiempo para escribir la definición inventada
+const VOTING_MS = 45000; // tiempo para leer y votar
+const MAX_DEF_LEN = 140;
+const CORRECT_VOTE_POINTS = 2; // acertar la definición verdadera
+const FOOLED_VOTE_POINTS = 1; // por cada voto que le mandan a tu mentira
+
+const GRADIENT_BG = "radial-gradient(circle at 20% -10%, #3a2166 0%, #170b2e 45%, #0c0620 100%)";
+const PLAYER_COLORS = [
+  "#3DDC84", "#FFD23F", "#FF9F1C", "#F0454B",
+  "#FF5D7A", "#B983FF", "#3E9EFF", "#2EC4B6",
+  "#C9E265", "#FF8AD8", "#7C9BFF", "#F4A261",
+];
+
+// ---------- Banco de palabras ----------
+// Palabras reales del español, ni tan comunes ni tan de diccionario
+// académico — pensadas para que sea posible escribir una mentira
+// creíble sin conocer la palabra. Definiciones resumidas a mano.
+const WORD_BANK = [
+  { id: "w1", word: "PETRICOR", def: "Olor característico que despide la tierra seca cuando cae la primera lluvia." },
+  { id: "w2", word: "SICIGIA", def: "Alineación de tres cuerpos celestes en línea recta, como el Sol, la Tierra y la Luna." },
+  { id: "w3", word: "MALAPROPISMO", def: "Uso incorrecto y gracioso de una palabra en lugar de otra parecida en sonido." },
+  { id: "w4", word: "PUSILÁNIME", def: "Que le falta ánimo o coraje para enfrentar algo." },
+  { id: "w5", word: "EFÍMERO", def: "Que dura muy poco tiempo, pasajero." },
+  { id: "w6", word: "QUIMERA", def: "Algo que se imagina posible pero que en realidad no lo es; una ilusión." },
+  { id: "w7", word: "OBNUBILAR", def: "Nublar el juicio o la razón de alguien." },
+  { id: "w8", word: "VERNÁCULO", def: "Propio del lugar o país de origen, sobre todo hablando de un idioma." },
+  { id: "w9", word: "SOSLAYAR", def: "Evitar una dificultad pasando de costado, sin enfrentarla." },
+  { id: "w10", word: "DIÁFANO", def: "Tan claro y transparente que se ve a través con nitidez." },
+  { id: "w11", word: "INEFABLE", def: "Que no se puede expresar con palabras." },
+  { id: "w12", word: "LÁNGUIDO", def: "Falto de fuerza o energía; decaído." },
+  { id: "w13", word: "ECUÁNIME", def: "Que actúa con calma e imparcialidad, sin dejarse llevar por las emociones." },
+  { id: "w14", word: "GREGARIO", def: "Que vive o actúa en grupo, sin mucha personalidad propia." },
+  { id: "w15", word: "DILATORIO", def: "Que sirve para retrasar o demorar algo a propósito." },
+  { id: "w16", word: "EPÓNIMO", def: "Persona que le da su nombre a un lugar, época o cosa." },
+  { id: "w17", word: "LACÓNICO", def: "Que se expresa con muy pocas palabras." },
+  { id: "w18", word: "SEMPITERNO", def: "Que dura para siempre, eterno." },
+  { id: "w19", word: "TACITURNO", def: "Callado, de pocas palabras, de carácter reservado." },
+  { id: "w20", word: "VEROSÍMIL", def: "Que parece verdadero o creíble, aunque no lo sea." },
+  { id: "w21", word: "PROCRASTINAR", def: "Postergar o dejar para después tareas o responsabilidades." },
+  { id: "w22", word: "HEDONISMO", def: "Doctrina que pone el placer como el fin principal de la vida." },
+  { id: "w23", word: "IDIOSINCRASIA", def: "Forma de ser particular de una persona o de un pueblo." },
+  { id: "w24", word: "UBICUO", def: "Que está presente en todos lados al mismo tiempo." },
+  { id: "w25", word: "ANACRÓNICO", def: "Que no corresponde a la época en la que ocurre o se sitúa." },
+  { id: "w26", word: "ESTENTÓREO", def: "Muy fuerte y retumbante, hablando de un sonido o una voz." },
+  { id: "w27", word: "EXIGUO", def: "Muy escaso o insuficiente." },
+  { id: "w28", word: "PROFUSO", def: "Abundante, en gran cantidad." },
+  { id: "w29", word: "HURAÑO", def: "Que evita el trato con otras personas; arisco." },
+  { id: "w30", word: "PERENTORIO", def: "Urgente, que no admite demora ni espera." },
+  { id: "w31", word: "SIBILINO", def: "Misterioso, dicho de forma ambigua u oscura a propósito." },
+  { id: "w32", word: "INEXTRICABLE", def: "Tan enredado que es imposible de resolver o desenredar." },
+  { id: "w33", word: "TAUTOLOGÍA", def: "Repetición innecesaria de una misma idea con distintas palabras." },
+  { id: "w34", word: "ONÍRICO", def: "Relacionado con los sueños." },
+  { id: "w35", word: "PROCLIVE", def: "Con tendencia o inclinación natural hacia algo, generalmente negativo." },
+  { id: "w36", word: "IMPERTÉRRITO", def: "Que no se altera ni se asusta ante el peligro o algo inesperado." },
+  { id: "w37", word: "SINUOSO", def: "Que tiene curvas y vueltas; que no va en línea recta." },
+  { id: "w38", word: "ABYECTO", def: "Despreciable, bajo moralmente." },
+  { id: "w39", word: "EXÉGESIS", def: "Interpretación o explicación detallada de un texto, sobre todo religioso." },
+  { id: "w40", word: "PANACEA", def: "Remedio o solución que se presenta como válida para todos los problemas." },
+  { id: "w41", word: "PLAUSIBLE", def: "Que se puede aceptar o creer como razonable." },
+  { id: "w42", word: "FATUO", def: "Vanidoso y sin fundamento; que presume sin motivo." },
+  { id: "w43", word: "GÁRRULO", def: "Que habla mucho y sin mucho sentido." },
+  { id: "w44", word: "NIMIO", def: "Sin importancia, insignificante." },
+  { id: "w45", word: "BALADÍ", def: "De poco valor o importancia; trivial." },
+  { id: "w46", word: "ESCUETO", def: "Dicho con pocas palabras, sin adornos ni rodeos." },
+  { id: "w47", word: "ICONOCLASTA", def: "Que rechaza o ataca las ideas, tradiciones o símbolos establecidos." },
+  { id: "w48", word: "EPIFANÍA", def: "Momento de revelación o comprensión repentina de algo importante." },
+  { id: "w49", word: "OSTRACISMO", def: "Situación de alguien que es excluido o apartado de un grupo." },
+  { id: "w50", word: "PARADIGMA", def: "Ejemplo o modelo que sirve de referencia para algo." },
+  { id: "w51", word: "SUBREPTICIO", def: "Que se hace a escondidas, de forma oculta o sigilosa." },
+  { id: "w52", word: "ANTEDILUVIANO", def: "Extremadamente antiguo o anticuado." },
+  { id: "w53", word: "VOLUBLE", def: "Que cambia de opinión o de estado de ánimo con facilidad." },
+  { id: "w54", word: "YUXTAPONER", def: "Colocar una cosa junto a otra sin mezclarlas." },
+  { id: "w55", word: "ZOZOBRA", def: "Sensación de angustia o inquietud por algo incierto." },
+  { id: "w56", word: "ACIAGO", def: "Que trae mala suerte o desgracia." },
+  { id: "w57", word: "ATÁVICO", def: "Heredado de los antepasados; muy antiguo y arraigado." },
+  { id: "w58", word: "BIZARRO", def: "Valiente y con espíritu (aunque hoy también se usa para decir \"raro\" o \"extravagante\")." },
+  { id: "w59", word: "ÍNFULAS", def: "Aires de grandeza o importancia que alguien se da sin tenerlos en realidad." },
+  { id: "w60", word: "GAZAPO", def: "Error o equivocación que se comete al hablar o escribir." },
+];
+
+function randomId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+function randomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+const MY_DEVICE_ID = (() => {
+  const KEY = "dicc:deviceId";
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id = randomId();
+    localStorage.setItem(KEY, id);
+  }
+  return id;
+})();
+
+async function readRoom(code) {
+  try {
+    const res = await window.storage.get(STORAGE_PREFIX + code, true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writeRoom(code, room) {
+  await window.storage.set(STORAGE_PREFIX + code, JSON.stringify(room), true);
+}
+function playerKey(code, round, playerId) {
+  return STORAGE_PREFIX + code + ":r" + round + ":player:" + playerId;
+}
+async function readPlayerState(code, round, playerId) {
+  try {
+    const res = await window.storage.get(playerKey(code, round, playerId), true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writePlayerState(code, round, playerId, state) {
+  await window.storage.set(playerKey(code, round, playerId), JSON.stringify(state), true);
+}
+// Pide el estado de cada jugador por su clave exacta, en paralelo — nunca
+// list() (ver el comentario de LOBBY_LIST_POLL_MS más arriba).
+async function readAllPlayerStates(code, round, playerIds) {
+  const entries = await Promise.all(
+    (playerIds || []).map(async (id) => [id, await readPlayerState(code, round, id)])
+  );
+  const map = {};
+  entries.forEach(([id, state]) => {
+    if (state) map[id] = state;
+  });
+  return map;
+}
+
+function shuffleArr(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function pickNewWord(usedWordIds) {
+  const available = WORD_BANK.filter((w) => !usedWordIds.includes(w.id));
+  const pool = available.length > 0 ? available : WORD_BANK;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// Arma la ronda nueva: elige palabra, resetea el estado de cada
+// jugador (sin definición ni voto todavía) y pone la sala en "writing"
+// con su cuenta regresiva.
+async function startRound(roomCode, freshRoom) {
+  const round = (freshRoom.round || 0) + 1;
+  const word = pickNewWord(freshRoom.usedWordIds || []);
+  await Promise.all(
+    freshRoom.players.map((p) =>
+      writePlayerState(roomCode, round, p.id, { definition: null, submittedAt: null, votedFor: null, votedAt: null })
+    )
+  );
+  freshRoom.round = round;
+  freshRoom.usedWordIds = [...(freshRoom.usedWordIds || []), word.id];
+  freshRoom.currentWordId = word.id;
+  freshRoom.currentOptions = null;
+  freshRoom.phase = "writing";
+  freshRoom.phaseEndsAt = Date.now() + WRITING_MS;
+  await writeRoom(roomCode, freshRoom);
+  return round;
+}
+
+// Se llama desde el sondeo de cualquier cliente mientras la sala está en
+// "writing". Si todos ya mandaron su definición (o si se acabó el
+// tiempo, lo que pase primero) arma la lista de opciones (las
+// inventadas + la real, todas mezcladas) y pasa a "voting". Guarda de
+// idempotencia igual que en los otros juegos: si freshRoom.round o
+// freshRoom.phase ya cambiaron, alguien más lo procesó primero.
+async function checkWritingComplete(roomCode, round) {
+  const freshRoom = await readRoom(roomCode);
+  if (!freshRoom || freshRoom.phase !== "writing" || freshRoom.round !== round) return;
+  const states = await readAllPlayerStates(roomCode, round, freshRoom.players.map((p) => p.id));
+  const allSubmitted = freshRoom.players.every((p) => states[p.id] && states[p.id].definition);
+  const timeUp = Date.now() >= (freshRoom.phaseEndsAt || 0);
+  if (!allSubmitted && !timeUp) return;
+
+  const word = WORD_BANK.find((w) => w.id === freshRoom.currentWordId);
+  const fakeOptions = freshRoom.players
+    .filter((p) => states[p.id] && states[p.id].definition)
+    .map((p) => ({ key: p.id, text: states[p.id].definition }));
+  const options = shuffleArr([{ key: "real", text: word ? word.def : "" }, ...fakeOptions]);
+
+  freshRoom.currentOptions = options;
+  freshRoom.phase = "voting";
+  freshRoom.phaseEndsAt = Date.now() + VOTING_MS;
+  await writeRoom(roomCode, freshRoom);
+}
+
+// Igual que checkWritingComplete, pero para "voting": cuando todos
+// votaron (o se acabó el tiempo), calcula puntos y pasa a "reveal".
+// Puntos: CORRECT_VOTE_POINTS por votar la definición real,
+// FOOLED_VOTE_POINTS por cada voto que le mandaron a tu mentira.
+async function checkVotingComplete(roomCode, round) {
+  const freshRoom = await readRoom(roomCode);
+  if (!freshRoom || freshRoom.phase !== "voting" || freshRoom.round !== round) return;
+  const states = await readAllPlayerStates(roomCode, round, freshRoom.players.map((p) => p.id));
+  const allVoted = freshRoom.players.every((p) => states[p.id] && states[p.id].votedFor);
+  const timeUp = Date.now() >= (freshRoom.phaseEndsAt || 0);
+  if (!allVoted && !timeUp) return;
+
+  const votes = freshRoom.players.map((p) => (states[p.id] || {}).votedFor).filter(Boolean);
+  const pointsById = {};
+  freshRoom.players.forEach((p) => { pointsById[p.id] = 0; });
+  votes.forEach((v) => {
+    if (v === "real") return; // se suma más abajo, por votante
+  });
+  freshRoom.players.forEach((p) => {
+    const myVote = (states[p.id] || {}).votedFor;
+    if (myVote === "real") pointsById[p.id] = (pointsById[p.id] || 0) + CORRECT_VOTE_POINTS;
+  });
+  // Cuántos votos recibió cada mentira (por autor).
+  votes.forEach((v) => {
+    if (v === "real") return;
+    if (pointsById[v] === undefined) return;
+    pointsById[v] += FOOLED_VOTE_POINTS;
+  });
+  freshRoom.players = freshRoom.players.map((p) => ({
+    ...p,
+    score: (p.score || 0) + (pointsById[p.id] || 0),
+    lastRoundPoints: pointsById[p.id] || 0,
+  }));
+  freshRoom.phase = "reveal";
+  await writeRoom(roomCode, freshRoom);
+}
+
+function useInjectFont() {
+  useEffect(() => {
+    if (document.getElementById("aq-fonts")) return;
+    const link = document.createElement("link");
+    link.id = "aq-fonts";
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap";
+    document.head.appendChild(link);
+  }, []);
+}
+
+// ==================== UI COMPARTIDA (mismo lenguaje visual que el resto del sitio) ====================
+function Screen({ children, style, homeConfirm }) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        width: "100%",
+        background: GRADIENT_BG,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        padding: "28px 18px 40px",
+        fontFamily: "'Nunito', sans-serif",
+        color: "#F3EEFF",
+        boxSizing: "border-box",
+        ...style,
+      }}
+    >
+      {homeConfirm !== null && <HomeButton confirmMessage={homeConfirm} />}
+      {children}
+    </div>
+  );
+}
+
+function HomeButton({ confirmMessage }) {
+  return (
+    <a
+      href="../"
+      onClick={(e) => {
+        if (confirmMessage && !window.confirm(confirmMessage)) e.preventDefault();
+      }}
+      title="Volver al menú de juegos"
+      style={{
+        position: "fixed",
+        top: "calc(env(safe-area-inset-top, 0px) + 14px)",
+        left: 14,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "9px 16px 9px 11px",
+        borderRadius: 30,
+        background: "rgba(0,0,0,0.6)",
+        border: "1.5px solid rgba(255,255,255,0.4)",
+        color: "#fff",
+        fontFamily: "'Nunito', sans-serif",
+        fontWeight: 800,
+        fontSize: 15,
+        textDecoration: "none",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+      }}
+    >
+      <span style={{ fontSize: 19 }}>🏠</span> Menú
+    </a>
+  );
+}
+
+function Title({ children, size = 30 }) {
+  return (
+    <h1
+      style={{
+        fontFamily: "'Baloo 2', sans-serif",
+        fontWeight: 800,
+        fontSize: size,
+        color: "#FFD23F",
+        textShadow: "0 3px 0 rgba(0,0,0,0.35)",
+        margin: "0 0 6px",
+        textAlign: "center",
+        letterSpacing: 0.3,
+      }}
+    >
+      {children}
+    </h1>
+  );
+}
+
+function Sub({ children, style }) {
+  return (
+    <p style={{ color: "#C9B8F0", fontSize: 16, textAlign: "center", margin: "0 0 22px", lineHeight: 1.4, ...style }}>
+      {children}
+    </p>
+  );
+}
+
+function BigButton({ children, onClick, color = "#3DDC84", disabled, style }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        boxSizing: "border-box",
+        width: "100%",
+        maxWidth: 380,
+        padding: "16px 20px",
+        borderRadius: 18,
+        border: disabled ? "none" : `1.5px solid color-mix(in srgb, ${color} 70%, transparent)`,
+        background: disabled ? "#4a3d63" : `color-mix(in srgb, ${color} 50%, transparent)`,
+        color: disabled ? "#8b7fa8" : "#F3EEFF",
+        textShadow: disabled ? "none" : "0 1px 3px rgba(0,0,0,0.45)",
+        fontFamily: "'Baloo 2', sans-serif",
+        fontWeight: 700,
+        fontSize: 18,
+        boxShadow: disabled ? "none" : "0 6px 0 rgba(0,0,0,0.28)",
+        cursor: disabled ? "default" : "pointer",
+        marginBottom: 14,
+        transition: "transform 0.08s ease",
+        ...style,
+      }}
+      onMouseDown={(e) => { if (!disabled) e.currentTarget.style.transform = "translateY(4px)"; }}
+      onMouseUp={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
+      onTouchStart={(e) => { if (!disabled) e.currentTarget.style.transform = "translateY(4px)"; }}
+      onTouchEnd={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Card({ children, style }) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 420,
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.12)",
+        borderRadius: 22,
+        padding: 20,
+        boxSizing: "border-box",
+        marginBottom: 16,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function pillStyle(active) {
+  return {
+    width: "100%",
+    padding: "10px 8px",
+    borderRadius: 12,
+    border: active ? "2px solid #FFD23F" : "1px solid rgba(255,255,255,0.15)",
+    background: active ? "rgba(255,210,63,0.15)" : "rgba(255,255,255,0.06)",
+    color: active ? "#FFD23F" : "#F3EEFF",
+    fontWeight: 800,
+    fontFamily: "'Baloo 2', sans-serif",
+    fontSize: 14,
+    cursor: "pointer",
+  };
+}
+
+const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.15)",
+  background: "rgba(0,0,0,0.25)",
+  color: "#F3EEFF",
+  fontSize: 17,
+  marginBottom: 10,
+  outline: "none",
+  fontFamily: "'Nunito', sans-serif",
+};
+
+function BgScene() {
+  return (
+    <>
+      <style>{`
+        @keyframes bgsun-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+        @keyframes bgcloud-drift { from { transform: translateX(115vw); } to { transform: translateX(-45vw); } }
+        @keyframes bgfloor-move { from { background-position: 0 0, 0 0; } to { background-position: 64px 0, 0 64px; } }
+        .bgscene-sun { animation: bgsun-pulse 3.2s ease-in-out infinite; }
+        .bgscene-cloud { animation: bgcloud-drift linear infinite; }
+        .bgscene-floor { animation: bgfloor-move 1.1s linear infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .bgscene-sun, .bgscene-cloud, .bgscene-floor { animation: none; }
+        }
+      `}</style>
+      <div style={{ position: "fixed", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none" }}>
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, #2A0F5E 0%, #5A1F94 20%, #9435B0 42%, #E84F8C 62%, #FF6B3D 80%, #FFC93D 100%)" }} />
+        <div className="bgscene-sun" style={{ position: "absolute", left: "50%", top: "7%", width: 120, height: 120, marginLeft: -60, borderRadius: "50%", background: "radial-gradient(circle at 34% 30%, #fff8d8, #ffd23f 55%, #ff9a1c 100%)", boxShadow: "0 0 80px 22px rgba(255,199,82,0.5)" }} />
+        <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "-5.6%", fontSize: 38, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "48s", animationDelay: "-25s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "-3.9%", fontSize: 52, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "32s", animationDelay: "-34s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "0.3%", fontSize: 40, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "40s", animationDelay: "-23s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "3.7%", fontSize: 24, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "30s", animationDelay: "-28s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "8.7%", fontSize: 34, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "46s", animationDelay: "-2s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "12.0%", fontSize: 50, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "22s", animationDelay: "-9s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "16.2%", fontSize: 44, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "44s", animationDelay: "-12s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "17.3%", fontSize: 40, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "36s", animationDelay: "-3s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "21.8%", fontSize: 32, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "38s", animationDelay: "-9s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "24.1%", fontSize: 36, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "24s", animationDelay: "-4s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "28.2%", fontSize: 44, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "34s", animationDelay: "-11s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "32.5%", fontSize: 30, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "24s", animationDelay: "-25s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "34.6%", fontSize: 28, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "38s", animationDelay: "-15s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "38.6%", fontSize: 48, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "30s", animationDelay: "-15s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "43.4%", fontSize: 30, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "48s", animationDelay: "-8s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "46.6%", fontSize: 46, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "42s", animationDelay: "-11s" }}>☁️</span>
+        </div>
+        <div className="bgscene-floor" style={{ position: "absolute", left: "-70%", right: "-70%", bottom: "-4%", height: "36vh", backgroundColor: "#3a1665", backgroundImage: "linear-gradient(90deg, rgba(255,255,255,0.16) 50%, transparent 50%), linear-gradient(rgba(255,255,255,0.16) 50%, transparent 50%)", backgroundSize: "64px 64px", transform: "perspective(280px) rotateX(58deg)", transformOrigin: "bottom" }} />
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(12,6,32,0) 0%, rgba(12,6,32,0.15) 40%, rgba(12,6,32,0.6) 75%, rgba(12,6,32,0.9) 100%)" }} />
+      </div>
+    </>
+  );
+}
+
+function Home({ onSelect }) {
+  return (
+    <Screen style={{ justifyContent: "center", background: "transparent" }}>
+      <BgScene />
+      <div style={{ position: "relative", zIndex: 1, width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div style={{ fontSize: 64, marginBottom: 6 }}>📖</div>
+        <Title size={30}>Diccionario Trucho</Title>
+        <Card style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <Sub>
+            Sale una palabra rara. Todos inventan una definición creíble, se mezclan con la real (de
+            incógnito), y todos votan cuál creen que es la verdadera. Ganás puntos si adivinás la
+            verdad, y más puntos si lográs que voten tu mentira.
+          </Sub>
+          <BigButton onClick={() => onSelect("game")}>🎮 Jugar con otros</BigButton>
+        </Card>
+      </div>
+    </Screen>
+  );
+}
+
+// ==================== PLAYER BADGE ROW ====================
+// Fila de jugadores con su puntaje y, durante writing/voting, un
+// check si ya mandó/votó.
+function PlayerBadgeRow({ players, doneIds, myId, showDone }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, width: "100%", maxWidth: 460, marginBottom: 14 }}>
+      {players.map((p, i) => {
+        const done = doneIds.has(p.id);
+        return (
+          <div
+            key={p.id}
+            style={{
+              background: PLAYER_COLORS[i % PLAYER_COLORS.length],
+              borderRadius: 12,
+              padding: "8px 6px",
+              textAlign: "center",
+              border: p.id === myId ? "2px solid #FFD23F" : "2px solid transparent",
+              position: "relative",
+              boxSizing: "border-box",
+            }}
+          >
+            {showDone && done && <span style={{ position: "absolute", top: -10, right: -4, fontSize: 16 }}>✅</span>}
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#1B1035", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {p.name}
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#1B1035" }}>{p.score || 0}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Countdown({ endsAt, now, label }) {
+  const secs = Math.max(0, Math.ceil((endsAt - now) / 1000));
+  return (
+    <Sub style={{ marginTop: -6, marginBottom: 14, fontSize: 15 }}>
+      ⏱️ {label} <b style={{ color: secs <= 10 ? "#FF5D7A" : "#FFD23F" }}>{secs}s</b>
+    </Sub>
+  );
+}
+
+// ==================== JOIN / LOBBY ====================
+function JoinScreen({ onJoined, onBack }) {
+  const [name, setName] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [openRooms, setOpenRooms] = useState([]);
+  const [resumable, setResumable] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const entries = await window.storage.list(STORAGE_PREFIX);
+        if (cancelled) return;
+        const rooms = entries
+          .map((e) => {
+            if (!/^dicc:sala:[^:]+$/.test(e.key)) return null;
+            try {
+              return JSON.parse(e.value);
+            } catch {
+              return null;
+            }
+          })
+          .filter((r) => r && r.phase === "lobby" && Date.now() - (r.createdAt || 0) < 3 * 60 * 60 * 1000)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setOpenRooms(rooms);
+      } catch {}
+    };
+    tick();
+    const id = setInterval(tick, LOBBY_LIST_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let saved;
+      try {
+        saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+      } catch {
+        saved = null;
+      }
+      if (!saved || !saved.code || !saved.playerId) {
+        setResumable(null);
+        return;
+      }
+      const existing = await readRoom(saved.code);
+      if (cancelled) return;
+      if (existing && existing.players.some((p) => p.id === saved.playerId)) {
+        setResumable({ code: saved.code, playerId: saved.playerId, name: (existing.players.find((p) => p.id === saved.playerId) || {}).name });
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+        setResumable(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const doJoin = async (codeMaybe) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setJoinError("Escribí tu nombre.");
+      return;
+    }
+    setJoining(true);
+    setJoinError("");
+    try {
+      const code = codeMaybe || (codeInput.trim() ? codeInput.trim().toUpperCase() : randomCode());
+      let existing = await readRoom(code);
+      if (existing && existing.phase !== "lobby") {
+        setJoinError("Esa sala ya está jugando. Esperá a la próxima partida.");
+        setJoining(false);
+        return;
+      }
+      const me = { id: randomId(), name: trimmed, deviceId: MY_DEVICE_ID, joinedAt: Date.now(), score: 0 };
+      if (!existing) {
+        existing = {
+          code,
+          hostId: me.id,
+          players: [me],
+          phase: "lobby",
+          round: 0,
+          totalRounds: DEFAULT_ROUNDS,
+          usedWordIds: [],
+          currentWordId: null,
+          currentOptions: null,
+          phaseEndsAt: null,
+          createdAt: Date.now(),
+        };
+      } else {
+        if (existing.players.length >= MAX_PLAYERS) {
+          setJoinError(`Sala llena (máximo ${MAX_PLAYERS} jugadores).`);
+          setJoining(false);
+          return;
+        }
+        if (existing.players.some((p) => p.name.toLowerCase() === trimmed.toLowerCase())) {
+          setJoinError(`Ya hay alguien llamado "${trimmed}" en esa sala. Cambiá el nombre.`);
+          setJoining(false);
+          return;
+        }
+        existing.players = [...existing.players, me];
+      }
+      await writeRoom(code, existing);
+      window.storage.incrementCounter("players").catch(() => {});
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: me.id }));
+      onJoined(code, me.id);
+    } catch (e) {
+      setJoinError("No se pudo conectar a la sala. Probá de nuevo.");
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  return (
+    <Screen>
+      <Title size={26}>Diccionario Trucho</Title>
+      <Sub style={{ marginTop: -10 }}>De {MIN_PLAYERS} a {MAX_PLAYERS} jugadores, cada uno en su celu</Sub>
+      <Card style={{ width: "100%", maxWidth: 420 }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Tu nombre" style={inputStyle} />
+        <input
+          value={codeInput}
+          onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+          placeholder="Código de sala (opcional)"
+          style={inputStyle}
+        />
+        {joinError && <div style={{ color: "#FF5D7A", fontSize: 13, marginBottom: 8 }}>{joinError}</div>}
+        <BigButton onClick={() => doJoin(null)} disabled={joining}>
+          {codeInput.trim() ? "Unirme a esa sala" : "Crear sala nueva"}
+        </BigButton>
+      </Card>
+
+      {resumable && (
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <Sub style={{ marginTop: 0 }}>Ya estabas en la sala <b>{resumable.code}</b> como {resumable.name}</Sub>
+          <BigButton onClick={() => onJoined(resumable.code, resumable.playerId)} color="#3E9EFF">
+            Volver a esa sala
+          </BigButton>
+        </Card>
+      )}
+
+      {openRooms.length > 0 && (
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", fontWeight: 700, marginBottom: 8 }}>Salas abiertas ahora</div>
+          {openRooms.map((r) => (
+            <button
+              key={r.code}
+              onClick={() => { setCodeInput(r.code); doJoin(r.code); }}
+              style={{ display: "flex", justifyContent: "space-between", width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, padding: "10px 12px", marginBottom: 6, color: "#F3EEFF", cursor: "pointer", fontWeight: 700 }}
+            >
+              <span>{r.code}</span>
+              <span style={{ color: "#8b7fa8" }}>{(r.players || []).length}/{MAX_PLAYERS} jugadores</span>
+            </button>
+          ))}
+        </Card>
+      )}
+
+      <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+        Volver
+      </BigButton>
+    </Screen>
+  );
+}
+
+// ==================== SALA ====================
+function GameRoom({ roomCode, myId, onBack }) {
+  const [room, setRoom] = useState(null);
+  const [myState, setMyState] = useState(null);
+  const [draft, setDraft] = useState("");
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const r = await readRoom(roomCode);
+      if (cancelled || !r) return;
+      setRoom(r);
+      const round = r.round || 0;
+      if (round > 0 && (r.phase === "writing" || r.phase === "voting" || r.phase === "reveal")) {
+        const st = await readPlayerState(roomCode, round, myId);
+        if (cancelled) return;
+        setMyState(st);
+        // checkWritingComplete/checkVotingComplete ya deciden solas si hay
+        // que avanzar de fase (todos listos, o se acabó el tiempo) — no
+        // hace falta duplicar esa condición acá.
+        if (r.phase === "writing") {
+          await checkWritingComplete(roomCode, round);
+        } else if (r.phase === "voting") {
+          await checkVotingComplete(roomCode, round);
+        }
+      }
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [roomCode, myId]);
+
+  if (!room) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <Sub>Cargando sala...</Sub>
+      </Screen>
+    );
+  }
+
+  const players = room.players || [];
+  const effectiveHost = players.find((p) => p.id === room.hostId) || [...players].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0] || null;
+  const isHost = !!effectiveHost && effectiveHost.id === myId;
+  const currentWord = WORD_BANK.find((w) => w.id === room.currentWordId);
+
+  const setTotalRounds = async (n) => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.totalRounds = n;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  const startGame = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh || fresh.players.length < MIN_PLAYERS) return;
+    await startRound(roomCode, fresh);
+    const r = await readRoom(roomCode);
+    setRoom(r);
+    setMyState(await readPlayerState(roomCode, r.round, myId));
+    setDraft("");
+  };
+
+  const submitDefinition = async () => {
+    const trimmed = draft.trim().slice(0, MAX_DEF_LEN);
+    if (!trimmed) return;
+    const state = { definition: trimmed, submittedAt: Date.now(), votedFor: null, votedAt: null };
+    await writePlayerState(roomCode, room.round, myId, state);
+    setMyState(state);
+  };
+
+  const submitVote = async (optionKey) => {
+    const base = myState || {};
+    const next = { ...base, votedFor: optionKey, votedAt: Date.now() };
+    await writePlayerState(roomCode, room.round, myId, next);
+    setMyState(next);
+  };
+
+  const nextRound = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    if ((fresh.round || 0) >= (fresh.totalRounds || DEFAULT_ROUNDS)) {
+      fresh.phase = "ended";
+      await writeRoom(roomCode, fresh);
+      setRoom(fresh);
+      return;
+    }
+    await startRound(roomCode, fresh);
+    const r = await readRoom(roomCode);
+    setRoom(r);
+    setMyState(await readPlayerState(roomCode, r.round, myId));
+    setDraft("");
+  };
+
+  const playAgain = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.phase = "lobby";
+    fresh.round = 0;
+    fresh.usedWordIds = [];
+    fresh.currentWordId = null;
+    fresh.currentOptions = null;
+    fresh.phaseEndsAt = null;
+    fresh.players = fresh.players.map((p) => ({ ...p, score: 0, lastRoundPoints: 0 }));
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+    setMyState(null);
+  };
+
+  const leaveRoom = async () => {
+    const fresh = await readRoom(roomCode);
+    if (fresh) {
+      fresh.players = fresh.players.filter((p) => p.id !== myId);
+      await writeRoom(roomCode, fresh);
+    }
+    localStorage.removeItem(SESSION_KEY);
+    onBack();
+  };
+
+  // ---------- LOBBY ----------
+  if (room.phase === "lobby") {
+    const totalRounds = room.totalRounds || DEFAULT_ROUNDS;
+    return (
+      <Screen homeConfirm="¿Salir de la sala?">
+        <Title size={26}>Sala {room.code}</Title>
+        <Sub style={{ marginTop: -10 }}>Compartí el código para que se sumen ({players.length}/{MAX_PLAYERS}). Mínimo {MIN_PLAYERS} jugadores.</Sub>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          {players.map((p) => (
+            <div key={p.id} style={{ padding: "6px 2px", color: "#F3EEFF" }}>
+              {p.id === effectiveHost?.id ? "👑 " : "• "}
+              {p.name}
+              {p.id === myId ? " (vos)" : ""}
+            </div>
+          ))}
+        </Card>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Cómo se juega</div>
+          <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "#F3EEFF" }}>
+            📖 Sale una palabra rara. Todos escriben una definición inventada pero creíble ({Math.round(WRITING_MS / 1000)}s para pensarla).
+            <br />
+            🗳️ Se mezclan todas las definiciones con la real, de incógnito, y todos votan cuál creen que es la verdadera ({Math.round(VOTING_MS / 1000)}s para votar). No podés votar la tuya.
+            <br />
+            🏆 Sumás {CORRECT_VOTE_POINTS} puntos si acertás la verdadera, y {FOOLED_VOTE_POINTS} punto por cada voto que le mandan a tu mentira.
+          </div>
+        </Card>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Cantidad de palabras</div>
+          {isHost ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              {ROUND_OPTIONS.map((n) => (
+                <button key={n} onClick={() => setTotalRounds(n)} style={{ ...pillStyle(totalRounds === n), flex: 1 }}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: "#F3EEFF", fontWeight: 700 }}>{totalRounds} palabras</div>
+          )}
+        </Card>
+        {isHost ? (
+          <BigButton onClick={startGame} disabled={players.length < MIN_PLAYERS}>
+            {players.length < MIN_PLAYERS ? `Esperando jugadores (mín. ${MIN_PLAYERS})...` : "Empezar 🎮"}
+          </BigButton>
+        ) : (
+          <Sub>Esperando a que {effectiveHost ? effectiveHost.name : "el anfitrión/a"} empiece...</Sub>
+        )}
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- ENDED ----------
+  if (room.phase === "ended") {
+    const ranked = [...players].sort((a, b) => (b.score || 0) - (a.score || 0));
+    const medals = ["🥇", "🥈", "🥉"];
+    return (
+      <Screen>
+        <Title size={26}>🏆 ¡Fin de la partida!</Title>
+        {ranked[0] && <Sub style={{ marginTop: -10 }}>Ganó <b style={{ color: "#FFD23F" }}>{ranked[0].name}</b> con {ranked[0].score || 0} puntos</Sub>}
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          {ranked.map((p, i) => (
+            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 2px", borderBottom: i < ranked.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
+              <span>{medals[i] || `${i + 1}°`} {p.name}{p.id === myId ? " (vos)" : ""}</span>
+              <span style={{ color: "#FFD23F", fontWeight: 800 }}>{p.score || 0}</span>
+            </div>
+          ))}
+        </Card>
+        <BigButton onClick={playAgain}>🔁 Jugar otra vez</BigButton>
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- WRITING ----------
+  if (room.phase === "writing") {
+    // No mostramos quién ya mandó la suya en tiempo real (evitaría un
+    // pedido de red extra por segundo, uno por jugador): el chequeo de
+    // fondo (checkWritingComplete) igual avanza de fase solo apenas
+    // están todas, sin que haga falta verlo acá.
+    const iSubmitted = !!(myState && myState.definition);
+    return (
+      <Screen homeConfirm="¿Salir? Perdés el progreso de esta partida.">
+        <Title size={22}>Sala {room.code}</Title>
+        <PlayerBadgeRow players={players} doneIds={new Set()} myId={myId} showDone={false} />
+        <Countdown endsAt={room.phaseEndsAt || Date.now()} now={now} label="Para escribir:" />
+        <Card style={{ width: "100%", maxWidth: 460, textAlign: "center" }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Palabra {room.round}/{room.totalRounds || DEFAULT_ROUNDS}</div>
+          <Title size={30}>{currentWord ? currentWord.word : "…"}</Title>
+        </Card>
+        {iSubmitted ? (
+          <Card style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
+            <div style={{ fontSize: 40, marginBottom: 6 }}>✅</div>
+            <Title size={18}>¡Ya mandaste tu definición!</Title>
+            <Sub style={{ marginBottom: 0 }}>Esperando a que terminen los demás...</Sub>
+          </Card>
+        ) : (
+          <Card style={{ width: "100%", maxWidth: 460 }}>
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value.slice(0, MAX_DEF_LEN))}
+              placeholder="Escribí una definición inventada, lo más creíble posible…"
+              rows={4}
+              style={{ ...inputStyle, resize: "none", marginBottom: 6 }}
+            />
+            <Sub style={{ margin: "0 0 10px", fontSize: 12 }}>{draft.length}/{MAX_DEF_LEN}</Sub>
+            <BigButton onClick={submitDefinition} disabled={!draft.trim()}>
+              Mandar definición
+            </BigButton>
+          </Card>
+        )}
+      </Screen>
+    );
+  }
+
+  // ---------- VOTING ----------
+  if (room.phase === "voting") {
+    const options = room.currentOptions || [];
+    const myVote = myState && myState.votedFor;
+    return (
+      <Screen homeConfirm="¿Salir? Perdés el progreso de esta partida.">
+        <Title size={22}>Sala {room.code}</Title>
+        <PlayerBadgeRow players={players} doneIds={new Set()} myId={myId} showDone={false} />
+        <Countdown endsAt={room.phaseEndsAt || Date.now()} now={now} label="Para votar:" />
+        <Card style={{ width: "100%", maxWidth: 460, textAlign: "center" }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>¿Cuál definición de "{currentWord ? currentWord.word : "…"}" es la verdadera?</div>
+        </Card>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 460, marginBottom: 14 }}>
+          {options.map((o) => {
+            const isMine = o.key === myId;
+            const selected = myVote === o.key;
+            return (
+              <button
+                key={o.key}
+                onClick={() => !isMine && !myVote && submitVote(o.key)}
+                disabled={isMine || !!myVote}
+                style={{
+                  textAlign: "left",
+                  padding: "14px 16px",
+                  borderRadius: 16,
+                  border: selected ? "2px solid #FFD23F" : "1.5px solid rgba(255,255,255,0.15)",
+                  background: selected ? "rgba(255,210,63,0.18)" : isMine ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.07)",
+                  color: isMine ? "#8b7fa8" : "#F3EEFF",
+                  fontFamily: "'Nunito', sans-serif",
+                  fontSize: 15,
+                  lineHeight: 1.4,
+                  cursor: isMine || myVote ? "default" : "pointer",
+                  opacity: myVote && !selected ? 0.55 : 1,
+                }}
+              >
+                {o.text}
+                {isMine && <div style={{ marginTop: 4, fontSize: 12, color: "#8b7fa8" }}>✍️ la escribiste vos</div>}
+              </button>
+            );
+          })}
+        </div>
+        {myVote && (
+          <Card style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
+            <div style={{ fontSize: 32, marginBottom: 4 }}>🗳️</div>
+            <Sub style={{ marginBottom: 0 }}>Ya votaste. Esperando a que terminen los demás...</Sub>
+          </Card>
+        )}
+      </Screen>
+    );
+  }
+
+  // ---------- REVEAL ----------
+  if (room.phase === "reveal") {
+    const options = room.currentOptions || [];
+    const isLastRound = (room.round || 0) >= (room.totalRounds || DEFAULT_ROUNDS);
+    return (
+      <RevealScreen
+        roomCode={roomCode}
+        round={room.round}
+        players={players}
+        myId={myId}
+        word={currentWord}
+        options={options}
+        isHost={isHost}
+        isLastRound={isLastRound}
+        onNext={nextRound}
+      />
+    );
+  }
+
+  return (
+    <Screen style={{ justifyContent: "center" }}>
+      <Sub>Cargando...</Sub>
+    </Screen>
+  );
+}
+
+// Pantalla de resultados de la ronda: necesita leer el voto de cada
+// jugador para armar el conteo (quién votó qué), así que trae su propio
+// estado con readAllPlayerStates (por clave exacta, nunca list()).
+function RevealScreen({ roomCode, round, players, myId, word, options, isHost, isLastRound, onNext }) {
+  const [votesByOption, setVotesByOption] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const states = await readAllPlayerStates(roomCode, round, players.map((p) => p.id));
+      if (cancelled) return;
+      const tally = {};
+      players.forEach((p) => {
+        const v = (states[p.id] || {}).votedFor;
+        if (!v) return;
+        tally[v] = tally[v] || [];
+        tally[v].push(p.name);
+      });
+      setVotesByOption(tally);
+    })();
+    return () => { cancelled = true; };
+  }, [roomCode, round]);
+
+  const authorName = (key) => (players.find((p) => p.id === key) || {}).name || "?";
+  const myPointsThisRound = (players.find((p) => p.id === myId) || {}).lastRoundPoints || 0;
+
+  return (
+    <Screen>
+      <Title size={22}>Sala — Ronda {round}</Title>
+      <Card style={{ width: "100%", maxWidth: 460, textAlign: "center" }}>
+        <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>La palabra era</div>
+        <Title size={26}>{word ? word.word : "…"}</Title>
+        <Sub style={{ marginBottom: 0 }}>{word ? word.def : ""}</Sub>
+      </Card>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 460, marginBottom: 14 }}>
+        {options.map((o) => {
+          const isReal = o.key === "real";
+          const voters = (votesByOption && votesByOption[o.key]) || [];
+          return (
+            <div
+              key={o.key}
+              style={{
+                padding: "14px 16px",
+                borderRadius: 16,
+                border: isReal ? "2px solid #3DDC84" : "1.5px solid rgba(255,255,255,0.15)",
+                background: isReal ? "rgba(61,220,132,0.15)" : "rgba(255,255,255,0.06)",
+              }}
+            >
+              <div style={{ fontSize: 15, lineHeight: 1.4, color: "#F3EEFF" }}>{o.text}</div>
+              <div style={{ marginTop: 6, fontSize: 12, color: isReal ? "#3DDC84" : "#8b7fa8", fontWeight: 700 }}>
+                {isReal ? "✅ La verdadera" : `✍️ Mentira de ${authorName(o.key)}`}
+                {voters.length > 0 && ` · votada por ${voters.join(", ")}`}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <Card style={{ width: "100%", maxWidth: 420 }}>
+        <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Puntaje</div>
+        {[...players].sort((a, b) => (b.score || 0) - (a.score || 0)).map((p) => (
+          <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 2px" }}>
+            <span>{p.name}{p.id === myId ? " (vos)" : ""}</span>
+            <span>
+              {p.lastRoundPoints ? <span style={{ color: "#3DDC84", fontWeight: 700, marginRight: 8 }}>+{p.lastRoundPoints}</span> : null}
+              <b style={{ color: "#FFD23F" }}>{p.score || 0}</b>
+            </span>
+          </div>
+        ))}
+      </Card>
+
+      {isHost ? (
+        <BigButton onClick={onNext}>{isLastRound ? "Ver resultados finales 🏆" : "Siguiente palabra ➜"}</BigButton>
+      ) : (
+        <Sub>Esperando a que el anfitrión/a siga...</Sub>
+      )}
+    </Screen>
+  );
+}
+
+function App() {
+  useInjectFont();
+  const [mode, setMode] = useState("home");
+  const [roomCode, setRoomCode] = useState(null);
+  const [myId, setMyId] = useState(null);
+
+  if (mode === "home") return <Home onSelect={setMode} />;
+  if (mode === "game" && roomCode && myId) {
+    return (
+      <GameRoom
+        roomCode={roomCode}
+        myId={myId}
+        onBack={() => {
+          setRoomCode(null);
+          setMyId(null);
+          setMode("home");
+        }}
+      />
+    );
+  }
+  return (
+    <JoinScreen
+      onJoined={(code, id) => {
+        setRoomCode(code);
+        setMyId(id);
+      }}
+      onBack={() => setMode("home")}
+    />
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
