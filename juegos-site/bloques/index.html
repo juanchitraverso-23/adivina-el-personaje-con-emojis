@@ -171,6 +171,27 @@ const SPIN_PERIOD_MS = 16000; // Final: la grilla atacada gira, una vuelta cada 
 // la final son 3.
 const STAGE_GRID_COUNT = { elim: 3, semifinal: 4, final: 3 };
 
+// Ventaja para Lara (7 años): mismas reglas para todos, pero si alguien
+// entra con ese nombre juega con una grilla menos por etapa, grillas más
+// chicas y con menos colores (más fáciles de resolver), y los efectos que
+// frenan/oscurecen la pantalla (freeze al errar, blanco y negro) le duran
+// menos cuando le tocan a ella — nunca a quienes la atacan a ella ni a
+// nadie más. No es una opción del lobby: se detecta sola por el nombre,
+// así no hace falta que nadie se acuerde de activar nada.
+function isLaraName(name) {
+  return typeof name === "string" && name.trim().toLowerCase() === "lara";
+}
+const LARA_GRID_SIZE = 7; // en vez de 10x10
+const LARA_COLOR_COUNT = 4; // en vez de 6 colores por grilla
+const LARA_WRONG_FREEZE_MS = 500; // en vez de 1000 (elim/semifinal, tocar mal)
+const LARA_FINAL_WRONG_FREEZE_MS = 1500; // en vez de 3000 (Final, grillas 1 y 2)
+const LARA_FINAL_G3_WRONG_PAUSE_MS = 1000; // en vez de 2000 (Final, grilla 3)
+const LARA_SEMI_FREEZE_MS = 2500; // en vez de 5000, cuando LA congelan (no cuando ataca)
+const LARA_FLICKER_COLOR_MS = 8000; // elim: más tiempo a color...
+const LARA_FLICKER_BW_MS = 2000; // ...y menos tiempo en blanco y negro
+const LARA_FINAL_G2_BW_MS = 2500; // Final grilla 2: menos tiempo en blanco y negro...
+const LARA_FINAL_G2_COLOR_MS = 3500; // ...y más tiempo a color
+
 const PLAYER_COLORS = [
   "#FF3E7F", "#5B4B8A", "#FFD23F", "#3DDC84",
   "#4FC3F7", "#FF9F1C", "#B983FF", "#FF6B6B",
@@ -410,8 +431,8 @@ function computeCellBorders(size, cellPiece) {
 function isGridSolved(grid) {
   return grid.activeColorIndex >= grid.colorOrder.length;
 }
-function newQueuedGrid(colorKeys) {
-  return generateGrid(GRID_SIZE, colorKeys);
+function newQueuedGrid(colorKeys, size) {
+  return generateGrid(size || GRID_SIZE, colorKeys);
 }
 
 const GRADIENT_BG = "radial-gradient(circle at 20% -10%, #3a2166 0%, #170b2e 45%, #0c0620 100%)";
@@ -1374,13 +1395,19 @@ function initialStageFor(playerCount) {
 }
 
 // Arma el estado inicial de cada jugador para una etapa nueva (grillas
-// frescas, contadores de ataque en cero).
-function freshStateForStage(stage) {
-  const count = STAGE_GRID_COUNT[stage] || 3;
+// frescas, contadores de ataque en cero). `easy` es la ventaja de Lara
+// (ver isLaraName): una grilla menos, y cada grilla más chica y con
+// menos colores.
+function freshStateForStage(stage, easy) {
+  const baseCount = STAGE_GRID_COUNT[stage] || 3;
+  const count = easy ? Math.max(1, baseCount - 1) : baseCount;
+  const size = easy ? LARA_GRID_SIZE : GRID_SIZE;
+  const colorKeys = easy ? PIECE_COLOR_KEYS.slice(0, LARA_COLOR_COUNT) : PIECE_COLOR_KEYS;
   const queue = Array.from({ length: count }, (_, i) => {
-    // La última grilla de la Final no tiene colores: son 4 tonos de gris.
+    // La última grilla de la Final no tiene colores: son 4 tonos de gris
+    // (ya son solo 4, así que para Lara no hace falta recortarlos más).
     const useGray = stage === "final" && i === count - 1;
-    return newQueuedGrid(useGray ? GRAYSCALE_COLOR_KEYS : PIECE_COLOR_KEYS);
+    return newQueuedGrid(useGray ? GRAYSCALE_COLOR_KEYS : colorKeys, size);
   });
   return {
     queue,
@@ -1403,7 +1430,7 @@ async function startStage(roomCode, freshRoom, stage, alivePlayers) {
   const round = (freshRoom.round || 1) + 1;
   const newStates = {};
   alivePlayers.forEach((p) => {
-    newStates[p.id] = freshStateForStage(stage);
+    newStates[p.id] = freshStateForStage(stage, isLaraName(p.name));
   });
   await Promise.all(alivePlayers.map((p) => writePlayerState(roomCode, round, p.id, newStates[p.id])));
   freshRoom.round = round;
@@ -1672,6 +1699,7 @@ function GameRoom({ roomCode, myId, onBack }) {
   }
 
   const players = room.players || [];
+  const myIsLara = isLaraName((players.find((p) => p.id === myId) || {}).name);
   const effectiveHost =
     players.find((p) => p.id === room.hostId) ||
     [...players].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0] ||
@@ -1689,22 +1717,23 @@ function GameRoom({ roomCode, myId, onBack }) {
     setWrongFlash(true);
     if (stage === "final") {
       if (finalGrid3) {
-        // No frena clicks: solo pausa el cronómetro mostrado 2s.
-        setTimerPauseUntil(Date.now() + FINAL_G3_WRONG_PAUSE_MS);
+        // No frena clicks: solo pausa el cronómetro mostrado 2s (menos si
+        // es Lara).
+        setTimerPauseUntil(Date.now() + (myIsLara ? LARA_FINAL_G3_WRONG_PAUSE_MS : FINAL_G3_WRONG_PAUSE_MS));
         wrongFlashTimerRef.current = setTimeout(() => setWrongFlash(false), 500);
       } else {
         setLocked(true);
         wrongFlashTimerRef.current = setTimeout(() => {
           setWrongFlash(false);
           setLocked(false);
-        }, FINAL_WRONG_FREEZE_MS);
+        }, myIsLara ? LARA_FINAL_WRONG_FREEZE_MS : FINAL_WRONG_FREEZE_MS);
       }
     } else {
       setLocked(true);
       wrongFlashTimerRef.current = setTimeout(() => {
         setWrongFlash(false);
         setLocked(false);
-      }, 1000);
+      }, myIsLara ? LARA_WRONG_FREEZE_MS : 1000);
     }
   };
 
@@ -1723,7 +1752,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     const initialStage = fresh.mode === "final" ? "final" : initialStageFor(fresh.players.length);
     const newStates = {};
     fresh.players.forEach((p) => {
-      newStates[p.id] = freshStateForStage(initialStage);
+      newStates[p.id] = freshStateForStage(initialStage, isLaraName(p.name));
     });
     await Promise.all(fresh.players.map((p) => writePlayerState(roomCode, round, p.id, newStates[p.id])));
     fresh.phase = "playing";
@@ -1947,20 +1976,40 @@ function GameRoom({ roomCode, myId, onBack }) {
   const myState = playerStates[myId];
   const iAmAlive = myState ? myState.alive !== false : true;
   const mySolvedCount = (myState && myState.solvedCount) || 0;
+  // Cuántas grillas me quedan (contando la que tengo abierta ahora), no
+  // cuántas ya resolví: con Lara la cola arranca una grilla más corta
+  // (ver freshStateForStage), así que "es mi última grilla" hay que
+  // decidirlo mirando mi propia cola, no comparando contra la cantidad
+  // fija de siempre (STAGE_GRID_COUNT) — si no, para ella esa cuenta
+  // nunca cierra y su última grilla (o la del medio, en la Final) no se
+  // comporta como corresponde.
+  const myQueueLen = (myState && myState.queue && myState.queue.length) || 0;
   // Etapa "elim": la última grilla que te toca (la 3ra, o cualquier extra
-  // que te hayan mandado después) parpadea color/blanco y negro.
-  const bwPhase = stage === "elim" && mySolvedCount >= STAGE_GRID_COUNT.elim - 1 && Math.floor(now / FLICKER_PERIOD_MS) % 2 === 1;
+  // que te hayan mandado después) parpadea color/blanco y negro. Si sos
+  // Lara, el ciclo es asimétrico: más tiempo a color, menos en blanco y
+  // negro (en vez del 50/50 de siempre).
+  const flickerColorMs = myIsLara ? LARA_FLICKER_COLOR_MS : FLICKER_PERIOD_MS;
+  const flickerBwMs = myIsLara ? LARA_FLICKER_BW_MS : FLICKER_PERIOD_MS;
+  const bwPhase =
+    stage === "elim" &&
+    myQueueLen === 1 &&
+    now % (flickerColorMs + flickerBwMs) >= flickerColorMs;
   // Etapa de 3: debuff "blanco y negro" (cuenta impar = activo) y freeze
   // acumulable por ataques.
   const myBwDebuff = stage === "semifinal" && ((myState && myState.bwDebuffCount) || 0) % 2 === 1;
   const myFreezeUntil = (myState && myState.freezeUntil) || 0;
   const myFrozen = stage === "semifinal" && now < myFreezeUntil;
-  // Final, grilla 2 (mySolvedCount === 1): parpadea sola, sin que nadie
-  // ataque — blanco y negro 5s, color 2s, sin parar, hasta resolverla.
-  const finalG2Cycle = stage === "final" && mySolvedCount === 1
-    ? (now % (FINAL_G2_BW_MS + FINAL_G2_COLOR_MS)) < FINAL_G2_BW_MS
+  // Final: la última grilla (myQueueLen === 1) es la de escala de grises;
+  // la del medio (ya resolví al menos una Y todavía me queda más de una
+  // después de esta) parpadea sola blanco y negro/color sin que nadie
+  // ataque. Con Lara (2 grillas en vez de 3) no hay "del medio": pasa
+  // directo de la primera a la de grises, sin esa fase intermedia.
+  const finalG2BwMs = myIsLara ? LARA_FINAL_G2_BW_MS : FINAL_G2_BW_MS;
+  const finalG2ColorMs = myIsLara ? LARA_FINAL_G2_COLOR_MS : FINAL_G2_COLOR_MS;
+  const finalG2Cycle = stage === "final" && mySolvedCount >= 1 && myQueueLen >= 2
+    ? (now % (finalG2BwMs + finalG2ColorMs)) < finalG2BwMs
     : false;
-  const finalG3 = stage === "final" && mySolvedCount === STAGE_GRID_COUNT.final - 1;
+  const finalG3 = stage === "final" && myQueueLen === 1;
   const timerPaused = stage === "final" && now < timerPauseUntil;
 
   // El picker se cierra YA (no espera red); el guardado real al rival (la
@@ -1974,18 +2023,26 @@ function GameRoom({ roomCode, myId, onBack }) {
     setAttackCtx(null);
     const cur = myLiveStateRef.current;
     if (cur) setMyStateNow({ ...cur, lastAttacked: targetId });
+    // Si el objetivo es Lara, la ventaja la sigue incluso en lo que le
+    // manden: el freeze le dura menos, y la grilla extra clásica le llega
+    // del mismo tamaño/dificultad fácil que el resto de su cola (si no,
+    // una sola grilla de 10x10 y 6 colores se le colaría de golpe).
+    const targetIsLara = isLaraName((players.find((p) => p.id === targetId) || {}).name);
     (async () => {
-      const freshTarget = (await readPlayerState(roomCode, round, targetId)) || freshStateForStage(stage);
+      const freshTarget = (await readPlayerState(roomCode, round, targetId)) || freshStateForStage(stage, targetIsLara);
       let nextTargetState;
       if (type === "bw") {
         nextTargetState = { ...freshTarget, bwDebuffCount: (freshTarget.bwDebuffCount || 0) + 1 };
       } else if (type === "freeze") {
         const base = Math.max(freshTarget.freezeUntil || 0, Date.now());
-        nextTargetState = { ...freshTarget, freezeUntil: base + SEMI_FREEZE_MS };
+        nextTargetState = { ...freshTarget, freezeUntil: base + (targetIsLara ? LARA_SEMI_FREEZE_MS : SEMI_FREEZE_MS) };
       } else if (type === "spin") {
         nextTargetState = { ...freshTarget, spinning: true };
       } else {
-        const newQueue = [...(freshTarget.queue || []), newQueuedGrid()];
+        const extraGrid = targetIsLara
+          ? newQueuedGrid(PIECE_COLOR_KEYS.slice(0, LARA_COLOR_COUNT), LARA_GRID_SIZE)
+          : newQueuedGrid();
+        const newQueue = [...(freshTarget.queue || []), extraGrid];
         nextTargetState = { ...freshTarget, queue: newQueue };
       }
       await writePlayerState(roomCode, round, targetId, nextTargetState);
@@ -2069,7 +2126,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     if (piece.cleared) return;
     const activeColor = grid.colorOrder[grid.activeColorIndex];
     if (piece.color !== activeColor) {
-      registerWrong(stage === "final" && (cur.solvedCount || 0) === STAGE_GRID_COUNT.final - 1);
+      registerWrong(stage === "final" && cur.queue.length === 1);
       return;
     }
     const newPieces = grid.pieces.map((p) => (p.id === pieceId ? { ...p, cleared: true } : p));
