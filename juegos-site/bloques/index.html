@@ -149,6 +149,11 @@ const POLL_MS = 1000;
 // segundo — nadie necesita precisión al segundo para ver qué salas hay
 // abiertas — así que sondea bastante más espaciado.
 const LOBBY_LIST_POLL_MS = 8000;
+// Igual motivo que LOBBY_LIST_POLL_MS (cuota diaria compartida de
+// Workers KV), pero del lado de las escrituras: agrupa los clicks
+// seguidos de cada jugador en una sola escritura en vez de una por
+// click (ver hasPendingWrite/scheduleSync más abajo).
+const SYNC_DEBOUNCE_MS = 500;
 const SESSION_KEY = "bloques:sesion";
 const MAX_PLAYERS = 16;
 const GRID_SIZE = 10;
@@ -1273,7 +1278,7 @@ function JoinScreen({ onJoined, onBack }) {
       localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: me.id }));
       onJoined(code, me.id);
     } catch (e) {
-      setJoinError("No se pudo conectar a la sala. Probá de nuevo.");
+      setJoinError(window.storage.friendlyErrorMessage(e));
     } finally {
       setJoining(false);
     }
@@ -1556,6 +1561,23 @@ function GameRoom({ roomCode, myId, onBack }) {
   const pendingWritesRef = useRef(0);
   const syncingRef = useRef(false);
   const syncDirtyRef = useRef(false);
+  // Agrupa varios clicks seguidos en UNA sola escritura al servidor, en
+  // vez de una por click: sin esto, limpiar una grilla entera (decenas
+  // de clicks en pocos segundos) gastaba una escritura de Workers KV por
+  // cada click — con la cuota gratuita de 1.000 escrituras/día
+  // compartida por todo el sitio, alcanzaba con que una familia jugara
+  // un rato para agotarla. Ahora se espera a que pasen SYNC_DEBOUNCE_MS
+  // sin clicks nuevos antes de mandar la escritura, así que una racha de
+  // clicks termina en una sola escritura con el estado final — el
+  // feedback local (myLiveStateRef, lo que ves en pantalla) sigue siendo
+  // instantáneo, lo único que se demora un toque es lo que se guarda en
+  // el servidor.
+  const syncDebounceRef = useRef(null);
+  // Mientras haya una escritura programada (todavía esperando el
+  // debounce) o en vuelo (ya viajando por la red), no hay que dejar que
+  // el sondeo de cada segundo pise el estado local con una lectura del
+  // servidor que todavía no la refleja.
+  const hasPendingWrite = () => pendingWritesRef.current > 0 || syncDebounceRef.current !== null;
   // Cuántas grillas tenía mi cola la última vez que supimos con certeza qué
   // tenía el servidor (recién leído, o recién escrito por mí). Comparar la
   // cola fresca contra ESTO — y no contra el largo de mi cola local actual —
@@ -1619,7 +1641,11 @@ function GameRoom({ roomCode, myId, onBack }) {
   };
   const scheduleSync = () => {
     syncDirtyRef.current = true;
-    runSyncLoop(roomCode, room ? room.round || 1 : 1, myId);
+    if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+    syncDebounceRef.current = setTimeout(() => {
+      syncDebounceRef.current = null;
+      runSyncLoop(roomCode, room ? room.round || 1 : 1, myId);
+    }, SYNC_DEBOUNCE_MS);
   };
   // Aplica `next` como mi estado YA (React + la referencia síncrona) y pide
   // que se guarde en segundo plano.
@@ -1661,16 +1687,16 @@ function GameRoom({ roomCode, myId, onBack }) {
         // terminaste, esperando a los demás" sin haber tocado nada.
         const hasData = states && Object.keys(states).length > 0;
         if (!hasData) return;
-        // Mientras tengo una sincronización propia en vuelo, no piso mi
-        // estado local (ni la referencia síncrona que usan los clicks) con
-        // esta lectura del server, que puede no reflejar todavía el último
-        // click.
-        if (pendingWritesRef.current === 0) {
+        // Mientras tengo una sincronización propia programada (esperando
+        // el debounce) o en vuelo, no piso mi estado local (ni la
+        // referencia síncrona que usan los clicks) con esta lectura del
+        // server, que puede no reflejar todavía mi último click.
+        if (!hasPendingWrite()) {
           myLiveStateRef.current = states[myId] || myLiveStateRef.current;
           lastKnownServerQueueLenRef.current = (myLiveStateRef.current && myLiveStateRef.current.queue || []).length;
         }
         setPlayerStates((prev) =>
-          pendingWritesRef.current > 0 && prev[myId] ? { ...states, [myId]: prev[myId] } : states
+          hasPendingWrite() && prev[myId] ? { ...states, [myId]: prev[myId] } : states
         );
 
         if (r.phase === "playing" && Date.now() >= (r.countdownEndsAt || 0)) {

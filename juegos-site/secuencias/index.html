@@ -142,6 +142,11 @@ const POLL_MS = 1000;
 // segundo — nadie necesita precisión al segundo para ver qué salas hay
 // abiertas — así que sondea bastante más espaciado.
 const LOBBY_LIST_POLL_MS = 8000;
+// Igual motivo que LOBBY_LIST_POLL_MS (cuota diaria compartida de
+// Workers KV), pero del lado de las escrituras: agrupa los toques
+// seguidos de cada jugador en una sola escritura en vez de una por
+// toque (ver hasPendingWrite/scheduleSync más abajo).
+const SYNC_DEBOUNCE_MS = 500;
 const SESSION_KEY = "secuencias:sesion";
 const MAX_PLAYERS = 8;
 const DEFAULT_MAX_QUEUE = 8;
@@ -1189,7 +1194,7 @@ function JoinScreen({ onJoined, onBack }) {
       localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: me.id }));
       onJoined(code, me.id);
     } catch (e) {
-      setJoinError("No se pudo conectar a la sala. Probá de nuevo.");
+      setJoinError(window.storage.friendlyErrorMessage(e));
     } finally {
       setJoining(false);
     }
@@ -1284,6 +1289,11 @@ function GameRoom({ roomCode, myId, onBack }) {
   const pendingWritesRef = useRef(0);
   const syncingRef = useRef(false);
   const syncDirtyRef = useRef(false);
+  // Agrupa varios toques seguidos en UNA sola escritura al servidor
+  // (ver scheduleSync más abajo) en vez de una por toque — mismo motivo
+  // y mismo patrón que en Bloques en Cadena.
+  const syncDebounceRef = useRef(null);
+  const hasPendingWrite = () => pendingWritesRef.current > 0 || syncDebounceRef.current !== null;
   // Cuántos elementos tenía mi cola la última vez que supimos con certeza
   // qué tenía el servidor (recién leído, o recién escrito por mí). Comparar
   // la cola fresca contra ESTO — y no contra el largo de mi cola local
@@ -1334,7 +1344,11 @@ function GameRoom({ roomCode, myId, onBack }) {
   };
   const scheduleSync = () => {
     syncDirtyRef.current = true;
-    runSyncLoop(roomCode, room ? room.round || 1 : 1, myId);
+    if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+    syncDebounceRef.current = setTimeout(() => {
+      syncDebounceRef.current = null;
+      runSyncLoop(roomCode, room ? room.round || 1 : 1, myId);
+    }, SYNC_DEBOUNCE_MS);
   };
   const setMyStateNow = (next) => {
     myLiveStateRef.current = next;
@@ -1373,12 +1387,12 @@ function GameRoom({ roomCode, myId, onBack }) {
         // terminaste, esperando a los demás" sin haber tocado nada.
         const hasData = states && Object.keys(states).length > 0;
         if (!hasData) return;
-        if (pendingWritesRef.current === 0) {
+        if (!hasPendingWrite()) {
           myLiveStateRef.current = states[myId] || myLiveStateRef.current;
           lastKnownServerQueueLenRef.current = (myLiveStateRef.current && myLiveStateRef.current.queue || []).length;
         }
         setPlayerStates((prev) =>
-          pendingWritesRef.current > 0 && prev[myId] ? { ...states, [myId]: prev[myId] } : states
+          hasPendingWrite() && prev[myId] ? { ...states, [myId]: prev[myId] } : states
         );
 
         if (r.phase === "playing") {

@@ -759,7 +759,7 @@ function JoinScreen({ mode, gameMode, onBack, onEntered }) {
       localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: me.id }));
       onEntered(code, me.id);
     } catch (e) {
-      setError("No se pudo conectar a la sala. Probá de nuevo.");
+      setError(window.storage.friendlyErrorMessage(e));
     } finally {
       setBusy(false);
     }

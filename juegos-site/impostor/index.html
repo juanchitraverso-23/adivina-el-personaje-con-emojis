@@ -658,7 +658,13 @@ async function quickJoinRoom(code) {
     state.joinError = "Ya hay alguien con ese nombre, probá otro."; render(); return;
   }
   existing.players.push({ id: myId, name, isBot: false });
-  await saveRoom(existing);
+  try {
+    await saveRoom(existing);
+  } catch (e) {
+    state.joinError = window.storage.friendlyErrorMessage(e);
+    render();
+    return;
+  }
   window.storage.incrementCounter("players").catch(() => {});
   stopOpenRoomsPolling();
   saveSession(code, name);
@@ -673,8 +679,13 @@ async function quickJoinRoom(code) {
 
 /* ================= MODO ONLINE ================= */
 async function saveRoom(r) {
-  try { await window.storage.set("room:" + r.code, JSON.stringify(r), true); }
-  catch (e) { console.error(e); }
+  // Antes este catch tragaba el error (solo console.error), así que si la
+  // escritura a KV fallaba (p. ej. se agotó la cuota gratis del día),
+  // createRoom/joinRoom igual avanzaban a la pantalla de lobby como si nada
+  // — el jugador quedaba en una sala que en realidad nunca se guardó, sin
+  // ningún error visible. Re-lanzamos para que quien llama pueda mostrar un
+  // mensaje claro y NO avanzar de pantalla.
+  await window.storage.set("room:" + r.code, JSON.stringify(r), true);
 }
 async function loadRoom(code) {
   try {
@@ -728,7 +739,15 @@ async function createRoom() {
     phase: "lobby", recentImpostorIds: [], recentStarterIds: [], recentWords: [], round: 0,
     createdAt: Date.now()
   };
-  await saveRoom(state.room);
+  try {
+    await saveRoom(state.room);
+  } catch (e) {
+    state.joinError = window.storage.friendlyErrorMessage(e);
+    state.room = null;
+    state.roomCode = null;
+    render();
+    return;
+  }
   window.storage.incrementCounter("players").catch(() => {});
   stopOpenRoomsPolling();
   saveSession(code, name);
@@ -751,7 +770,13 @@ async function joinRoom() {
     state.joinError = "Ya hay alguien con ese nombre, probá otro."; render(); return;
   }
   existing.players.push({ id: myId, name, isBot: false });
-  await saveRoom(existing);
+  try {
+    await saveRoom(existing);
+  } catch (e) {
+    state.joinError = window.storage.friendlyErrorMessage(e);
+    render();
+    return;
+  }
   window.storage.incrementCounter("players").catch(() => {});
   stopOpenRoomsPolling();
   saveSession(code, name);

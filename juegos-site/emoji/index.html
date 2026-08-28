@@ -929,7 +929,7 @@ function OnlineGame({ onBack }) {
       setPlayerId(id);
       setScreen("game");
     } catch (e) {
-      setJoinError("No se pudo conectar a la sala. Probá de nuevo.");
+      setJoinError(window.storage.friendlyErrorMessage(e));
     } finally {
       setJoining(false);
     }
@@ -1099,7 +1099,7 @@ function OnlineGame({ onBack }) {
       setPlayerId(id);
       setScreen("game");
     } catch (e) {
-      setJoinError("No se pudo conectar a la sala. Probá de nuevo.");
+      setJoinError(window.storage.friendlyErrorMessage(e));
     } finally {
       setJoining(false);
     }
