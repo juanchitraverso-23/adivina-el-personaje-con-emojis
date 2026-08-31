@@ -173,9 +173,17 @@ const FINAL_G3_WRONG_PAUSE_MS = 2000; // Final, grilla 3 (escala de grises): toc
 const SEMI_FREEZE_MS = 5000; // etapa de 3: cada ataque de freeze suma 5s (se acumulan)
 const SPIN_PERIOD_MS = 16000; // Final: la grilla atacada gira, una vuelta cada 16s
 const BW_DEBUFF_MS = 15000; // etapa de 3: "blanco y negro" dura como máximo esto — antes quedaba pegado para siempre si nadie mandaba un segundo ataque igual para cancelarlo
-const GUERRA_FLICKER_MS = 15000; // modo Guerra: ataque "blanco y negro intermitente", mismo tope de 15s que el de Semifinal (y por la misma razón: que nunca quede pegado esperando un segundo ataque)
-const GUERRA_GIANT_SIZE_MULT = 2; // modo Guerra: ataque "grilla gigante" — duplica filas y columnas (4 veces más piezas)
-const GUERRA_GIANT_CLEAR_COUNT = 4; // ...y cada tap limpia hasta 4 piezas del color activo de una, para compensar y que no sea mucho más lenta de resolver
+// Modo Guerra — girar, blanco y negro intermitente y grilla gigante se
+// pueden recibir hasta GUERRA_MAX_STACK veces (2) en la MISMA grilla: la
+// segunda vez no se cancela, se suma y el efecto se hace más fuerte (ver
+// cada ataque abajo). Ni bien resolvés la grilla entera, se te sacan todos
+// (completeCurrentGrid). La grilla extra es aparte: no se acumula ni tiene
+// tope de veces, pero solo se le puede mandar UNA vez a cada rival en toda
+// la partida (gridExtraSentTo).
+const GUERRA_MAX_STACK = 2;
+const GUERRA_FLICKER_MS = 15000; // "blanco y negro intermitente": cada vez que te lo mandan (hasta 2 veces) se suma este tiempo a lo que te queda activo — mismo patrón que el freeze de Semifinal
+const GUERRA_GIANT_SIZE_MULT = 2; // "grilla gigante": multiplica filas y columnas por esto en CADA aplicación — 1 vez: 4 veces más piezas; 2 veces (máximo): 16 veces más piezas
+const GUERRA_GIANT_CLEAR_COUNT = 4; // ...y cada tap limpia esto TIMES la cantidad de veces que se la mandaron (1 vez: 4 piezas; 2 veces: 8), para que no sea proporcionalmente más lenta de resolver
 // Cantidad de grillas por etapa: fija (no elegible), así quedó después de
 // jugarlo en familia — de entrada son 3, la etapa de 3 jugadores son 4, y
 // la final son 3.
@@ -635,9 +643,15 @@ const inputStyle = {
 // que sacudir el tablero (shake).
 function GridBoard({ grid, onTap, shake, bw, locked, spinning }) {
   const borders = useMemo(() => computeCellBorders(grid.size, grid.cellPiece), [grid.cellPiece]);
+  // `spinning` es la cantidad de veces que le mandaron el ataque de girar
+  // (0 = no gira, 1 = velocidad normal, 2 = el doble de rápido en Guerra —
+  // ver GUERRA_MAX_STACK). La animación es la misma clase de siempre, pero
+  // con la duración calculada acá para poder variar la velocidad; en las
+  // demás etapas spinning nunca pasa de 1, así que se ve igual que antes.
+  const spinStack = spinning || 0;
   return (
     <div
-      className={spinning ? "bloques-spin" : ""}
+      className={spinStack > 0 ? "bloques-spin" : ""}
       style={{
         display: "grid",
         gridTemplateColumns: `repeat(${grid.size}, 1fr)`,
@@ -652,6 +666,7 @@ function GridBoard({ grid, onTap, shake, bw, locked, spinning }) {
         opacity: locked ? 0.55 : 1,
         transition: "filter 0.6s ease, opacity 0.15s ease",
         boxSizing: "border-box",
+        animationDuration: spinStack > 0 ? Math.round(SPIN_PERIOD_MS / spinStack) + "ms" : undefined,
       }}
     >
       {grid.cellPiece.map((pieceId, i) => {
@@ -827,17 +842,22 @@ function PlayerBadgeRow({ players, playerStates, myId, eliminationOrder }) {
 // color que su ficha en PlayerBadgeRow), con el nombre grande adentro —
 // "cuadrados de colores con el nombre de cada uno grande, en el medio de
 // la pantalla", como pidieron después de jugarlo en familia.
-function TargetPicker({ players, playerStates, myId, myLastAttacked, eliminationOrder, title, subtitle, onAttack, onSkip, allowRepeat }) {
+function TargetPicker({ players, playerStates, myId, myLastAttacked, eliminationOrder, title, subtitle, onAttack, onSkip, allowRepeat, excludeIds }) {
   // Igual que en PlayerBadgeRow: quién sigue vivo se decide con
   // room.eliminationOrder, no con playerStates — alguien eliminado en una
   // etapa anterior no tiene estado en la ronda actual, así que "sin
   // estado" no puede leerse como "vivo" o se lo podría volver a atacar.
   const eliminatedIds = new Set(eliminationOrder || []);
+  const excludedIds = new Set(excludeIds || []);
   const aliveList = players.filter((p) => !eliminatedIds.has(p.id));
   const aliveCount = aliveList.length;
   const candidates = aliveList.filter((p) => {
     if (p.id === myId) return false;
     if ((playerStates[p.id] || {}).finishedAt) return false; // ya terminó esta etapa, no se lo puede atacar más
+    // Modo Guerra, ataque "grilla extra": ya se la mandé a esta persona
+    // (una sola vez por rival en toda la partida) — no aparece más como
+    // candidato para ESTE tipo de ataque específicamente.
+    if (excludedIds.has(p.id)) return false;
     // Modo Guerra: se puede repetir el mismo objetivo siempre (así lo pidió
     // el usuario), así que ahí no se aplica el "no le pegues dos veces
     // seguidas al mismo" que sí rige en el resto de las etapas.
@@ -905,31 +925,38 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
 }
 
 // Los 4 tipos de ataque que se pueden elegir en el modo Guerra. title/subtitle
-// son los que ve el ATACANTE en el paso siguiente (elegir a quién). El texto
-// de "se cancela" aplica a spin y flicker (ambos son toggle: si el rival ya
-// lo tiene, mandarlo de nuevo se lo saca); grid y giant se pueden mandar
-// las veces que quieras sin que se cancelen (grid se acumula; giant
-// simplemente genera otra grilla gigante fresca cada vez).
+// son los que ve el ATACANTE en el paso siguiente (elegir a quién). Girar,
+// blanco y negro intermitente y grilla gigante se pueden recibir hasta 2
+// veces en la MISMA grilla (GUERRA_MAX_STACK): la segunda no cancela,
+// suma y el efecto se hace más fuerte (ver el detalle de cada uno en
+// performAttack). Grilla extra es distinta: no tiene tope de veces ni se
+// acumula en fuerza, pero solo se le puede mandar a cada rival UNA vez en
+// toda la partida (gridExtraSentTo) — por eso en GuerraAttackPicker
+// desaparece del todo cuando ya se la mandaste a todos.
 const GUERRA_ATTACK_META = {
-  spin: { emoji: "🌀", label: "Girar", desc: "Gira hasta que resuelva esa grilla.", title: "🌀 ¿A quién le hacés girar la grilla?", subtitle: "Si ya la tenía girando, se cancela." },
-  flicker: { emoji: "⚫⚪", label: "Blanco y negro intermitente", desc: "Parpadea 15s entre color y gris.", title: "⚫⚪ ¿A quién le ponés blanco y negro intermitente?", subtitle: "Dura 15s — si ya lo tenía puesto, se cancela antes." },
-  giant: { emoji: "🔲", label: "Grilla gigante", desc: "Duplica filas y columnas de la grilla que tiene abierta.", title: "🔲 ¿A quién le duplicás la grilla?", subtitle: "Dura hasta que la resuelva — pero cada tap le limpia 4 piezas de una, así no es taaan difícil. Se puede repetir sin problema." },
-  grid: { emoji: "🧱", label: "Grilla extra", desc: "Le suma una grilla más a resolver.", title: "🧱 ¿A quién le mandás una grilla extra?", subtitle: "Se acumula: no se cancela si le mandan varias." },
+  spin: { emoji: "🌀", label: "Girar", desc: "Gira hasta que resuelva esa grilla. Recibirlo 2 veces duplica la velocidad.", title: "🌀 ¿A quién le hacés girar la grilla?", subtitle: "Si ya la tenía girando, ahora gira el doble de rápido (máximo)." },
+  flicker: { emoji: "⚫⚪", label: "Blanco y negro intermitente", desc: "Parpadea entre color y gris. Recibirlo 2 veces suma tiempo y alarga la fase en gris.", title: "⚫⚪ ¿A quién le ponés blanco y negro intermitente?", subtitle: "Si ya lo tenía puesto, se suma tiempo y la fase en gris dura el doble (máximo)." },
+  giant: { emoji: "🔲", label: "Grilla gigante", desc: "Duplica filas y columnas de la grilla que tiene abierta. Recibirlo 2 veces la vuelve a duplicar.", title: "🔲 ¿A quién le agrandás la grilla?", subtitle: "Dura hasta que la resuelva — cada tap le limpia varias piezas de una, así no es taaan difícil. Si ya la tenía agrandada, se agranda de nuevo (máximo 2 veces)." },
+  grid: { emoji: "🧱", label: "Grilla extra", desc: "Le suma una grilla más a resolver.", title: "🧱 ¿A quién le mandás una grilla extra?", subtitle: "Ojo: a cada rival se la podés mandar una sola vez en toda la partida." },
 };
 
 // Primer paso del ataque en el modo Guerra: elegir QUÉ mandás (girar/blanco y
 // negro intermitente/grilla extra). El paso siguiente (a QUIÉN) reusa
 // TargetPicker con el título/subtítulo de GUERRA_ATTACK_META.
-function GuerraAttackPicker({ onChoose, onSkip }) {
+function GuerraAttackPicker({ onChoose, onSkip, hideGridExtra }) {
+  // La grilla extra se saca del todo de la lista una vez que ya se la
+  // mandaste a TODOS los rivales que se le pueden mandar (uno por persona,
+  // en toda la partida) — no queda un botón sin nadie a quién apuntarle.
+  const visibleTypes = Object.entries(GUERRA_ATTACK_META).filter(([type]) => !(type === "grid" && hideGridExtra));
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
       <Card style={{ maxWidth: 420, marginBottom: 0 }}>
         <Title size={22}>💥 ¡Grilla resuelta! ¿Qué ataque mandás?</Title>
         <Sub style={{ marginTop: -8, marginBottom: 12 }}>
-          Si el rival ya tiene ese mismo ataque activo, se lo cancelás en vez de sumarlo.
+          Girar y blanco y negro se pueden recibir hasta 2 veces (la segunda suma, no cancela). Grilla extra: una sola vez por rival.
         </Sub>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
-          {Object.entries(GUERRA_ATTACK_META).map(([type, meta]) => (
+          {visibleTypes.map(([type, meta]) => (
             <button
               key={type}
               onClick={() => onChoose(type)}
@@ -1490,8 +1517,10 @@ function freshStateForStage(stage, easy, forcedCount) {
     eliminatedAt: null,
     bwUntil: null,
     freezeUntil: null,
-    spinning: false,
+    spinning: 0, // 0 = no gira; en Guerra puede llegar a 2 (el doble de rápido) — ver GUERRA_MAX_STACK
     flickerUntil: null, // modo Guerra: ataque "blanco y negro intermitente"
+    flickerStack: 0, // ...cuántas veces te lo mandaron en esta grilla (máx. GUERRA_MAX_STACK) — cada una alarga la fase en gris
+    gridExtraSentTo: [], // modo Guerra: a quién ya le mandé el ataque "grilla extra" (solo una vez por rival, en toda la partida)
   };
 }
 
@@ -1699,6 +1728,17 @@ function GameRoom({ roomCode, myId, onBack }) {
           // local, así que el servidor jamás se enteraba de que terminé.
           finishedAt: liveNow.finishedAt || fresh.finishedAt || null,
           spinning: liveNow.spinning,
+          // Mismo motivo que finishedAt/spinning arriba: completeCurrentGrid
+          // (modo Guerra) limpia estos tres localmente al resolver una
+          // grilla (spinning ya estaba cubierto) — sin pisarlos acá con
+          // `fresh`, un sync que corre justo después podía revivir un
+          // ataque que ya se había sacado, o perder mi propio registro de
+          // a quién ya le mandé la grilla extra.
+          flickerUntil: liveNow.flickerUntil,
+          flickerStack: liveNow.flickerStack,
+          // gridExtraSentTo solo lo modifico yo mismo (cuando ATACO a otro,
+          // no cuando me atacan a mí), así que siempre vale mi copia local.
+          gridExtraSentTo: liveNow.gridExtraSentTo || [],
         };
         await writePlayerState(roomCode, round, myId, merged);
         lastKnownServerQueueLenRef.current = merged.queue.length;
@@ -1986,13 +2026,15 @@ function GameRoom({ roomCode, myId, onBack }) {
                 🌀 girar, ⚫⚪ blanco y negro intermitente (15s), 🔲 grilla gigante o 🧱 grilla extra —
                 y a QUIÉN, las veces que quieras repetir a la misma persona.
                 <br />
-                Girar y blanco y negro son de todo o nada: si el rival ya lo tiene puesto, mandarlo de
-                nuevo se lo cancela en vez de sumarlo. La grilla gigante duplica filas y columnas de la
-                que tiene abierta (pero cada tap le limpia 4 piezas de una, no es tan difícil) y se puede
-                repetir sin problema. La grilla extra se acumula. Se pueden combinar entre sí (por
-                ejemplo, alguien puede estar girando Y en blanco y negro a la vez) — y ojo, resolver
-                CUALQUIER grilla te saca todos los ataques que tenías encima, así que arrancás la
-                siguiente limpio.
+                Girar, blanco y negro y grilla gigante se pueden recibir hasta 2 veces en la misma
+                grilla: la segunda no cancela, suma — girar el doble de rápido, blanco y negro con la
+                fase en gris más larga, grilla gigante otra vez más grande (¡hasta 16 veces más piezas
+                si te la mandan 2 veces!, aunque cada tap limpia varias de una así no es tan difícil). Se
+                pueden combinar entre sí (por ejemplo, alguien puede estar girando Y en blanco y negro a
+                la vez) — y ojo, resolver CUALQUIER grilla te saca todos los ataques que tenías encima,
+                así que arrancás la siguiente limpio. La grilla extra es distinta: no se acumula en
+                fuerza, pero a cada rival se la podés mandar una sola vez en toda la partida — después
+                ya no aparece esa opción para esa persona.
                 <br />
                 No se corta cuando alguien gana: se sigue jugando hasta que todos terminan su cola, y
                 quedan ordenados por el orden real en que van terminando.
@@ -2156,9 +2198,13 @@ function GameRoom({ roomCode, myId, onBack }) {
   const myFrozen = stage === "semifinal" && now < myFreezeUntil;
   // Modo Guerra: "blanco y negro intermitente" — a diferencia del debuff
   // fijo de Semifinal, acá la grilla PARPADEA entre color y blanco y negro
-  // (mismo patrón que bwPhase de la etapa "elim") mientras esté activo.
+  // (mismo patrón que bwPhase de la etapa "elim") mientras esté activo. Si
+  // te lo mandaron 2 veces (flickerStack), la fase en blanco y negro dura
+  // el doble; la fase a color no cambia.
   const myGuerraFlickerActive = stage === "guerra" && now < ((myState && myState.flickerUntil) || 0);
-  const myGuerraFlicker = myGuerraFlickerActive && now % (flickerColorMs + flickerBwMs) >= flickerColorMs;
+  const myGuerraFlickerStack = (myState && myState.flickerStack) || 1;
+  const myGuerraEffectiveBwMs = flickerBwMs * myGuerraFlickerStack;
+  const myGuerraFlicker = myGuerraFlickerActive && now % (flickerColorMs + myGuerraEffectiveBwMs) >= flickerColorMs;
   // Final: la última grilla (myQueueLen === 1) es la de escala de grises;
   // la del medio (ya resolví al menos una Y todavía me queda más de una
   // después de esta) parpadea sola blanco y negro/color sin que nadie
@@ -2182,7 +2228,18 @@ function GameRoom({ roomCode, myId, onBack }) {
     const type = forcedType || (attackCtx ? attackCtx.type : "grid");
     setAttackCtx(null);
     const cur = myLiveStateRef.current;
-    if (cur) setMyStateNow({ ...cur, lastAttacked: targetId });
+    if (cur) {
+      // En Guerra, la grilla extra queda registrada como "ya se la mandé a
+      // esta persona" en MI PROPIO estado (gridExtraSentTo) — es un cupo de
+      // uno por rival en toda la partida, no por grilla, así que sobrevive
+      // aunque yo pase a mi siguiente grilla. Ver GuerraAttackPicker y
+      // TargetPicker (excludeIds) para dónde se usa esto.
+      const patch = { lastAttacked: targetId };
+      if (stage === "guerra" && type === "grid") {
+        patch.gridExtraSentTo = [...(cur.gridExtraSentTo || []), targetId];
+      }
+      setMyStateNow({ ...cur, ...patch });
+    }
     // Si el objetivo es Lara, la ventaja la sigue incluso en lo que le
     // manden: el freeze le dura menos, y la grilla extra clásica le llega
     // del mismo tamaño/dificultad fácil que el resto de su cola (si no,
@@ -2196,41 +2253,54 @@ function GameRoom({ roomCode, myId, onBack }) {
         // Si ya lo tiene activo, mandarlo de nuevo lo cancela (vuelve a
         // normal YA) en vez de sumar; si no lo tiene, se activa por
         // BW_DEBUFF_MS — así nunca queda pegado para siempre esperando un
-        // segundo ataque que capaz nadie manda.
+        // segundo ataque que capaz nadie manda. (Esto es Semifinal, no
+        // Guerra: acá sigue siendo cancelar, no acumular.)
         const active = (freshTarget.bwUntil || 0) > Date.now();
         nextTargetState = { ...freshTarget, bwUntil: active ? null : Date.now() + BW_DEBUFF_MS };
       } else if (type === "flicker") {
-        // Modo Guerra: "blanco y negro intermitente" — mismo patrón que
-        // "bw" (se cancela si ya lo tiene, si no se activa por
-        // GUERRA_FLICKER_MS), pero el efecto visual parpadea en vez de
-        // quedar fijo (ver myGuerraFlicker más abajo).
-        const active = (freshTarget.flickerUntil || 0) > Date.now();
-        nextTargetState = { ...freshTarget, flickerUntil: active ? null : Date.now() + GUERRA_FLICKER_MS };
+        // Modo Guerra: "blanco y negro intermitente" — se puede recibir
+        // hasta GUERRA_MAX_STACK (2) veces en la misma grilla. Cada vez que
+        // llega, se SUMA (no cancela): se alarga el tiempo activo que le
+        // queda (mismo patrón de acumulación que el freeze de Semifinal) Y
+        // la fase en blanco y negro del parpadeo se hace más larga (la fase
+        // a color no cambia) — ver myGuerraFlicker más abajo. Al tope, un
+        // tercer intento no hace nada más.
+        const stack = freshTarget.flickerStack || 0;
+        if (stack >= GUERRA_MAX_STACK) {
+          nextTargetState = freshTarget;
+        } else {
+          const base = Math.max(freshTarget.flickerUntil || 0, Date.now());
+          nextTargetState = { ...freshTarget, flickerStack: stack + 1, flickerUntil: base + GUERRA_FLICKER_MS };
+        }
       } else if (type === "freeze") {
         const base = Math.max(freshTarget.freezeUntil || 0, Date.now());
         nextTargetState = { ...freshTarget, freezeUntil: base + (targetIsLara ? LARA_SEMI_FREEZE_MS : SEMI_FREEZE_MS) };
       } else if (type === "spin") {
-        // Toggle: si ya lo tenía girando (puede pasar en Guerra, donde el
-        // mismo tipo de ataque repetido cancela en vez de sumar), lo saca;
-        // si no, lo activa. En la Final nunca llega acá ya activo (el
-        // ataque de girar solo se manda una vez por jugador), así que ahí
-        // este cambio no altera nada.
-        nextTargetState = { ...freshTarget, spinning: !freshTarget.spinning };
+        // Modo Guerra: se puede recibir hasta GUERRA_MAX_STACK (2) veces —
+        // la segunda no cancela, suma velocidad (gira el doble de rápido,
+        // ver GridBoard). En la Final nunca llega acá con spinning ya en 1
+        // (el ataque de girar se manda una sola vez por jugador), así que
+        // ahí este cambio no altera nada — simplemente pasa de 0 a 1.
+        const stack = freshTarget.spinning || 0;
+        nextTargetState = { ...freshTarget, spinning: Math.min(GUERRA_MAX_STACK, stack + 1) };
       } else if (type === "giant") {
         // Modo Guerra: "grilla gigante" — reemplaza la grilla que el rival
         // tiene abierta AHORA (se pierde el progreso de esa, arranca de
-        // cero) por una del doble de filas y columnas (GUERRA_GIANT_SIZE_MULT,
-        // ~4 veces más piezas). Se puede mandar de nuevo aunque ya la tenga
-        // puesta — no pasa nada raro, simplemente se genera otra gigante
-        // fresca (por eso no hace falta el patrón toggle de bw/spin acá).
-        // Si no le queda ninguna grilla (ya terminó todas), no hay nada que
-        // agrandar: no debería pasar porque TargetPicker ya filtra a quien
-        // terminó, pero por las dudas no rompe si el estado llegó a cero.
+        // cero) por una más grande. Se puede recibir hasta GUERRA_MAX_STACK
+        // (2) veces en la misma grilla: cada vez multiplica filas y
+        // columnas de nuevo por GUERRA_GIANT_SIZE_MULT (1 vez: 4 veces más
+        // piezas; 2 veces: 16 veces más — el tap también limpia el doble de
+        // piezas de una, ver tapCell). Al tope, un tercer intento no hace
+        // nada más. Si no le queda ninguna grilla (ya terminó todas), no
+        // hay nada que agrandar: no debería pasar porque TargetPicker ya
+        // filtra a quien terminó, pero por las dudas no rompe si pasa.
         const q = freshTarget.queue || [];
-        if (q.length > 0) {
-          const baseSize = (targetIsLara ? LARA_GRID_SIZE : GRID_SIZE) * GUERRA_GIANT_SIZE_MULT;
+        const currentStack = q.length > 0 ? (q[0].giantStack || 0) : GUERRA_MAX_STACK;
+        if (q.length > 0 && currentStack < GUERRA_MAX_STACK) {
+          const newStack = currentStack + 1;
+          const baseSize = (targetIsLara ? LARA_GRID_SIZE : GRID_SIZE) * Math.pow(GUERRA_GIANT_SIZE_MULT, newStack);
           const baseColors = targetIsLara ? PIECE_COLOR_KEYS.slice(0, LARA_COLOR_COUNT) : PIECE_COLOR_KEYS;
-          const giantGrid = { ...generateGrid(baseSize, baseColors), giant: true };
+          const giantGrid = { ...generateGrid(baseSize, baseColors), giant: true, giantStack: newStack };
           nextTargetState = { ...freshTarget, queue: [giantGrid, ...q.slice(1)] };
         } else {
           nextTargetState = freshTarget;
@@ -2263,10 +2333,10 @@ function GameRoom({ roomCode, myId, onBack }) {
 
     if (stage === "final") {
       if (newQueue.length === 0) {
-        setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: false, finishedAt: Date.now() });
+        setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: 0, finishedAt: Date.now() });
         return;
       }
-      setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: false });
+      setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: 0 });
       if (solvedCount === 2) {
         const opponents = players.filter((p) => {
           if (p.id === myId) return false;
@@ -2294,7 +2364,7 @@ function GameRoom({ roomCode, myId, onBack }) {
       // intermitente) — arrancás la siguiente grilla limpio. La grilla
       // gigante no necesita limpieza acá: vive en el objeto de la grilla
       // vieja (newQueue ya no la incluye), no en el estado del jugador.
-      setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: false, flickerUntil: null, finishedAt: isLastGrid ? Date.now() : cur.finishedAt || null });
+      setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: 0, flickerUntil: null, flickerStack: 0, finishedAt: isLastGrid ? Date.now() : cur.finishedAt || null });
       const candidates = players.filter((p) => {
         if (p.id === myId) return false;
         const st = playerStates[p.id] || {};
@@ -2304,7 +2374,10 @@ function GameRoom({ roomCode, myId, onBack }) {
         return !st.finishedAt;
       });
       if (candidates.length === 0) return; // nadie a quien atacar todavía
-      setAttackCtx({ type: "choose", singleTargetId: candidates.length === 1 ? candidates[0].id : null });
+      // A quién le mando cada tipo se resuelve en el picker (el atajo de
+      // "un solo rival posible" depende del tipo elegido, porque la grilla
+      // extra excluye a quien ya la recibió — ver el onChoose más abajo).
+      setAttackCtx({ type: "choose" });
       return;
     }
 
@@ -2352,13 +2425,15 @@ function GameRoom({ roomCode, myId, onBack }) {
       registerWrong(stage === "final" && cur.queue.length === 1);
       return;
     }
-    // Ataque "grilla gigante" (modo Guerra): la grilla tiene ~4 veces más
-    // piezas de lo normal, así que cada tap limpia hasta GUERRA_GIANT_CLEAR_COUNT
-    // piezas del color activo de una (la tocada + las que hagan falta hasta
-    // ese número), no solo la tocada — para que no sea ~4 veces más lenta
-    // de resolver. En cualquier otra grilla (grid.giant es undefined) esto
-    // no cambia nada: se limpia solo la pieza tocada, como siempre.
-    const clearCount = grid.giant ? GUERRA_GIANT_CLEAR_COUNT : 1;
+    // Ataque "grilla gigante" (modo Guerra): la grilla tiene varias veces
+    // más piezas de lo normal (giantStack veces GUERRA_GIANT_SIZE_MULT al
+    // cuadrado), así que cada tap limpia GUERRA_GIANT_CLEAR_COUNT * giantStack
+    // piezas del color activo de una (la tocada + las que hagan falta), no
+    // solo la tocada — con 2 aplicaciones limpia el doble, para que no sea
+    // proporcionalmente más lenta de resolver. En cualquier otra grilla
+    // (grid.giant es undefined) esto no cambia nada: se limpia solo la
+    // pieza tocada, como siempre.
+    const clearCount = grid.giant ? GUERRA_GIANT_CLEAR_COUNT * (grid.giantStack || 1) : 1;
     const extraIds = grid.pieces
       .filter((p) => p.color === activeColor && !p.cleared && p.id !== pieceId)
       .slice(0, clearCount - 1)
@@ -2476,7 +2551,7 @@ function GameRoom({ roomCode, myId, onBack }) {
             shake={wrongFlash}
             bw={bwPhase || myBwDebuff || finalG2Cycle || myGuerraFlicker}
             locked={locked || myFrozen || inCountdown}
-            spinning={!!(myState && myState.spinning)}
+            spinning={(myState && myState.spinning) || 0}
           />
           <ColorIndicator grid={currentGrid} bw={bwPhase || myBwDebuff || finalG2Cycle || myGuerraFlicker} />
           {locked && !myFrozen && <PenaltyNotice />}
@@ -2492,17 +2567,17 @@ function GameRoom({ roomCode, myId, onBack }) {
           )}
           {myGuerraFlickerActive && (
             <div style={{ textAlign: "center", color: "#C9B8F0", fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", fontSize: 14, marginTop: 12 }}>
-              ⚫⚪ Blanco y negro intermitente — {Math.max(0, Math.ceil(((myState.flickerUntil || 0) - now) / 1000))}s
+              ⚫⚪ Blanco y negro intermitente{myGuerraFlickerStack >= 2 ? " (x2, fase gris más larga)" : ""} — {Math.max(0, Math.ceil(((myState.flickerUntil || 0) - now) / 1000))}s
             </div>
           )}
-          {myState && myState.spinning && (
+          {myState && myState.spinning > 0 && (
             <div style={{ textAlign: "center", color: "#B983FF", fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", fontSize: 14, marginTop: 12 }}>
-              🌀 ¡Te mandaron a girar! Terminá la grilla para que pare.
+              🌀 ¡Te mandaron a girar{myState.spinning >= 2 ? " al doble de velocidad" : ""}! Terminá la grilla para que pare.
             </div>
           )}
           {currentGrid && currentGrid.giant && (
             <div style={{ textAlign: "center", color: "#4FC3F7", fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", fontSize: 14, marginTop: 12 }}>
-              🔲 ¡Te agrandaron la grilla! Cada tap limpia 4 piezas de una.
+              🔲 ¡Te agrandaron la grilla{currentGrid.giantStack >= 2 ? " al máximo" : ""}! Cada tap limpia {GUERRA_GIANT_CLEAR_COUNT * (currentGrid.giantStack || 1)} piezas de una.
             </div>
           )}
           {finalG3 && (
@@ -2521,14 +2596,31 @@ function GameRoom({ roomCode, myId, onBack }) {
 
       {attackCtx && attackCtx.type === "choose" && (
         <GuerraAttackPicker
+          hideGridExtra={(() => {
+            // La grilla extra ya no aparece como opción cuando no queda
+            // NADIE a quien mandársela — es decir, cuando cada rival vivo y
+            // sin terminar ya está en gridExtraSentTo.
+            const already = new Set((myState && myState.gridExtraSentTo) || []);
+            const stillEligible = players.some((p) => p.id !== myId && !(playerStates[p.id] || {}).finishedAt && !already.has(p.id));
+            return !stillEligible;
+          })()}
           onChoose={(chosenType) => {
-            // Si solo hay un rival posible, se manda directo (sin abrir el
-            // selector de a quién) — mismo atajo que ya usa la Final
-            // cuando queda un único rival para el ataque de girar.
-            if (attackCtx.singleTargetId) {
-              performAttack(attackCtx.singleTargetId, chosenType);
+            const meta = GUERRA_ATTACK_META[chosenType];
+            // A quién le puedo mandar ESTE tipo en particular: para grilla
+            // extra, se descartan los rivales que ya la recibieron de mí
+            // (una vez por persona en toda la partida); para el resto, da
+            // igual — se puede repetir siempre.
+            let targets = players.filter((p) => p.id !== myId && !(playerStates[p.id] || {}).finishedAt);
+            if (chosenType === "grid") {
+              const already = new Set((myState && myState.gridExtraSentTo) || []);
+              targets = targets.filter((p) => !already.has(p.id));
+            }
+            // Si solo queda un rival posible para este tipo, se manda
+            // directo (sin abrir el selector de a quién) — mismo atajo que
+            // ya usa la Final cuando queda un único rival para girar.
+            if (targets.length === 1) {
+              performAttack(targets[0].id, chosenType);
             } else {
-              const meta = GUERRA_ATTACK_META[chosenType];
               setAttackCtx({ type: chosenType, title: meta.title, subtitle: meta.subtitle });
             }
           }}
@@ -2543,6 +2635,7 @@ function GameRoom({ roomCode, myId, onBack }) {
           myLastAttacked={myState ? myState.lastAttacked : null}
           eliminationOrder={room.eliminationOrder}
           allowRepeat={stage === "guerra"}
+          excludeIds={stage === "guerra" && attackCtx.type === "grid" ? (myState && myState.gridExtraSentTo) || [] : null}
           title={attackCtx.title}
           subtitle={attackCtx.subtitle}
           onAttack={performAttack}
