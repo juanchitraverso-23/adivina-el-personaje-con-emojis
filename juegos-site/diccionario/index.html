@@ -1218,6 +1218,11 @@ function GameRoom({ roomCode, myId, onBack }) {
   const currentWord = WORD_BANK.find((w) => w.id === room.currentWordId);
 
   const setTotalRounds = async (n) => {
+    // Si ya está en esa cantidad, no hay nada que escribir — sin este
+    // chequeo, tocar el mismo botón dos veces gastaba una escritura de
+    // Workers KV al pedo, y la cuota gratis de escrituras es la más chica
+    // de las cuatro (1.000/día para TODO el sitio).
+    if (room.totalRounds === n) return;
     const fresh = await readRoom(roomCode);
     if (!fresh) return;
     fresh.totalRounds = n;

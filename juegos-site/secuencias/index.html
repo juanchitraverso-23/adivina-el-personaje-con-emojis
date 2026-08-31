@@ -1482,7 +1482,12 @@ function GameRoom({ roomCode, myId, onBack }) {
     setPlayerStates(newStates);
   };
 
+  // Los tres selectores de abajo evitan escribir si el valor no cambió: sin
+  // este chequeo, tocar el mismo botón dos veces gastaba una escritura de
+  // Workers KV al pedo, y la cuota gratis de escrituras es la más chica de
+  // las cuatro (1.000/día para TODO el sitio).
   const setTaskType = async (taskType) => {
+    if (room.taskType === taskType) return;
     const fresh = await readRoom(roomCode);
     if (!fresh) return;
     fresh.taskType = taskType;
@@ -1491,6 +1496,7 @@ function GameRoom({ roomCode, myId, onBack }) {
   };
 
   const setGridSize = async (gridSize) => {
+    if (room.gridSize === gridSize) return;
     const fresh = await readRoom(roomCode);
     if (!fresh) return;
     fresh.gridSize = gridSize;
@@ -1499,6 +1505,7 @@ function GameRoom({ roomCode, myId, onBack }) {
   };
 
   const setRoomPenalty = async (value) => {
+    if (room.penalty === value) return;
     const fresh = await readRoom(roomCode);
     if (!fresh) return;
     fresh.penalty = value;
