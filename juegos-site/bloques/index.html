@@ -160,6 +160,7 @@ const GRID_SIZE = 10;
 const PRACTICE_BEST_KEY = "bloques:practica:mejorTiempo";
 const DEFAULT_GRID_COUNT = 3; // cantidad de grillas por defecto en Práctica (elegible ahí, ver PracticeGame)
 const GRID_COUNT_OPTIONS = [3, 5, 7];
+const DEFAULT_GUERRA_GRID_COUNT = 5; // modo Guerra: mismo selector 3/5/7 que Práctica, 5 por defecto
 
 // ---- Modo Guerra online: torneo por etapas (ver comentario grande antes
 // de GameRoom para el detalle completo de reglas por etapa). ----
@@ -171,6 +172,8 @@ const FINAL_WRONG_FREEZE_MS = 3000; // Final, grillas 1 y 2: tocar mal frena los
 const FINAL_G3_WRONG_PAUSE_MS = 2000; // Final, grilla 3 (escala de grises): tocar mal pausa el cronómetro 2s (no frena clicks)
 const SEMI_FREEZE_MS = 5000; // etapa de 3: cada ataque de freeze suma 5s (se acumulan)
 const SPIN_PERIOD_MS = 16000; // Final: la grilla atacada gira, una vuelta cada 16s
+const BW_DEBUFF_MS = 15000; // etapa de 3: "blanco y negro" dura como máximo esto — antes quedaba pegado para siempre si nadie mandaba un segundo ataque igual para cancelarlo
+const GUERRA_FLICKER_MS = 15000; // modo Guerra: ataque "blanco y negro intermitente", mismo tope de 15s que el de Semifinal (y por la misma razón: que nunca quede pegado esperando un segundo ataque)
 // Cantidad de grillas por etapa: fija (no elegible), así quedó después de
 // jugarlo en familia — de entrada son 3, la etapa de 3 jugadores son 4, y
 // la final son 3.
@@ -822,7 +825,7 @@ function PlayerBadgeRow({ players, playerStates, myId, eliminationOrder }) {
 // color que su ficha en PlayerBadgeRow), con el nombre grande adentro —
 // "cuadrados de colores con el nombre de cada uno grande, en el medio de
 // la pantalla", como pidieron después de jugarlo en familia.
-function TargetPicker({ players, playerStates, myId, myLastAttacked, eliminationOrder, title, subtitle, onAttack, onSkip }) {
+function TargetPicker({ players, playerStates, myId, myLastAttacked, eliminationOrder, title, subtitle, onAttack, onSkip, allowRepeat }) {
   // Igual que en PlayerBadgeRow: quién sigue vivo se decide con
   // room.eliminationOrder, no con playerStates — alguien eliminado en una
   // etapa anterior no tiene estado en la ronda actual, así que "sin
@@ -833,7 +836,10 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
   const candidates = aliveList.filter((p) => {
     if (p.id === myId) return false;
     if ((playerStates[p.id] || {}).finishedAt) return false; // ya terminó esta etapa, no se lo puede atacar más
-    if (aliveCount > 2 && p.id === myLastAttacked) return false;
+    // Modo Guerra: se puede repetir el mismo objetivo siempre (así lo pidió
+    // el usuario), así que ahí no se aplica el "no le pegues dos veces
+    // seguidas al mismo" que sí rige en el resto de las etapas.
+    if (!allowRepeat && aliveCount > 2 && p.id === myLastAttacked) return false;
     return true;
   });
   return (
@@ -890,6 +896,60 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
         )}
         <BigButton onClick={onSkip} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0", marginBottom: 0 }}>
           {candidates.length === 0 ? "Seguir jugando" : "Saltear (no atacar)"}
+        </BigButton>
+      </Card>
+    </div>
+  );
+}
+
+// Los 3 tipos de ataque que se pueden elegir en el modo Guerra. title/subtitle
+// son los que ve el ATACANTE en el paso siguiente (elegir a quién). El texto
+// de "se cancela" aplica a spin y flicker (ambos son toggle: si el rival ya
+// lo tiene, mandarlo de nuevo se lo saca); grid se acumula sin límite, como
+// en el resto de las etapas.
+const GUERRA_ATTACK_META = {
+  spin: { emoji: "🌀", label: "Girar", desc: "Gira hasta que resuelva esa grilla.", title: "🌀 ¿A quién le hacés girar la grilla?", subtitle: "Si ya la tenía girando, se cancela." },
+  flicker: { emoji: "⚫⚪", label: "Blanco y negro intermitente", desc: "Parpadea 15s entre color y gris.", title: "⚫⚪ ¿A quién le ponés blanco y negro intermitente?", subtitle: "Dura 15s — si ya lo tenía puesto, se cancela antes." },
+  grid: { emoji: "🧱", label: "Grilla extra", desc: "Le suma una grilla más a resolver.", title: "🧱 ¿A quién le mandás una grilla extra?", subtitle: "Se acumula: no se cancela si le mandan varias." },
+};
+
+// Primer paso del ataque en el modo Guerra: elegir QUÉ mandás (girar/blanco y
+// negro intermitente/grilla extra). El paso siguiente (a QUIÉN) reusa
+// TargetPicker con el título/subtítulo de GUERRA_ATTACK_META.
+function GuerraAttackPicker({ onChoose, onSkip }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
+      <Card style={{ maxWidth: 420, marginBottom: 0 }}>
+        <Title size={22}>💥 ¡Grilla resuelta! ¿Qué ataque mandás?</Title>
+        <Sub style={{ marginTop: -8, marginBottom: 12 }}>
+          Si el rival ya tiene ese mismo ataque activo, se lo cancelás en vez de sumarlo.
+        </Sub>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+          {Object.entries(GUERRA_ATTACK_META).map(([type, meta]) => (
+            <button
+              key={type}
+              onClick={() => onChoose(type)}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                textAlign: "left",
+                background: "rgba(255,255,255,0.08)",
+                border: "1.5px solid rgba(255,255,255,0.15)",
+                borderRadius: 14,
+                padding: "10px 14px",
+                color: "#F3EEFF",
+                fontFamily: "'Baloo 2', sans-serif",
+                cursor: "pointer",
+              }}
+            >
+              <span style={{ fontWeight: 800, fontSize: 16 }}>{meta.emoji} {meta.label}</span>
+              <span style={{ fontSize: 12.5, color: "#C9B8F0", fontWeight: 600 }}>{meta.desc}</span>
+            </button>
+          ))}
+        </div>
+        <BigButton onClick={onSkip} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0", marginBottom: 0 }}>
+          Saltear (no atacar)
         </BigButton>
       </Card>
     </div>
@@ -1364,7 +1424,8 @@ function JoinScreen({ onJoined, onBack }) {
 //    vez, elimina uno por carrera) hasta llegar a 3 jugadores. Si la sala
 //    arrancó con exactamente 3, esta etapa se saltea.
 //  - "semifinal": 3 jugadores, 4 grillas. Al terminar la 1ra se habilita
-//    "blanco y negro" (si el rival ya lo tiene, se cancelan); al terminar
+//    "blanco y negro" (dura 15s como máximo; si el rival ya lo tiene, se
+//    cancela antes); al terminar
 //    la 2da, la grilla extra clásica (se acumula); al terminar la 3ra,
 //    "freeze" de 5s (se acumula si te mandan varios). El que queda sin
 //    terminar la carrera, queda afuera; los otros 2 pasan a la Final. Si
@@ -1402,9 +1463,11 @@ function initialStageFor(playerCount) {
 // Arma el estado inicial de cada jugador para una etapa nueva (grillas
 // frescas, contadores de ataque en cero). `easy` es la ventaja de Lara
 // (ver isLaraName): una grilla menos, y cada grilla más chica y con
-// menos colores.
-function freshStateForStage(stage, easy) {
-  const baseCount = STAGE_GRID_COUNT[stage] || 3;
+// menos colores. `forcedCount`, si se pasa, reemplaza STAGE_GRID_COUNT
+// (lo usa el modo Guerra, donde la cantidad de grillas la elige el
+// anfitrión en el lobby en vez de estar fija por etapa).
+function freshStateForStage(stage, easy, forcedCount) {
+  const baseCount = forcedCount || STAGE_GRID_COUNT[stage] || 3;
   const count = easy ? Math.max(1, baseCount - 1) : baseCount;
   const size = easy ? LARA_GRID_SIZE : GRID_SIZE;
   const colorKeys = easy ? PIECE_COLOR_KEYS.slice(0, LARA_COLOR_COUNT) : PIECE_COLOR_KEYS;
@@ -1421,9 +1484,10 @@ function freshStateForStage(stage, easy) {
     finishedAt: null,
     lastAttacked: null,
     eliminatedAt: null,
-    bwDebuffCount: 0,
+    bwUntil: null,
     freezeUntil: null,
     spinning: false,
+    flickerUntil: null, // modo Guerra: ataque "blanco y negro intermitente"
   };
 }
 
@@ -1494,16 +1558,17 @@ async function checkHeatCompletion(roomCode, round, stage) {
   }
 }
 
-// Se llama desde el tick de sondeo de cualquier cliente, solo en la
-// etapa "final". A diferencia de "elim"/"semifinal", acá nadie queda
-// eliminado a mitad de carrera: se sigue jugando hasta que TODOS
-// terminan sus 3 grillas, y quedan ordenados por el momento real en que
-// cada uno terminó (freshRoom.finishOrder, primero = ganador). Misma
-// guarda de idempotencia que checkHeatCompletion.
-async function checkFinalCompletion(roomCode, round) {
+// Se llama desde el tick de sondeo de cualquier cliente, en las etapas
+// "final" y "guerra" (mismo comportamiento en las dos: a diferencia de
+// "elim"/"semifinal", acá nadie queda eliminado a mitad de carrera — se
+// sigue jugando hasta que TODOS terminan su cola de grillas, y quedan
+// ordenados por el momento real en que cada uno terminó
+// (freshRoom.finishOrder, primero = ganador). Misma guarda de
+// idempotencia que checkHeatCompletion.
+async function checkGroupRaceCompletion(roomCode, round, stage) {
   const freshRoom = await readRoom(roomCode);
   if (!freshRoom || freshRoom.phase !== "playing") return;
-  if (freshRoom.round !== round || freshRoom.stage !== "final") return; // ya lo procesó otro cliente
+  if (freshRoom.round !== round || freshRoom.stage !== stage) return; // ya lo procesó otro cliente
   const states = await readAllPlayerStates(roomCode, round, (freshRoom.players || []).map((p) => p.id));
   // Mismo motivo que en checkHeatCompletion: quién sigue en carrera sale
   // de freshRoom.players (lectura fuerte), no de `states` (list(), más
@@ -1700,8 +1765,8 @@ function GameRoom({ roomCode, myId, onBack }) {
         );
 
         if (r.phase === "playing" && Date.now() >= (r.countdownEndsAt || 0)) {
-          if (r.stage === "final") {
-            await checkFinalCompletion(roomCode, round);
+          if (r.stage === "final" || r.stage === "guerra") {
+            await checkGroupRaceCompletion(roomCode, round, r.stage);
           } else {
             await checkHeatCompletion(roomCode, round, r.stage);
           }
@@ -1775,10 +1840,11 @@ function GameRoom({ roomCode, myId, onBack }) {
     const fresh = await readRoom(roomCode);
     if (!fresh || fresh.players.length < 2) return;
     const round = fresh.round || 1;
-    const initialStage = fresh.mode === "final" ? "final" : initialStageFor(fresh.players.length);
+    const initialStage = fresh.mode === "final" ? "final" : fresh.mode === "guerra" ? "guerra" : initialStageFor(fresh.players.length);
+    const guerraCount = fresh.mode === "guerra" ? fresh.guerraGridCount || DEFAULT_GUERRA_GRID_COUNT : undefined;
     const newStates = {};
     fresh.players.forEach((p) => {
-      newStates[p.id] = freshStateForStage(initialStage, isLaraName(p.name));
+      newStates[p.id] = freshStateForStage(initialStage, isLaraName(p.name), guerraCount);
     });
     await Promise.all(fresh.players.map((p) => writePlayerState(roomCode, round, p.id, newStates[p.id])));
     fresh.phase = "playing";
@@ -1798,6 +1864,15 @@ function GameRoom({ roomCode, myId, onBack }) {
     const fresh = await readRoom(roomCode);
     if (!fresh) return;
     fresh.mode = value;
+    if (value === "guerra" && !fresh.guerraGridCount) fresh.guerraGridCount = DEFAULT_GUERRA_GRID_COUNT;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  const setGuerraGridCount = async (n) => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.guerraGridCount = n;
     await writeRoom(roomCode, fresh);
     setRoom(fresh);
   };
@@ -1837,20 +1912,39 @@ function GameRoom({ roomCode, myId, onBack }) {
         <Card style={{ width: "100%", maxWidth: 420 }}>
           <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Modo de juego</div>
           {isHost ? (
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setRoomMode("torneo")} style={{ ...pillStyle(roomMode === "torneo"), flex: 1 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={() => setRoomMode("torneo")} style={{ ...pillStyle(roomMode === "torneo"), flex: 1, minWidth: 110 }}>
                 🏆 Torneo por etapas
               </button>
-              <button onClick={() => setRoomMode("final")} style={{ ...pillStyle(roomMode === "final"), flex: 1 }}>
+              <button onClick={() => setRoomMode("final")} style={{ ...pillStyle(roomMode === "final"), flex: 1, minWidth: 110 }}>
                 🏁 Final directa
+              </button>
+              <button onClick={() => setRoomMode("guerra")} style={{ ...pillStyle(roomMode === "guerra"), flex: 1, minWidth: 110 }}>
+                💥 Guerra
               </button>
             </div>
           ) : (
             <div style={{ color: "#F3EEFF", fontWeight: 700 }}>
-              {roomMode === "final" ? "🏁 Final directa" : "🏆 Torneo por etapas"}
+              {roomMode === "final" ? "🏁 Final directa" : roomMode === "guerra" ? "💥 Guerra" : "🏆 Torneo por etapas"}
             </div>
           )}
         </Card>
+        {roomMode === "guerra" && (
+          <Card style={{ width: "100%", maxWidth: 420 }}>
+            <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Cantidad de grillas</div>
+            {isHost ? (
+              <div style={{ display: "flex", gap: 8 }}>
+                {GRID_COUNT_OPTIONS.map((n) => (
+                  <button key={n} onClick={() => setGuerraGridCount(n)} style={{ ...pillStyle((room.guerraGridCount || DEFAULT_GUERRA_GRID_COUNT) === n), flex: 1 }}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{ color: "#F3EEFF", fontWeight: 700 }}>{room.guerraGridCount || DEFAULT_GUERRA_GRID_COUNT}</div>
+            )}
+          </Card>
+        )}
         <Card style={{ width: "100%", maxWidth: 420 }}>
           {roomMode === "final" ? (
             <>
@@ -1869,6 +1963,26 @@ function GameRoom({ roomCode, myId, onBack }) {
                 grillas, y quedan ordenados por el orden real en que van terminando.
               </div>
             </>
+          ) : roomMode === "guerra" ? (
+            <>
+              <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Cómo se juega — Guerra</div>
+              <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "#F3EEFF" }}>
+                De 2 a 16 jugadores, cada uno con su propia cola de {room.guerraGridCount || DEFAULT_GUERRA_GRID_COUNT} grillas.
+                <br />
+                ⏱️ Arranca con una cuenta regresiva de 5s — todos empiezan a la vez, sin ventajas.
+                <br />
+                💥 Cada vez que resolvés una grilla (incluida la última), elegís QUÉ ataque mandás —
+                🌀 girar, ⚫⚪ blanco y negro intermitente (15s) o 🧱 grilla extra — y a QUIÉN, las veces
+                que quieras repetir a la misma persona.
+                <br />
+                Girar y blanco y negro son de todo o nada: si el rival ya lo tiene puesto, mandarlo de
+                nuevo se lo cancela en vez de sumarlo. La grilla extra sí se acumula. Los tres se pueden
+                combinar entre sí (por ejemplo, alguien puede estar girando Y en blanco y negro a la vez).
+                <br />
+                No se corta cuando alguien gana: se sigue jugando hasta que todos terminan su cola, y
+                quedan ordenados por el orden real en que van terminando.
+              </div>
+            </>
           ) : (
             <>
               <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Cómo se juega — torneo por etapas</div>
@@ -1880,7 +1994,7 @@ function GameRoom({ roomCode, myId, onBack }) {
                 afuera; se repite hasta llegar a 3 jugadores.
                 <br />
                 🥈 <b style={{ color: "#FFD23F" }}>Semifinal (3 jugadores):</b> 4 grillas. Al terminar la 1ra se
-                habilita "blanco y negro" (2 seguidos al mismo rival se cancelan); al terminar la 2da, la
+                habilita "blanco y negro" (dura 15s, 2 seguidos al mismo rival se cancela antes); al terminar la 2da, la
                 grilla extra clásica (se acumula); al terminar la 3ra, "freeze" de 5s (se acumula). El que
                 queda sin terminar la carrera queda afuera; los otros 2 pasan a la Final.
                 <br />
@@ -2020,11 +2134,16 @@ function GameRoom({ roomCode, myId, onBack }) {
     stage === "elim" &&
     myQueueLen === 1 &&
     now % (flickerColorMs + flickerBwMs) >= flickerColorMs;
-  // Etapa de 3: debuff "blanco y negro" (cuenta impar = activo) y freeze
-  // acumulable por ataques.
-  const myBwDebuff = stage === "semifinal" && ((myState && myState.bwDebuffCount) || 0) % 2 === 1;
+  // Etapa de 3: debuff "blanco y negro" (dura como máximo BW_DEBUFF_MS, se
+  // cancela antes si te mandan otro igual) y freeze acumulable por ataques.
+  const myBwDebuff = stage === "semifinal" && now < ((myState && myState.bwUntil) || 0);
   const myFreezeUntil = (myState && myState.freezeUntil) || 0;
   const myFrozen = stage === "semifinal" && now < myFreezeUntil;
+  // Modo Guerra: "blanco y negro intermitente" — a diferencia del debuff
+  // fijo de Semifinal, acá la grilla PARPADEA entre color y blanco y negro
+  // (mismo patrón que bwPhase de la etapa "elim") mientras esté activo.
+  const myGuerraFlickerActive = stage === "guerra" && now < ((myState && myState.flickerUntil) || 0);
+  const myGuerraFlicker = myGuerraFlickerActive && now % (flickerColorMs + flickerBwMs) >= flickerColorMs;
   // Final: la última grilla (myQueueLen === 1) es la de escala de grises;
   // la del medio (ya resolví al menos una Y todavía me queda más de una
   // después de esta) parpadea sola blanco y negro/color sin que nadie
@@ -2055,15 +2174,33 @@ function GameRoom({ roomCode, myId, onBack }) {
     // una sola grilla de 10x10 y 6 colores se le colaría de golpe).
     const targetIsLara = isLaraName((players.find((p) => p.id === targetId) || {}).name);
     (async () => {
-      const freshTarget = (await readPlayerState(roomCode, round, targetId)) || freshStateForStage(stage, targetIsLara);
+      const fallbackCount = stage === "guerra" ? room.guerraGridCount : undefined;
+      const freshTarget = (await readPlayerState(roomCode, round, targetId)) || freshStateForStage(stage, targetIsLara, fallbackCount);
       let nextTargetState;
       if (type === "bw") {
-        nextTargetState = { ...freshTarget, bwDebuffCount: (freshTarget.bwDebuffCount || 0) + 1 };
+        // Si ya lo tiene activo, mandarlo de nuevo lo cancela (vuelve a
+        // normal YA) en vez de sumar; si no lo tiene, se activa por
+        // BW_DEBUFF_MS — así nunca queda pegado para siempre esperando un
+        // segundo ataque que capaz nadie manda.
+        const active = (freshTarget.bwUntil || 0) > Date.now();
+        nextTargetState = { ...freshTarget, bwUntil: active ? null : Date.now() + BW_DEBUFF_MS };
+      } else if (type === "flicker") {
+        // Modo Guerra: "blanco y negro intermitente" — mismo patrón que
+        // "bw" (se cancela si ya lo tiene, si no se activa por
+        // GUERRA_FLICKER_MS), pero el efecto visual parpadea en vez de
+        // quedar fijo (ver myGuerraFlicker más abajo).
+        const active = (freshTarget.flickerUntil || 0) > Date.now();
+        nextTargetState = { ...freshTarget, flickerUntil: active ? null : Date.now() + GUERRA_FLICKER_MS };
       } else if (type === "freeze") {
         const base = Math.max(freshTarget.freezeUntil || 0, Date.now());
         nextTargetState = { ...freshTarget, freezeUntil: base + (targetIsLara ? LARA_SEMI_FREEZE_MS : SEMI_FREEZE_MS) };
       } else if (type === "spin") {
-        nextTargetState = { ...freshTarget, spinning: true };
+        // Toggle: si ya lo tenía girando (puede pasar en Guerra, donde el
+        // mismo tipo de ataque repetido cancela en vez de sumar), lo saca;
+        // si no, lo activa. En la Final nunca llega acá ya activo (el
+        // ataque de girar solo se manda una vez por jugador), así que ahí
+        // este cambio no altera nada.
+        nextTargetState = { ...freshTarget, spinning: !freshTarget.spinning };
       } else {
         const extraGrid = targetIsLara
           ? newQueuedGrid(PIECE_COLOR_KEYS.slice(0, LARA_COLOR_COUNT), LARA_GRID_SIZE)
@@ -2080,7 +2217,7 @@ function GameRoom({ roomCode, myId, onBack }) {
   // primera en la cola: la saca de la cola YA (instantáneo).
   //  - Final: si no queda nada en la cola, terminé mis 3 grillas —
   //    finishedAt YA (no gano al instante: se sigue jugando hasta que
-  //    todos terminan, ver checkFinalCompletion). Si recién terminé la
+  //    todos terminan, ver checkGroupRaceCompletion). Si recién terminé la
   //    grilla 2, ataco "girando" a un rival: si solo queda uno posible,
   //    directo; si hay más de uno, abro el selector para elegir.
   //  - elim/semifinal: si no queda nada, terminé esta carrera y espero a
@@ -2111,6 +2248,27 @@ function GameRoom({ roomCode, myId, onBack }) {
       return;
     }
 
+    if (stage === "guerra") {
+      const isLastGrid = newQueue.length === 0;
+      // Igual que en la Final, terminar la cola entera pone finishedAt YA
+      // (así el ranking refleja el momento real en que terminaste de
+      // resolver, no cuánto tardaste después eligiendo a quién atacar).
+      // Por decisión del usuario, incluso en tu última grilla mandás un
+      // último ataque de despedida antes de quedar afuera de la acción.
+      setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: false, finishedAt: isLastGrid ? Date.now() : cur.finishedAt || null });
+      const candidates = players.filter((p) => {
+        if (p.id === myId) return false;
+        const st = playerStates[p.id] || {};
+        // En Guerra nadie queda eliminado a mitad de partida: el único
+        // motivo para no poder atacar a alguien es que ya terminó toda su
+        // cola (mismo filtro que ya aplica TargetPicker para candidatos).
+        return !st.finishedAt;
+      });
+      if (candidates.length === 0) return; // nadie a quien atacar todavía
+      setAttackCtx({ type: "choose", singleTargetId: candidates.length === 1 ? candidates[0].id : null });
+      return;
+    }
+
     if (newQueue.length === 0) {
       setMyStateNow({ ...cur, queue: newQueue, solvedCount, finishedAt: Date.now() });
       return;
@@ -2122,7 +2280,7 @@ function GameRoom({ roomCode, myId, onBack }) {
       setAttackCtx({
         type: "bw",
         title: "⚫⚪ ¡Grilla resuelta! ¿A quién le ponés blanco y negro?",
-        subtitle: "Si ya lo tiene puesto, se cancela y vuelve a la normalidad.",
+        subtitle: "Dura 15s — si ya lo tiene puesto, se cancela antes y vuelve a la normalidad.",
       });
     } else if (stage === "semifinal" && solvedCount === 2) {
       setAttackCtx({ type: "grid", title: "🧱 ¡Grilla resuelta! ¿A quién le mandás una extra?" });
@@ -2171,9 +2329,12 @@ function GameRoom({ roomCode, myId, onBack }) {
   const currentGrid = myState && myState.queue && myState.queue[0];
 
   const stageLabel =
+    stage === "guerra" ? "💥 Guerra" :
     stage === "final" ? "🏁 Final" : stage === "semifinal" ? "🥈 Semifinal (quedan 3)" : "⚔️ Eliminación";
   const stageDesc =
-    stage === "final"
+    stage === "guerra"
+      ? `${room.guerraGridCount || 5} grillas. Cada una que resolvés, mandás un ataque. Se sigue jugando hasta que todos terminan; queda primero quien las resuelve antes.`
+      : stage === "final"
       ? "3 grillas. Se sigue jugando hasta que todos terminan; queda primero quien las resuelve antes."
       : stage === "semifinal"
       ? "4 grillas. El último en terminar queda afuera; los otros 2 pasan a la Final."
@@ -2262,11 +2423,11 @@ function GameRoom({ roomCode, myId, onBack }) {
             grid={currentGrid}
             onTap={tapCell}
             shake={wrongFlash}
-            bw={bwPhase || myBwDebuff || finalG2Cycle}
+            bw={bwPhase || myBwDebuff || finalG2Cycle || myGuerraFlicker}
             locked={locked || myFrozen || inCountdown}
             spinning={!!(myState && myState.spinning)}
           />
-          <ColorIndicator grid={currentGrid} bw={bwPhase || myBwDebuff || finalG2Cycle} />
+          <ColorIndicator grid={currentGrid} bw={bwPhase || myBwDebuff || finalG2Cycle || myGuerraFlicker} />
           {locked && !myFrozen && <PenaltyNotice />}
           {myFrozen && (
             <div style={{ textAlign: "center", color: "#4FC3F7", fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", fontSize: 14, marginTop: 12 }}>
@@ -2276,6 +2437,11 @@ function GameRoom({ roomCode, myId, onBack }) {
           {myBwDebuff && (
             <div style={{ textAlign: "center", color: "#C9B8F0", fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", fontSize: 14, marginTop: 12 }}>
               ⚫⚪ Te pusieron blanco y negro
+            </div>
+          )}
+          {myGuerraFlickerActive && (
+            <div style={{ textAlign: "center", color: "#C9B8F0", fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", fontSize: 14, marginTop: 12 }}>
+              ⚫⚪ Blanco y negro intermitente — {Math.max(0, Math.ceil(((myState.flickerUntil || 0) - now) / 1000))}s
             </div>
           )}
           {myState && myState.spinning && (
@@ -2297,13 +2463,30 @@ function GameRoom({ roomCode, myId, onBack }) {
         </Card>
       )}
 
-      {attackCtx && (
+      {attackCtx && attackCtx.type === "choose" && (
+        <GuerraAttackPicker
+          onChoose={(chosenType) => {
+            // Si solo hay un rival posible, se manda directo (sin abrir el
+            // selector de a quién) — mismo atajo que ya usa la Final
+            // cuando queda un único rival para el ataque de girar.
+            if (attackCtx.singleTargetId) {
+              performAttack(attackCtx.singleTargetId, chosenType);
+            } else {
+              const meta = GUERRA_ATTACK_META[chosenType];
+              setAttackCtx({ type: chosenType, title: meta.title, subtitle: meta.subtitle });
+            }
+          }}
+          onSkip={() => setAttackCtx(null)}
+        />
+      )}
+      {attackCtx && attackCtx.type !== "choose" && (
         <TargetPicker
           players={players}
           playerStates={playerStates}
           myId={myId}
           myLastAttacked={myState ? myState.lastAttacked : null}
           eliminationOrder={room.eliminationOrder}
+          allowRepeat={stage === "guerra"}
           title={attackCtx.title}
           subtitle={attackCtx.subtitle}
           onAttack={performAttack}
