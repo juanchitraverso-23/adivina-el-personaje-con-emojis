@@ -659,7 +659,16 @@ function GridBoard({ grid, onTap, shake, bw, locked, spinning }) {
       className={spinStack > 0 ? "bloques-spin" : ""}
       style={{
         display: "grid",
-        gridTemplateColumns: `repeat(${grid.size}, 1fr)`,
+        // minmax(0, 1fr) y no 1fr a secas: por default una columna de grid
+        // no se achica más allá del contenido "mínimo" de lo que tiene
+        // adentro, y un <button> en iOS Safari (a diferencia de Mac Safari,
+        // que es más laxo con esto) impone un ancho mínimo propio bastante
+        // grande si no se lo saca de encima — con pocas columnas no se
+        // nota, pero con las 20-40 columnas de una grilla gigante del modo
+        // Guerra, esos mínimos sumados empujan la grilla entera bien
+        // afuera de la pantalla del celular. minmax(0, 1fr) le dice a cada
+        // columna "no tenés mínimo", y listo.
+        gridTemplateColumns: `repeat(${grid.size}, minmax(0, 1fr))`,
         gap: 2,
         width: "100%",
         maxWidth: 460,
@@ -686,6 +695,16 @@ function GridBoard({ grid, onTap, shake, bw, locked, spinning }) {
             onClick={() => !cleared && !locked && onTap(i)}
             disabled={cleared || locked}
             style={{
+              // appearance: none + minWidth/minHeight: 0 — refuerzan lo de
+              // minmax(0, 1fr) de arriba: sin esto, iOS Safari le sigue
+              // aplicando al <button> su apariencia/tamaño nativo por
+              // debajo, y esa mínima intrínseca puede seguir empujando la
+              // columna aunque el grid ya le haya dicho que no tiene piso.
+              appearance: "none",
+              WebkitAppearance: "none",
+              minWidth: 0,
+              minHeight: 0,
+              boxSizing: "border-box",
               aspectRatio: "1",
               borderRadius: 4,
               padding: 0,
