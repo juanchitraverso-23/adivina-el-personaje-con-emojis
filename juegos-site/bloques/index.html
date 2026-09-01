@@ -423,6 +423,11 @@ function generateGrid(size, colorKeys) {
   const colorSeq = shuffleArr(pieces.map((_, i) => keys[i % keys.length]));
   pieces.forEach((p, i) => { p.color = colorSeq[i]; });
   return {
+    gid: randomId(), // identidad única de ESTA grilla en particular — la usa
+    // runSyncLoop para distinguir "el servidor tiene la misma grilla que yo,
+    // solo que todavía no le llegó mi progreso" de "el servidor tiene una
+    // grilla DISTINTA en esta posición" (p. ej. el ataque "grilla gigante"
+    // del modo Guerra, que reemplaza la grilla de la posición 0 entera).
     size,
     cellPiece,
     pieces,
@@ -1676,15 +1681,24 @@ function GameRoom({ roomCode, myId, onBack }) {
   // el sondeo de cada segundo pise el estado local con una lectura del
   // servidor que todavía no la refleja.
   const hasPendingWrite = () => pendingWritesRef.current > 0 || syncDebounceRef.current !== null;
-  // Cuántas grillas tenía mi cola la última vez que supimos con certeza qué
-  // tenía el servidor (recién leído, o recién escrito por mí). Comparar la
-  // cola fresca contra ESTO — y no contra el largo de mi cola local actual —
+  // Los ids (gid) de las grillas de mi cola la última vez que supimos con
+  // certeza qué tenía el servidor (recién leído, o recién escrito por mí).
+  // Comparar la cola fresca contra ESTO — y no contra mi cola local actual —
   // es lo que distingue "llegó un ataque nuevo" de "todavía no sincronicé
   // que yo misma acorté mi cola al completar una grilla": si comparara
   // contra mi cola local, completar una grilla (que la acorta) haría
   // parecer que el servidor "tiene de más", y ese sobrante (en realidad la
-  // grilla vieja que ya completé) se volvería a agregar solo.
-  const lastKnownServerQueueLenRef = useRef(0);
+  // grilla vieja que ya completé) se volvería a agregar solo. Usar ids en
+  // vez de solo el largo también es lo que permite notar cuando el
+  // servidor reemplazó la grilla de la posición 0 (el ataque "grilla
+  // gigante" del modo Guerra), no solo cuando agregó al final (la "grilla
+  // extra" clásica) — contar largo nomás no distinguía esos dos casos.
+  const lastKnownServerQueueIdsRef = useRef([]);
+  // true mientras tengo un "se te fueron todos los ataques de encima" (lo
+  // que hace completeCurrentGrid en Guerra al resolver cualquier grilla)
+  // aplicado localmente pero todavía no confirmado en el servidor — ver el
+  // comentario en runSyncLoop sobre por qué hace falta esta bandera.
+  const myAttacksClearedPendingRef = useRef(false);
 
   // Persiste myLiveStateRef.current al servidor. Relee fresco justo antes de
   // escribir y conserva cualquier grilla extra que haya llegado por ataque
@@ -1702,18 +1716,68 @@ function GameRoom({ roomCode, myId, onBack }) {
         const cur = myLiveStateRef.current;
         if (!cur) break;
         const fresh = (await readPlayerState(roomCode, round, myId)) || cur;
-        const freshQueueLen = (fresh.queue || []).length;
+        const freshQueue = fresh.queue || [];
         let liveNow = myLiveStateRef.current;
         let liveQueue = liveNow.queue || [];
-        if (freshQueueLen > lastKnownServerQueueLenRef.current) {
-          // Esto sí es nuevo desde la última vez que supimos del servidor
-          // (un ataque que llegó mientras tanto): lo sumamos al final.
-          const extra = fresh.queue.slice(lastKnownServerQueueLenRef.current);
+        const lastIds = lastKnownServerQueueIdsRef.current || [];
+        let queueChanged = false;
+
+        // ¿La grilla que el servidor tiene en la posición 0 es una
+        // DISTINTA de la que yo tengo ahí localmente? Eso pasa cuando
+        // alguien manda el ataque "grilla gigante" (modo Guerra): reemplaza
+        // la grilla de esa posición entera por una nueva, más grande — no
+        // le suma nada a la cola, la cambia. Se nota comparando el gid de
+        // freshQueue[0] contra el mío Y contra el que ya conocía del
+        // servidor (si coincidiera con este último, es una que ya adopté
+        // antes, no hay nada nuevo). Cuando sí cambió de verdad, adopto la
+        // del servidor — se pierde el progreso que tenía en la vieja, pero
+        // es lo esperado: es una grilla distinta. Sin este chequeo (antes
+        // solo se comparaba el LARGO de la cola, que la grilla gigante no
+        // cambia) mi próximo guardado pisaba el ataque recién llegado con
+        // mi grilla vieja, y la grilla "nunca se agrandaba".
+        if (
+          freshQueue.length > 0 &&
+          liveQueue.length > 0 &&
+          freshQueue[0].gid !== liveQueue[0].gid &&
+          freshQueue[0].gid !== lastIds[0]
+        ) {
+          liveQueue = [freshQueue[0], ...liveQueue.slice(1)];
+          queueChanged = true;
+        }
+
+        // ¿Se sumaron grillas nuevas al FINAL desde la última vez que
+        // sincronizamos (el ataque clásico de "grilla extra")? Comparar
+        // contra `lastIds` (lo último que supe con certeza del servidor) y
+        // no contra mi cola local actual es lo que distingue "llegó un
+        // ataque nuevo" de "todavía no sincronicé que yo misma acorté mi
+        // cola al completar una grilla".
+        if (freshQueue.length > lastIds.length) {
+          const extra = freshQueue.slice(lastIds.length);
           liveQueue = liveQueue.concat(extra);
+          queueChanged = true;
+        }
+
+        if (queueChanged) {
           liveNow = { ...liveNow, queue: liveQueue };
           myLiveStateRef.current = liveNow;
           setPlayerStates((m) => ({ ...m, [myId]: liveNow }));
         }
+
+        // Los ataques que me manda OTRA gente (girar, blanco y negro
+        // intermitente) llegan escritos directo en mi estado del servidor
+        // — mi copia local nunca los toca, salvo en el momento puntual en
+        // que YO los limpio al completar una grilla en Guerra
+        // (myAttacksClearedPendingRef, prendida por completeCurrentGrid).
+        // Fuera de ese momento, siempre vale la versión del servidor: si
+        // uso mi copia local a ciegas todo el tiempo (como hacía antes),
+        // un ataque que llega mientras tengo clicks pendientes de
+        // sincronizar se pierde apenas sincronizo — piso el ataque recién
+        // llegado con mi valor de antes de que me atacaran. Con varias
+        // personas jugando y atacando todo el tiempo (el caso real de una
+        // partida en familia) esto pasaba todo el rato, no solo a veces.
+        const useMyClearedAttacks = myAttacksClearedPendingRef.current;
+        myAttacksClearedPendingRef.current = false; // se consume: la próxima sync ya no aplica, salvo que completar otra grilla lo vuelva a prender
+
         const merged = {
           ...fresh,
           queue: liveQueue,
@@ -1727,21 +1791,15 @@ function GameRoom({ roomCode, myId, onBack }) {
           // todavía sin mi finishedAt) y nunca lo pisaba con mi valor
           // local, así que el servidor jamás se enteraba de que terminé.
           finishedAt: liveNow.finishedAt || fresh.finishedAt || null,
-          spinning: liveNow.spinning,
-          // Mismo motivo que finishedAt/spinning arriba: completeCurrentGrid
-          // (modo Guerra) limpia estos tres localmente al resolver una
-          // grilla (spinning ya estaba cubierto) — sin pisarlos acá con
-          // `fresh`, un sync que corre justo después podía revivir un
-          // ataque que ya se había sacado, o perder mi propio registro de
-          // a quién ya le mandé la grilla extra.
-          flickerUntil: liveNow.flickerUntil,
-          flickerStack: liveNow.flickerStack,
+          spinning: useMyClearedAttacks ? liveNow.spinning : fresh.spinning,
+          flickerUntil: useMyClearedAttacks ? liveNow.flickerUntil : fresh.flickerUntil,
+          flickerStack: useMyClearedAttacks ? liveNow.flickerStack : fresh.flickerStack,
           // gridExtraSentTo solo lo modifico yo mismo (cuando ATACO a otro,
           // no cuando me atacan a mí), así que siempre vale mi copia local.
           gridExtraSentTo: liveNow.gridExtraSentTo || [],
         };
         await writePlayerState(roomCode, round, myId, merged);
-        lastKnownServerQueueLenRef.current = merged.queue.length;
+        lastKnownServerQueueIdsRef.current = merged.queue.map((g) => g.gid);
       }
     } finally {
       syncingRef.current = false;
@@ -1802,7 +1860,7 @@ function GameRoom({ roomCode, myId, onBack }) {
         // server, que puede no reflejar todavía mi último click.
         if (!hasPendingWrite()) {
           myLiveStateRef.current = states[myId] || myLiveStateRef.current;
-          lastKnownServerQueueLenRef.current = (myLiveStateRef.current && myLiveStateRef.current.queue || []).length;
+          lastKnownServerQueueIdsRef.current = ((myLiveStateRef.current && myLiveStateRef.current.queue) || []).map((g) => g.gid);
         }
         setPlayerStates((prev) =>
           hasPendingWrite() && prev[myId] ? { ...states, [myId]: prev[myId] } : states
@@ -1900,7 +1958,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     await writeRoom(roomCode, fresh);
     setRoom(fresh);
     myLiveStateRef.current = newStates[myId] || null;
-    lastKnownServerQueueLenRef.current = (newStates[myId] && newStates[myId].queue || []).length;
+    lastKnownServerQueueIdsRef.current = ((newStates[myId] && newStates[myId].queue) || []).map((g) => g.gid);
     setPlayerStates(newStates);
   };
 
@@ -2332,6 +2390,13 @@ function GameRoom({ roomCode, myId, onBack }) {
     const solvedCount = (cur.solvedCount || 0) + 1;
 
     if (stage === "final") {
+      // Misma bandera que en Guerra (ver el comentario de
+      // myAttacksClearedPendingRef en runSyncLoop): sin prenderla acá
+      // también, el merge de la próxima sincronización podía preferir el
+      // spinning viejo del servidor (todavía sin este clear) por encima
+      // de este 0 recién puesto, y la grilla seguía girando después de
+      // resuelta.
+      myAttacksClearedPendingRef.current = true;
       if (newQueue.length === 0) {
         setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: 0, finishedAt: Date.now() });
         return;
@@ -2364,6 +2429,11 @@ function GameRoom({ roomCode, myId, onBack }) {
       // intermitente) — arrancás la siguiente grilla limpio. La grilla
       // gigante no necesita limpieza acá: vive en el objeto de la grilla
       // vieja (newQueue ya no la incluye), no en el estado del jugador.
+      // Prendo la bandera para que runSyncLoop sepa, en su próxima
+      // sincronización, que este spinning/flickerUntil/flickerStack en 0
+      // es un limpiado intencional mío y no algo desactualizado — si no,
+      // podría pisar con esto un ataque que llegó justo en el medio.
+      myAttacksClearedPendingRef.current = true;
       setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: 0, flickerUntil: null, flickerStack: 0, finishedAt: isLastGrid ? Date.now() : cur.finishedAt || null });
       const candidates = players.filter((p) => {
         if (p.id === myId) return false;
