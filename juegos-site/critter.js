@@ -20,7 +20,9 @@
     style.id = STYLE_ID;
     style.textContent = [
       ".jx-critter-layer { position: fixed; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; }",
-      ".jx-critter-run { position: absolute; bottom: 7vh; }",
+      ".jx-critter-run { position: absolute; bottom: 7vh; pointer-events: auto; cursor: pointer; }",
+      ".jx-critter-poof { position: fixed; font-size: 30px; opacity: 1; z-index: 3; animation: jx-critter-poof 0.4s ease-out forwards; pointer-events: none; }",
+      "@keyframes jx-critter-poof { from { transform: scale(0.6); opacity: 1; } to { transform: scale(1.8); opacity: 0; } }",
       ".jx-critter-face { display: block; }",
       ".jx-critter-bounce { display: block; }",
       ".jx-critter-bounce svg { display: block; shape-rendering: crispEdges; filter: drop-shadow(0 4px 0 rgba(0,0,0,0.35)); }",
@@ -127,6 +129,26 @@
     face.appendChild(bounce);
     run.appendChild(face);
     layer.appendChild(run);
+
+    // Se puede tocar: no hace nada por sí solo (critter.js no sabe nada del
+    // resto del sitio, a propósito — ver el comentario grande de arriba),
+    // pero avisa con un evento genérico en `window` para que quien quiera
+    // (por ejemplo Bloques en Cadena, modo Guerra) reaccione como le
+    // parezca. Un "poof" a modo de feedback y el bichito desaparece ya.
+    run.addEventListener("click", function () {
+      var rect = run.getBoundingClientRect();
+      var poof = document.createElement("div");
+      poof.className = "jx-critter-poof";
+      poof.style.left = rect.left + rect.width / 2 - 15 + "px";
+      poof.style.top = rect.top + rect.height / 2 - 15 + "px";
+      poof.textContent = "✨";
+      document.body.appendChild(poof);
+      setTimeout(function () {
+        poof.remove();
+      }, 450);
+      run.remove();
+      window.dispatchEvent(new CustomEvent("jx-critter-tap"));
+    });
 
     setTimeout(function () {
       run.remove();

@@ -745,6 +745,7 @@ function attackSignature(type, st) {
   if (type === "flicker") return (st.flickerStack || 0) + ":" + (st.flickerUntil || 0);
   if (type === "freeze") return st.freezeUntil || 0;
   if (type === "spin") return st.spinning || 0;
+  if (type === "twoOne") return st.twoOneStack || 0;
   if (type === "giant" || type === "rainbow") return q[0] ? q[0].gid : null;
   return q.length; // "grid" (grilla extra)
 }
@@ -1054,14 +1055,14 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
   );
 }
 
-// Los 5 tipos de ataque que se pueden elegir en el modo Guerra. title/subtitle
+// Los 6 tipos de ataque que se pueden elegir en el modo Guerra. title/subtitle
 // son los que ve el ATACANTE en el paso siguiente (elegir a quién). Girar,
-// blanco y negro intermitente, grilla gigante y colores extra se pueden
-// recibir hasta 2 veces en la MISMA grilla (GUERRA_MAX_STACK): la segunda
-// no cancela, suma y el efecto se hace más fuerte (ver el detalle de cada
-// uno en performAttack). Grilla extra (🧱) es distinta: no tiene tope de
-// veces ni se acumula en fuerza, pero solo se le puede mandar a cada
-// rival UNA vez en toda la partida (gridExtraSentTo) — por eso en
+// blanco y negro intermitente, grilla gigante, colores extra y 2-1 se
+// pueden recibir hasta 2 veces en la MISMA grilla (GUERRA_MAX_STACK): la
+// segunda no cancela, suma y el efecto se hace más fuerte (ver el detalle
+// de cada uno en performAttack). Grilla extra (🧱) es distinta: no tiene
+// tope de veces ni se acumula en fuerza, pero solo se le puede mandar a
+// cada rival UNA vez en toda la partida (gridExtraSentTo) — por eso en
 // GuerraAttackPicker desaparece del todo cuando ya se la mandaste a
 // todos.
 const GUERRA_ATTACK_META = {
@@ -1069,6 +1070,7 @@ const GUERRA_ATTACK_META = {
   flicker: { emoji: "⚫⚪", label: "Blanco y negro intermitente", desc: "Parpadea entre color y gris. Recibirlo 2 veces suma tiempo y alarga la fase en gris.", title: "⚫⚪ ¿A quién le ponés blanco y negro intermitente?", subtitle: "Si ya lo tenía puesto, se suma tiempo y la fase en gris dura el doble (máximo)." },
   giant: { emoji: "🔲", label: "Grilla gigante", desc: "Duplica filas y columnas de la grilla que tiene abierta. Recibirlo 2 veces la vuelve a duplicar.", title: "🔲 ¿A quién le agrandás la grilla?", subtitle: "Dura hasta que la resuelva — cada tap le limpia varias piezas de una, así no es taaan difícil. Si ya la tenía agrandada, se agranda de nuevo (máximo 2 veces)." },
   rainbow: { emoji: "🌈", label: "Colores extra", desc: "La grilla que tiene abierta pasa a tener 16 colores en vez de 6. Recibirlo 2 veces hace que CADA pieza sea de un color distinto.", title: "🌈 ¿A quién le ponés colores extra?", subtitle: "Si ya tenía 16 colores, ahora cada pieza de la grilla queda de un color distinto (máximo)." },
+  twoOne: { emoji: "♻️", label: "2-1", desc: "Cada 2 piezas que limpia, reaparece 1 en un lugar donde ya había limpiado. Recibirlo 2 veces lo vuelve '4-3'.", title: "♻️ ¿A quién le ponés el 2-1?", subtitle: "Si ya lo tenía puesto, pasa a '4-3': cada 4 que limpia, reaparecen 3 (máximo)." },
   grid: { emoji: "🧱", label: "Grilla extra", desc: "Le suma una grilla más a resolver.", title: "🧱 ¿A quién le mandás una grilla extra?", subtitle: "Ojo: a cada rival se la podés mandar una sola vez en toda la partida." },
 };
 
@@ -1115,6 +1117,13 @@ function AttackIcon({ type }) {
       </div>
     );
   }
+  if (type === "twoOne") {
+    return (
+      <div style={{ ...wrap, background: "#2EC4B6", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontSize: 30, fontWeight: 900, color: "#0A2E2A", fontFamily: "'Baloo 2', sans-serif" }}>2→1</span>
+      </div>
+    );
+  }
   // spin
   return (
     <div style={{ ...wrap, background: "#B983FF", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1142,7 +1151,7 @@ function GuerraAttackPicker({ onChoose, onSkip, hideGridExtra }) {
       <Card style={{ maxWidth: 420, marginBottom: 0 }}>
         <Title size={22}>💥 ¡Grilla resuelta! ¿Qué ataque mandás?</Title>
         <Sub style={{ marginTop: -8, marginBottom: 12 }}>
-          Girar, blanco y negro y grilla gigante se pueden recibir hasta 2 veces (la segunda suma, no cancela). Grilla extra: una sola vez por rival.
+          Girar, blanco y negro, grilla gigante, colores extra y 2-1 se pueden recibir hasta 2 veces (la segunda suma, no cancela). Grilla extra: una sola vez por rival.
         </Sub>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 12 }}>
           {visibleTypes.map(([type, meta]) => (
@@ -1724,6 +1733,7 @@ function freshStateForStage(stage, easy, forcedCount) {
     spinning: 0, // 0 = no gira; en Guerra puede llegar a 2 (el doble de rápido) — ver GUERRA_MAX_STACK
     flickerUntil: null, // modo Guerra: ataque "blanco y negro intermitente"
     flickerStack: 0, // ...cuántas veces te lo mandaron en esta grilla (máx. GUERRA_MAX_STACK) — cada una alarga la fase en gris
+    twoOneStack: 0, // modo Guerra: ataque "2-1" — 0 = no activo, 1 = "2-1" (cada 2 que borra reaparece 1), 2 = "4-3" (cada 4 reaparecen 3) — ver tapCell
     gridExtraSentTo: [], // modo Guerra: a quién ya le mandé el ataque "grilla extra" (solo una vez por rival, en toda la partida)
   };
 }
@@ -1863,6 +1873,15 @@ function GameRoom({ roomCode, myId, onBack }) {
   const pendingWritesRef = useRef(0);
   const syncingRef = useRef(false);
   const syncDirtyRef = useRef(false);
+  // Modo Guerra, ataque "2-1": cuenta cuántas piezas llevo limpiadas en la
+  // grilla ACTUAL (no en toda la partida), para saber cuándo toca que
+  // reaparezca alguna — ver tapCell. Puramente local (nunca viaja al
+  // servidor: es solo el ritmo de MI propio tapCell), se resetea sola
+  // apenas noto que cambié de grilla (gid distinto al que veníamos
+  // contando, ya sea porque la completé yo o porque me llegó una nueva
+  // por ataque de grilla gigante/colores extra).
+  const twoOneCounterRef = useRef(0);
+  const twoOneGidRef = useRef(null);
   // Agrupa varios clicks seguidos en UNA sola escritura al servidor, en
   // vez de una por click: sin esto, limpiar una grilla entera (decenas
   // de clicks en pocos segundos) gastaba una escritura de Workers KV por
@@ -1993,6 +2012,7 @@ function GameRoom({ roomCode, myId, onBack }) {
           spinning: useMyClearedAttacks ? liveNow.spinning : fresh.spinning,
           flickerUntil: useMyClearedAttacks ? liveNow.flickerUntil : fresh.flickerUntil,
           flickerStack: useMyClearedAttacks ? liveNow.flickerStack : fresh.flickerStack,
+          twoOneStack: useMyClearedAttacks ? liveNow.twoOneStack : fresh.twoOneStack,
           // gridExtraSentTo solo lo modifico yo mismo (cuando ATACO a otro,
           // no cuando me atacan a mí), así que siempre vale mi copia local.
           gridExtraSentTo: liveNow.gridExtraSentTo || [],
@@ -2081,6 +2101,22 @@ function GameRoom({ roomCode, myId, onBack }) {
       clearInterval(id);
     };
   }, [roomCode]);
+
+  // Easter egg "tocá el bichito, mandás un ataque al azar" (ver el
+  // comentario grande donde se ASIGNA onCritterTapRef.current, más abajo,
+  // cerca de performAttack). El listener en sí tiene que registrarse acá
+  // arriba, ANTES del "if (!room) return" de abajo — si no, en el primer
+  // render (room todavía null) este hook no se llamaría, y en el
+  // siguiente sí, violando las Reglas de los Hooks (React error #310).
+  // Se registra una sola vez (deps vacías) y siempre llama a la versión
+  // MÁS RECIENTE de la lógica a través de la ref, así no queda pegado a
+  // datos viejos de stage/players/performAttack del primer render.
+  const onCritterTapRef = useRef(() => {});
+  useEffect(() => {
+    const onCritterTap = () => onCritterTapRef.current();
+    window.addEventListener("jx-critter-tap", onCritterTap);
+    return () => window.removeEventListener("jx-critter-tap", onCritterTap);
+  }, []);
 
   if (!room) {
     return (
@@ -2280,21 +2316,24 @@ function GameRoom({ roomCode, myId, onBack }) {
                 ⏱️ Arranca con una cuenta regresiva de 5s — todos empiezan a la vez, sin ventajas.
                 <br />
                 💥 Cada vez que resolvés una grilla (incluida la última), elegís QUÉ ataque mandás —
-                🌀 girar, ⚫⚪ blanco y negro intermitente (15s), 🔲 grilla gigante, 🌈 colores extra o
-                🧱 grilla extra — y a QUIÉN, las veces que quieras repetir a la misma persona.
+                🌀 girar, ⚫⚪ blanco y negro intermitente (15s), 🔲 grilla gigante, 🌈 colores extra,
+                ♻️ 2-1 o 🧱 grilla extra — y a QUIÉN, las veces que quieras repetir a la misma persona.
                 <br />
-                Girar, blanco y negro, grilla gigante y colores extra se pueden recibir hasta 2 veces en
-                la misma grilla: la segunda no cancela, suma — girar el doble de rápido, blanco y negro
-                con la fase en gris más larga, grilla gigante otra vez más grande (¡hasta 16 veces más
-                piezas si te la mandan 2 veces!, aunque cada tap limpia varias de una así no es tan
-                difícil), y colores extra pasa de 16 colores fijos a que CADA pieza sea de un color
-                distinto (tantos colores como piezas tenga la grilla en ese momento). Se pueden combinar
-                entre sí (por ejemplo, alguien puede estar girando Y en blanco y negro a la vez, o tener
-                la grilla gigante Y con colores extra al mismo tiempo) — y ojo, resolver CUALQUIER grilla
-                te saca todos los ataques que tenías encima, así que arrancás la siguiente limpio. La
-                grilla extra (🧱, no confundir con colores extra) es distinta: no se acumula en fuerza,
-                pero a cada rival se la podés mandar una sola vez en toda la partida — después ya no
-                aparece esa opción para esa persona.
+                Girar, blanco y negro, grilla gigante, colores extra y 2-1 se pueden recibir hasta 2
+                veces en la misma grilla: la segunda no cancela, suma — girar el doble de rápido, blanco
+                y negro con la fase en gris más larga, grilla gigante otra vez más grande (¡hasta 16
+                veces más piezas si te la mandan 2 veces!, aunque cada tap limpia varias de una así no es
+                tan difícil), colores extra pasa de 16 colores fijos a que CADA pieza sea de un color
+                distinto (tantos colores como piezas tenga la grilla en ese momento), y 2-1 pasa a "4-3":
+                cada 2 piezas que limpiás reaparece 1 en un lugar donde ya habías limpiado (con un color
+                de los que te faltan) — al máximo, cada 4 que limpiás reaparecen 3. Deja de reaparecer
+                cuando quedan pocas piezas (2, o 4 al máximo), para que siempre se pueda terminar. Se
+                pueden combinar entre sí (por ejemplo, alguien puede estar girando Y en blanco y negro a
+                la vez, o tener la grilla gigante Y con colores extra al mismo tiempo) — y ojo, resolver
+                CUALQUIER grilla te saca todos los ataques que tenías encima, así que arrancás la
+                siguiente limpio. La grilla extra (🧱, no confundir con colores extra) es distinta: no se
+                acumula en fuerza, pero a cada rival se la podés mandar una sola vez en toda la partida —
+                después ya no aparece esa opción para esa persona.
                 <br />
                 No se corta cuando alguien gana: se sigue jugando hasta que todos terminan su cola, y
                 quedan ordenados por el orden real en que van terminando.
@@ -2545,6 +2584,14 @@ function GameRoom({ roomCode, myId, onBack }) {
         // ahí este cambio no altera nada — simplemente pasa de 0 a 1.
         const stack = freshTarget.spinning || 0;
         nextTargetState = { ...freshTarget, spinning: Math.min(GUERRA_MAX_STACK, stack + 1) };
+      } else if (type === "twoOne") {
+        // Modo Guerra: "2-1" — mientras esté activo, cada tanto que limpia
+        // piezas reaparece alguna en un lugar donde ya había limpiado (con
+        // un color de los que todavía le faltan). El detalle de CUÁNDO y
+        // CUÁNTAS reaparecen (2→1, o 4→3 al máximo) vive en tapCell, no
+        // acá — acá solo se sube el nivel, igual que girar.
+        const stack = freshTarget.twoOneStack || 0;
+        nextTargetState = { ...freshTarget, twoOneStack: Math.min(GUERRA_MAX_STACK, stack + 1) };
       } else if (type === "giant") {
         // Modo Guerra: "grilla gigante" — reemplaza la grilla que el rival
         // tiene abierta AHORA (se pierde el progreso de esa, arranca de
@@ -2645,6 +2692,30 @@ function GameRoom({ roomCode, myId, onBack }) {
     })();
   };
 
+  // Easter egg pedido por el usuario: tocar uno de los bichitos de
+  // critter.js (el fantasma/dino/platito que cruza la pantalla cada
+  // tanto, en CUALQUIER juego del sitio) dispara un evento genérico en
+  // `window` — critter.js no sabe nada de Guerra ni de ataques, a
+  // propósito. Acá, y SOLO en el modo Guerra, reaccionamos mandando un
+  // ataque al azar a alguien al azar de la partida — de verdad al azar:
+  // puede tocarte a vos mismo. No incluye "grilla extra" en el sorteo
+  // porque esa tiene la regla de "una sola vez por rival" (gridExtraSentTo)
+  // y saltearla de esta forma la rompería. El listener en sí (más abajo,
+  // cerca de los demás refs) se registra una sola vez, SIEMPRE, sin
+  // importar si `room` todavía está cargando — por eso la lógica de
+  // verdad vive acá, en una simple asignación a una ref, no en un hook
+  // nuevo: un useEffect puesto acá (después del "if (!room) return" de
+  // más arriba) rompería las Reglas de los Hooks, porque en el render
+  // donde `room` todavía es null nunca se llegaría a ejecutar.
+  onCritterTapRef.current = () => {
+    if (stage !== "guerra") return;
+    if (!players || players.length === 0) return;
+    const target = players[Math.floor(Math.random() * players.length)];
+    const pool = ["spin", "flicker", "giant", "rainbow", "twoOne"];
+    const type = pool[Math.floor(Math.random() * pool.length)];
+    performAttack(target.id, type);
+  };
+
   // Se llama cuando se completaron los colores de la grilla que está
   // primera en la cola: la saca de la cola YA (instantáneo).
   //  - Final: si no queda nada en la cola, terminé mis 3 grillas —
@@ -2696,15 +2767,16 @@ function GameRoom({ roomCode, myId, onBack }) {
       // último ataque de despedida antes de quedar afuera de la acción.
       // También por decisión del usuario: resolver CUALQUIER grilla te saca
       // todos los ataques que tenías encima (spinning, blanco y negro
-      // intermitente) — arrancás la siguiente grilla limpio. La grilla
-      // gigante no necesita limpieza acá: vive en el objeto de la grilla
-      // vieja (newQueue ya no la incluye), no en el estado del jugador.
-      // Prendo la bandera para que runSyncLoop sepa, en su próxima
-      // sincronización, que este spinning/flickerUntil/flickerStack en 0
-      // es un limpiado intencional mío y no algo desactualizado — si no,
-      // podría pisar con esto un ataque que llegó justo en el medio.
+      // intermitente, 2-1) — arrancás la siguiente grilla limpio. La
+      // grilla gigante no necesita limpieza acá: vive en el objeto de la
+      // grilla vieja (newQueue ya no la incluye), no en el estado del
+      // jugador. Prendo la bandera para que runSyncLoop sepa, en su
+      // próxima sincronización, que este spinning/flickerUntil/
+      // flickerStack/twoOneStack en 0 es un limpiado intencional mío y no
+      // algo desactualizado — si no, podría pisar con esto un ataque que
+      // llegó justo en el medio.
       myAttacksClearedPendingRef.current = true;
-      setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: 0, flickerUntil: null, flickerStack: 0, finishedAt: isLastGrid ? Date.now() : cur.finishedAt || null });
+      setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: 0, flickerUntil: null, flickerStack: 0, twoOneStack: 0, finishedAt: isLastGrid ? Date.now() : cur.finishedAt || null });
       const candidates = players.filter((p) => {
         if (p.id === myId) return false;
         const st = playerStates[p.id] || {};
@@ -2779,9 +2851,45 @@ function GameRoom({ roomCode, myId, onBack }) {
       .slice(0, clearCount - 1)
       .map((p) => p.id);
     const idsToClear = new Set([pieceId, ...extraIds]);
-    const newPieces = grid.pieces.map((p) => (idsToClear.has(p.id) ? { ...p, cleared: true } : p));
+    let newPieces = grid.pieces.map((p) => (idsToClear.has(p.id) ? { ...p, cleared: true } : p));
     const remaining = newPieces.some((p) => p.color === activeColor && !p.cleared);
     const newIndex = remaining ? grid.activeColorIndex : grid.activeColorIndex + 1;
+
+    // Ataque "2-1" (modo Guerra): mientras esté activo, cada N piezas que
+    // limpio reaparecen M en algún lugar donde ya había limpiado — nivel 1
+    // ("2-1"): N=2, M=1; nivel 2 ("4-3", al recibirlo 2 veces): N=4, M=3.
+    // El color de cada una que reaparece sale de los que TODAVÍA me faltan
+    // (colorOrder desde newIndex en adelante) — nunca del color que recién
+    // terminé con este mismo tap, así no "revive" algo que el cartelito ya
+    // dio por hecho. Deja de reaparecer si quedan pocas piezas (2, o 4 en
+    // el nivel máximo) para que la grilla siempre se pueda terminar.
+    const twoOneStack = cur.twoOneStack || 0;
+    if (twoOneStack > 0) {
+      if (twoOneGidRef.current !== grid.gid) {
+        twoOneGidRef.current = grid.gid;
+        twoOneCounterRef.current = 0;
+      }
+      const N = twoOneStack >= 2 ? 4 : 2;
+      const M = twoOneStack >= 2 ? 3 : 1;
+      const threshold = twoOneStack >= 2 ? 4 : 2;
+      const before = twoOneCounterRef.current;
+      const after = before + idsToClear.size;
+      twoOneCounterRef.current = after;
+      const triggers = Math.floor(after / N) - Math.floor(before / N);
+      const remainingAfterClear = newPieces.filter((p) => !p.cleared).length;
+      const pendingColors = grid.colorOrder.slice(newIndex);
+      if (triggers > 0 && remainingAfterClear > threshold && pendingColors.length > 0) {
+        const clearedPool = shuffleArr(newPieces.filter((p) => p.cleared));
+        const toRevive = Math.min(M * triggers, clearedPool.length);
+        const reviveIds = new Set(clearedPool.slice(0, toRevive).map((p) => p.id));
+        newPieces = newPieces.map((p) =>
+          reviveIds.has(p.id)
+            ? { ...p, cleared: false, color: pendingColors[Math.floor(Math.random() * pendingColors.length)] }
+            : p
+        );
+      }
+    }
+
     const newGrid = { ...grid, pieces: newPieces, activeColorIndex: newIndex };
 
     if (newIndex >= grid.colorOrder.length) {
@@ -2913,6 +3021,13 @@ function GameRoom({ roomCode, myId, onBack }) {
           {myState && myState.spinning > 0 && (
             <div style={{ textAlign: "center", color: "#B983FF", fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", fontSize: 14, marginTop: 12 }}>
               🌀 ¡Te mandaron a girar{myState.spinning >= 2 ? " al doble de velocidad" : ""}! Terminá la grilla para que pare.
+            </div>
+          )}
+          {myState && myState.twoOneStack > 0 && (
+            <div style={{ textAlign: "center", color: "#2EC4B6", fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", fontSize: 14, marginTop: 12 }}>
+              {myState.twoOneStack >= 2
+                ? "♻️ ¡Te pusieron 4-3! Cada 4 piezas que limpiás, reaparecen 3."
+                : "♻️ ¡Te pusieron 2-1! Cada 2 piezas que limpiás, reaparece 1."}
             </div>
           )}
           {currentGrid && currentGrid.giant && (
