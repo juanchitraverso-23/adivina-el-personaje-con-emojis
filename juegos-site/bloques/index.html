@@ -2654,6 +2654,26 @@ function GameRoom({ roomCode, myId, onBack }) {
       }
       return nextTargetState;
     };
+
+    // Ataque a mí mismo: posible desde que el easter egg del bichito
+    // sortea el ataque entre TODOS los jugadores, uno mismo incluido. Acá
+    // NO conviene el camino de leer-y-escribir directo al servidor de
+    // abajo: myLiveStateRef.current YA es mi copia más al día que existe
+    // (más que cualquier lectura de vuelta al server, que puede tardar),
+    // y escribir el efecto por FUERA de setMyStateNow dejaba
+    // myLiveStateRef desactualizado — el ataque se veía un instante
+    // (playerStates se actualizaba directo) pero mis propios taps
+    // seguían usando la grilla vieja de la ref, y mi próximo sync de
+    // fondo terminaba pisando el ataque con esa copia vieja (exactamente
+    // lo que reportó el usuario: "apareció y se fue"). Se arregla
+    // mandándolo por el mismo camino de siempre para MI estado: local YA
+    // + sync de fondo, con todo el merge ya endurecido.
+    if (targetId === myId) {
+      const latest = myLiveStateRef.current;
+      if (latest) setMyStateNow(computeNextTargetState(latest));
+      return;
+    }
+
     (async () => {
       const fallbackCount = stage === "guerra" ? room.guerraGridCount : undefined;
       // El rival tiene su PROPIO sync en segundo plano corriendo todo el
@@ -2666,13 +2686,24 @@ function GameRoom({ roomCode, myId, onBack }) {
       // escritores sobre la misma key). No hay compare-and-swap en KV
       // para evitarlo de raíz, así que en vez de confiar en una sola
       // escritura, VERIFICAMOS que haya quedado y reintentamos si no:
-      // escribimos, esperamos un toque, releemos, y si la "firma" de nuestro
-      // ataque (attackSignature) volvió exactamente a como estaba ANTES de
-      // mandarlo (la huella exacta de "me lo pisaron"), recalculamos desde
-      // el estado actual y reintentamos. Si en cambio cambió por otro
-      // motivo legítimo (el rival avanzó de grilla, o alguien más le mandó
-      // otro ataque mientras tanto), NO insistimos — reaplicar a ciegas
-      // podría pegarle a la grilla equivocada.
+      // escribimos, esperamos, releemos, y si la "firma" de nuestro
+      // ataque (attackSignature) volvió exactamente a como estaba ANTES
+      // de mandarlo (la huella exacta de "me lo pisaron"), recalculamos
+      // desde el estado actual y reintentamos. Si en cambio cambió por
+      // otro motivo legítimo (el rival avanzó de grilla, o alguien más le
+      // mandó otro ataque mientras tanto), NO insistimos — reaplicar a
+      // ciegas podría pegarle a la grilla equivocada.
+      //
+      // CHECK_DELAY_MS tiene que ser MÁS que SYNC_DEBOUNCE_MS (500ms): si
+      // el rival tenía un tap sin sincronizar todavía en el momento
+      // exacto del ataque, su sync puede tardar hasta ese debounce entero
+      // en salir — verificar demasiado rápido (300ms) daba por buena
+      // nuestra escritura ANTES de que esa sync tardía llegara a
+      // pisarla, dejando el ataque revertido sin que nadie lo note
+      // ("apareció y se fue"). Por eso además hacemos DOS chequeos
+      // seguidos por intento (no uno): la primera lectura puede caer
+      // justo antes de que esa sync tardía termine.
+      const CHECK_DELAY_MS = 650;
       for (let attempt = 0; attempt < 3; attempt++) {
         const freshTarget = (await readPlayerState(roomCode, round, targetId)) || freshStateForStage(stage, targetIsLara, fallbackCount);
         const beforeSig = attackSignature(type, freshTarget);
@@ -2681,13 +2712,19 @@ function GameRoom({ roomCode, myId, onBack }) {
         setPlayerStates((m) => ({ ...m, [targetId]: nextTargetState }));
         const appliedSig = attackSignature(type, nextTargetState);
         if (attempt === 2) break; // último intento: ya escribimos, no verificamos más
-        await new Promise((r) => setTimeout(r, 300));
-        const verify = await readPlayerState(roomCode, round, targetId);
-        const verifySig = attackSignature(type, verify);
-        if (verifySig === appliedSig) break; // quedó bien, listo
-        if (verifySig !== beforeSig) break; // cambió por otro motivo legítimo: no insistir
-        // volvió exactamente a como estaba antes de nuestro ataque — se
-        // lo pisaron, reintentamos desde el estado actual.
+        let ok = true;
+        for (let check = 0; check < 2; check++) {
+          await new Promise((r) => setTimeout(r, CHECK_DELAY_MS));
+          const verify = await readPlayerState(roomCode, round, targetId);
+          const verifySig = attackSignature(type, verify);
+          if (verifySig === appliedSig) continue; // sigue bien, seguimos vigilando un toque más
+          if (verifySig !== beforeSig) { ok = true; break; } // cambió por otro motivo legítimo: no insistir
+          ok = false; // volvió exacto a como estaba antes de nuestro ataque — nos lo pisaron
+          break;
+        }
+        if (ok) break;
+        // si no, reintentamos desde el estado actual (recalcula y vuelve
+        // a escribir con lo que haya de verdad en el servidor ahora).
       }
     })();
   };
