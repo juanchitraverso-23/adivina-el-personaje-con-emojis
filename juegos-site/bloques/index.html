@@ -179,11 +179,16 @@ const BW_DEBUFF_MS = 15000; // etapa de 3: "blanco y negro" dura como máximo es
 // cada ataque abajo). Ni bien resolvés la grilla entera, se te sacan todos
 // (completeCurrentGrid). La grilla extra es aparte: no se acumula ni tiene
 // tope de veces, pero solo se le puede mandar UNA vez a cada rival en toda
-// la partida (gridExtraSentTo).
+// la partida (gridExtraSentTo). "16 colores" tampoco se acumula: es
+// binario (la grilla ya tiene 16 colores o no), un segundo envío mientras
+// ya está activo no hace nada más — pero SÍ se puede combinar con grilla
+// gigante (una grilla puede terminar siendo gigante Y de 16 colores a la
+// vez, cada una preserva la marca de la otra al aplicarse).
 const GUERRA_MAX_STACK = 2;
 const GUERRA_FLICKER_MS = 15000; // "blanco y negro intermitente": cada vez que te lo mandan (hasta 2 veces) se suma este tiempo a lo que te queda activo — mismo patrón que el freeze de Semifinal
 const GUERRA_GIANT_SIZE_MULT = 2; // "grilla gigante": multiplica filas y columnas por esto en CADA aplicación — 1 vez: 4 veces más piezas; 2 veces (máximo): 16 veces más piezas
 const GUERRA_GIANT_CLEAR_COUNT = 4; // ...y cada tap limpia esto TIMES la cantidad de veces que se la mandaron (1 vez: 4 piezas; 2 veces: 8), para que no sea proporcionalmente más lenta de resolver
+const LARA_RAINBOW_COLOR_COUNT = 8; // "16 colores": para Lara, la mitad (8) — misma proporción que el resto de sus ventajas
 // Cantidad de grillas por etapa: fija (no elegible), así quedó después de
 // jugarlo en familia — de entrada son 3, la etapa de 3 jugadores son 4, y
 // la final son 3.
@@ -235,7 +240,23 @@ const GRAYSCALE_COLORS = [
 ];
 const PIECE_COLOR_KEYS = PIECE_COLORS.map((c) => c.key);
 const GRAYSCALE_COLOR_KEYS = GRAYSCALE_COLORS.map((c) => c.key);
-const PIECE_COLORS_MAP = Object.fromEntries([...PIECE_COLORS, ...GRAYSCALE_COLORS].map((c) => [c.key, c]));
+// Ataque "16 colores" del modo Guerra: 10 colores más, sumados a los 6 de
+// siempre, para llegar a 16 bien distinguibles entre sí.
+const RAINBOW_EXTRA_COLORS = [
+  { key: "pink", hex: "#FF6FA0", name: "Rosa" },
+  { key: "teal", hex: "#2EC4B6", name: "Turquesa" },
+  { key: "lime", hex: "#C4E538", name: "Lima" },
+  { key: "indigo", hex: "#6C5DD3", name: "Índigo" },
+  { key: "magenta", hex: "#E64AC9", name: "Magenta" },
+  { key: "cyan", hex: "#22D3EE", name: "Cian" },
+  { key: "brown", hex: "#C97B3D", name: "Marrón" },
+  { key: "olive", hex: "#9AA83C", name: "Oliva" },
+  { key: "maroon", hex: "#A83250", name: "Bordó" },
+  { key: "steel", hex: "#6E8FB0", name: "Acero" },
+];
+const RAINBOW_COLORS = [...PIECE_COLORS, ...RAINBOW_EXTRA_COLORS];
+const RAINBOW_COLOR_KEYS = RAINBOW_COLORS.map((c) => c.key);
+const PIECE_COLORS_MAP = Object.fromEntries([...PIECE_COLORS, ...GRAYSCALE_COLORS, ...RAINBOW_EXTRA_COLORS].map((c) => [c.key, c]));
 
 function randomId() {
   return Math.random().toString(36).slice(2, 10);
@@ -948,7 +969,7 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
   );
 }
 
-// Los 4 tipos de ataque que se pueden elegir en el modo Guerra. title/subtitle
+// Los 5 tipos de ataque que se pueden elegir en el modo Guerra. title/subtitle
 // son los que ve el ATACANTE en el paso siguiente (elegir a quién). Girar,
 // blanco y negro intermitente y grilla gigante se pueden recibir hasta 2
 // veces en la MISMA grilla (GUERRA_MAX_STACK): la segunda no cancela,
@@ -956,17 +977,72 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
 // performAttack). Grilla extra es distinta: no tiene tope de veces ni se
 // acumula en fuerza, pero solo se le puede mandar a cada rival UNA vez en
 // toda la partida (gridExtraSentTo) — por eso en GuerraAttackPicker
-// desaparece del todo cuando ya se la mandaste a todos.
+// desaparece del todo cuando ya se la mandaste a todos. "16 colores" es
+// binario (no se acumula), pero se puede combinar con grilla gigante.
 const GUERRA_ATTACK_META = {
   spin: { emoji: "🌀", label: "Girar", desc: "Gira hasta que resuelva esa grilla. Recibirlo 2 veces duplica la velocidad.", title: "🌀 ¿A quién le hacés girar la grilla?", subtitle: "Si ya la tenía girando, ahora gira el doble de rápido (máximo)." },
   flicker: { emoji: "⚫⚪", label: "Blanco y negro intermitente", desc: "Parpadea entre color y gris. Recibirlo 2 veces suma tiempo y alarga la fase en gris.", title: "⚫⚪ ¿A quién le ponés blanco y negro intermitente?", subtitle: "Si ya lo tenía puesto, se suma tiempo y la fase en gris dura el doble (máximo)." },
   giant: { emoji: "🔲", label: "Grilla gigante", desc: "Duplica filas y columnas de la grilla que tiene abierta. Recibirlo 2 veces la vuelve a duplicar.", title: "🔲 ¿A quién le agrandás la grilla?", subtitle: "Dura hasta que la resuelva — cada tap le limpia varias piezas de una, así no es taaan difícil. Si ya la tenía agrandada, se agranda de nuevo (máximo 2 veces)." },
+  rainbow: { emoji: "🌈", label: "16 colores", desc: "La grilla que tiene abierta pasa a tener 16 colores en vez de 6, cada uno con menos piezas.", title: "🌈 ¿A quién le ponés 16 colores?", subtitle: "No se acumula (mandarlo de nuevo no hace nada si ya lo tiene), pero se puede combinar con grilla gigante." },
   grid: { emoji: "🧱", label: "Grilla extra", desc: "Le suma una grilla más a resolver.", title: "🧱 ¿A quién le mandás una grilla extra?", subtitle: "Ojo: a cada rival se la podés mandar una sola vez en toda la partida." },
 };
 
-// Primer paso del ataque en el modo Guerra: elegir QUÉ mandás (girar/blanco y
-// negro intermitente/grilla extra). El paso siguiente (a QUIÉN) reusa
-// TargetPicker con el título/subtítulo de GUERRA_ATTACK_META.
+// Ícono grande y clarísimo de cada ataque — el CUADRO entero es el ícono
+// (no un emoji chiquito en una lista), como pidió el usuario: "+1" negro
+// grande para grilla extra, un cuadrado cuadriculado para grilla gigante,
+// un tirabuzón grande para girar, un cuadrado blanco y negro para el
+// parpadeo, y uno de muchos colores para 16 colores.
+function AttackIcon({ type }) {
+  const wrap = { position: "absolute", inset: 0, borderRadius: 14, overflow: "hidden" };
+  if (type === "grid") {
+    return (
+      <div style={{ ...wrap, background: "#F3EEFF", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontSize: 40, fontWeight: 900, color: "#1B1035", fontFamily: "'Baloo 2', sans-serif" }}>+1</span>
+      </div>
+    );
+  }
+  if (type === "giant") {
+    const n = 6;
+    return (
+      <div style={{ ...wrap, background: "#1B1035", display: "grid", gridTemplateColumns: `repeat(${n}, 1fr)`, gap: 2, padding: 8 }}>
+        {Array.from({ length: n * n }).map((_, i) => (
+          <div key={i} style={{ borderRadius: 2, background: (Math.floor(i / n) + i) % 2 === 0 ? "#4FC3F7" : "#2A1F52" }} />
+        ))}
+      </div>
+    );
+  }
+  if (type === "flicker") {
+    return (
+      <div style={{ ...wrap, display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr" }}>
+        <div style={{ background: "#F4F4F6" }} />
+        <div style={{ background: "#17171A" }} />
+        <div style={{ background: "#17171A" }} />
+        <div style={{ background: "#F4F4F6" }} />
+      </div>
+    );
+  }
+  if (type === "rainbow") {
+    return (
+      <div style={{ ...wrap, background: "#1B1035", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 2, padding: 6 }}>
+        {RAINBOW_COLOR_KEYS.map((key) => (
+          <div key={key} style={{ borderRadius: 2, background: PIECE_COLORS_MAP[key].hex }} />
+        ))}
+      </div>
+    );
+  }
+  // spin
+  return (
+    <div style={{ ...wrap, background: "#B983FF", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <span className="bloques-attack-spin-icon" style={{ fontSize: 52, display: "inline-block" }}>🌀</span>
+    </div>
+  );
+}
+
+// Primer paso del ataque en el modo Guerra: elegir QUÉ mandás. El paso
+// siguiente (a QUIÉN) reusa TargetPicker con el título/subtítulo de
+// GUERRA_ATTACK_META. Cuadrados grandes de ícono, mismo estilo que los
+// cuadrados de rival de TargetPicker — "que se vean tan claros como los
+// jugadores" (pedido del usuario después de jugarlo en familia).
 function GuerraAttackPicker({ onChoose, onSkip, hideGridExtra }) {
   // La grilla extra se saca del todo de la lista una vez que ya se la
   // mandaste a TODOS los rivales que se le pueden mandar (uno por persona,
@@ -974,32 +1050,51 @@ function GuerraAttackPicker({ onChoose, onSkip, hideGridExtra }) {
   const visibleTypes = Object.entries(GUERRA_ATTACK_META).filter(([type]) => !(type === "grid" && hideGridExtra));
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
+      <style>{`
+        @keyframes bloques-attack-spin-icon { to { transform: rotate(360deg); } }
+        .bloques-attack-spin-icon { animation: bloques-attack-spin-icon 900ms linear infinite; }
+      `}</style>
       <Card style={{ maxWidth: 420, marginBottom: 0 }}>
         <Title size={22}>💥 ¡Grilla resuelta! ¿Qué ataque mandás?</Title>
         <Sub style={{ marginTop: -8, marginBottom: 12 }}>
-          Girar y blanco y negro se pueden recibir hasta 2 veces (la segunda suma, no cancela). Grilla extra: una sola vez por rival.
+          Girar, blanco y negro y grilla gigante se pueden recibir hasta 2 veces (la segunda suma, no cancela). Grilla extra: una sola vez por rival.
         </Sub>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 12 }}>
           {visibleTypes.map(([type, meta]) => (
             <button
               key={type}
               onClick={() => onChoose(type)}
               style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-                textAlign: "left",
-                background: "rgba(255,255,255,0.08)",
-                border: "1.5px solid rgba(255,255,255,0.15)",
-                borderRadius: 14,
-                padding: "10px 14px",
-                color: "#F3EEFF",
-                fontFamily: "'Baloo 2', sans-serif",
+                position: "relative",
+                aspectRatio: "1",
+                border: "none",
+                borderRadius: 16,
+                padding: 0,
                 cursor: "pointer",
+                boxShadow: "0 6px 0 rgba(0,0,0,0.28)",
               }}
             >
-              <span style={{ fontWeight: 800, fontSize: 16 }}>{meta.emoji} {meta.label}</span>
-              <span style={{ fontSize: 12.5, color: "#C9B8F0", fontWeight: 600 }}>{meta.desc}</span>
+              <AttackIcon type={type} />
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: "rgba(10,5,26,0.72)",
+                  borderBottomLeftRadius: 14,
+                  borderBottomRightRadius: 14,
+                  padding: "6px 6px",
+                  color: "#F3EEFF",
+                  fontFamily: "'Baloo 2', sans-serif",
+                  fontWeight: 800,
+                  fontSize: 13,
+                  textAlign: "center",
+                  lineHeight: 1.2,
+                }}
+              >
+                {meta.emoji} {meta.label}
+              </div>
             </button>
           ))}
         </div>
@@ -2100,18 +2195,19 @@ function GameRoom({ roomCode, myId, onBack }) {
                 ⏱️ Arranca con una cuenta regresiva de 5s — todos empiezan a la vez, sin ventajas.
                 <br />
                 💥 Cada vez que resolvés una grilla (incluida la última), elegís QUÉ ataque mandás —
-                🌀 girar, ⚫⚪ blanco y negro intermitente (15s), 🔲 grilla gigante o 🧱 grilla extra —
-                y a QUIÉN, las veces que quieras repetir a la misma persona.
+                🌀 girar, ⚫⚪ blanco y negro intermitente (15s), 🔲 grilla gigante, 🌈 16 colores o 🧱
+                grilla extra — y a QUIÉN, las veces que quieras repetir a la misma persona.
                 <br />
                 Girar, blanco y negro y grilla gigante se pueden recibir hasta 2 veces en la misma
                 grilla: la segunda no cancela, suma — girar el doble de rápido, blanco y negro con la
                 fase en gris más larga, grilla gigante otra vez más grande (¡hasta 16 veces más piezas
-                si te la mandan 2 veces!, aunque cada tap limpia varias de una así no es tan difícil). Se
-                pueden combinar entre sí (por ejemplo, alguien puede estar girando Y en blanco y negro a
-                la vez) — y ojo, resolver CUALQUIER grilla te saca todos los ataques que tenías encima,
-                así que arrancás la siguiente limpio. La grilla extra es distinta: no se acumula en
-                fuerza, pero a cada rival se la podés mandar una sola vez en toda la partida — después
-                ya no aparece esa opción para esa persona.
+                si te la mandan 2 veces!, aunque cada tap limpia varias de una así no es tan difícil). 16
+                colores no se acumula (mandarlo de nuevo no hace nada si ya lo tiene), pero se puede
+                combinar con grilla gigante. Se pueden combinar entre sí (por ejemplo, alguien puede
+                estar girando Y en blanco y negro a la vez) — y ojo, resolver CUALQUIER grilla te saca
+                todos los ataques que tenías encima, así que arrancás la siguiente limpio. La grilla
+                extra es distinta: no se acumula en fuerza, pero a cada rival se la podés mandar una
+                sola vez en toda la partida — después ya no aparece esa opción para esa persona.
                 <br />
                 No se corta cuando alguien gana: se sigue jugando hasta que todos terminan su cola, y
                 quedan ordenados por el orden real en que van terminando.
@@ -2370,15 +2466,43 @@ function GameRoom({ roomCode, myId, onBack }) {
         // piezas de una, ver tapCell). Al tope, un tercer intento no hace
         // nada más. Si no le queda ninguna grilla (ya terminó todas), no
         // hay nada que agrandar: no debería pasar porque TargetPicker ya
-        // filtra a quien terminó, pero por las dudas no rompe si pasa.
+        // filtra a quien terminó, pero por las dudas no rompe si pasa. Si
+        // la grilla ya tenía "16 colores" puesto, la nueva grilla gigante
+        // conserva esa marca (se combinan: gigante Y de 16 colores).
         const q = freshTarget.queue || [];
-        const currentStack = q.length > 0 ? (q[0].giantStack || 0) : GUERRA_MAX_STACK;
+        const currentGrid0 = q[0];
+        const currentStack = q.length > 0 ? (currentGrid0.giantStack || 0) : GUERRA_MAX_STACK;
         if (q.length > 0 && currentStack < GUERRA_MAX_STACK) {
           const newStack = currentStack + 1;
+          const isRainbow = !!currentGrid0.rainbow;
           const baseSize = (targetIsLara ? LARA_GRID_SIZE : GRID_SIZE) * Math.pow(GUERRA_GIANT_SIZE_MULT, newStack);
-          const baseColors = targetIsLara ? PIECE_COLOR_KEYS.slice(0, LARA_COLOR_COUNT) : PIECE_COLOR_KEYS;
-          const giantGrid = { ...generateGrid(baseSize, baseColors), giant: true, giantStack: newStack };
+          const baseColors = isRainbow
+            ? (targetIsLara ? RAINBOW_COLOR_KEYS.slice(0, LARA_RAINBOW_COLOR_COUNT) : RAINBOW_COLOR_KEYS)
+            : (targetIsLara ? PIECE_COLOR_KEYS.slice(0, LARA_COLOR_COUNT) : PIECE_COLOR_KEYS);
+          const giantGrid = { ...generateGrid(baseSize, baseColors), giant: true, giantStack: newStack, rainbow: isRainbow };
           nextTargetState = { ...freshTarget, queue: [giantGrid, ...q.slice(1)] };
+        } else {
+          nextTargetState = freshTarget;
+        }
+      } else if (type === "rainbow") {
+        // Modo Guerra: "16 colores" — reemplaza la grilla que el rival
+        // tiene abierta AHORA por una del mismo tamaño pero con 16 colores
+        // en vez de 6 (RAINBOW_COLOR_KEYS), cada uno con menos piezas — hay
+        // que ir cambiando de color seguido. A diferencia de girar/blanco y
+        // negro/grilla gigante, esto NO se acumula: es binario, así que si
+        // ya la tiene puesta un segundo envío no hace nada más. Si la
+        // grilla ya era gigante, conserva esa marca (se combinan).
+        const q = freshTarget.queue || [];
+        const currentGrid0 = q[0];
+        if (q.length > 0 && !currentGrid0.rainbow) {
+          const rainbowColors = targetIsLara ? RAINBOW_COLOR_KEYS.slice(0, LARA_RAINBOW_COLOR_COUNT) : RAINBOW_COLOR_KEYS;
+          const rainbowGrid = {
+            ...generateGrid(currentGrid0.size, rainbowColors),
+            giant: currentGrid0.giant,
+            giantStack: currentGrid0.giantStack,
+            rainbow: true,
+          };
+          nextTargetState = { ...freshTarget, queue: [rainbowGrid, ...q.slice(1)] };
         } else {
           nextTargetState = freshTarget;
         }
@@ -2667,6 +2791,11 @@ function GameRoom({ roomCode, myId, onBack }) {
           {currentGrid && currentGrid.giant && (
             <div style={{ textAlign: "center", color: "#4FC3F7", fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", fontSize: 14, marginTop: 12 }}>
               🔲 ¡Te agrandaron la grilla{currentGrid.giantStack >= 2 ? " al máximo" : ""}! Cada tap limpia {GUERRA_GIANT_CLEAR_COUNT * (currentGrid.giantStack || 1)} piezas de una.
+            </div>
+          )}
+          {currentGrid && currentGrid.rainbow && (
+            <div style={{ textAlign: "center", color: "#E64AC9", fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", fontSize: 14, marginTop: 12 }}>
+              🌈 ¡Te pusieron 16 colores! Hay que ir cambiando de color seguido.
             </div>
           )}
           {finalG3 && (
