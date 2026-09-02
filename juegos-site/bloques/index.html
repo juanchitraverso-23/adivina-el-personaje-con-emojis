@@ -728,6 +728,26 @@ const inputStyle = {
 function colorDefFor(grid, key) {
   return (grid.colorDefs && grid.colorDefs[key]) || PIECE_COLORS_MAP[key];
 }
+// "Firma" del efecto de un ataque sobre el estado de un jugador — un
+// valor chico que cambia si y solo si ESE ataque en particular está
+// presente/aplicado. La usa performAttack para verificar (después de
+// escribir) que el ataque realmente quedó puesto y no se lo pisó una
+// escritura concurrente del propio rival (ver el comentario grande en
+// performAttack). Cada tipo mira el campo que ese ataque en particular
+// toca — girar/blanco y negro/freeze/bw viven en el jugador directamente,
+// mientras que grilla gigante y colores extra reemplazan la grilla de la
+// posición 0 entera (su gid cambia), y grilla extra le suma una al final
+// (cambia el largo de la cola).
+function attackSignature(type, st) {
+  if (!st) return null;
+  const q = st.queue || [];
+  if (type === "bw") return st.bwUntil || 0;
+  if (type === "flicker") return (st.flickerStack || 0) + ":" + (st.flickerUntil || 0);
+  if (type === "freeze") return st.freezeUntil || 0;
+  if (type === "spin") return st.spinning || 0;
+  if (type === "giant" || type === "rainbow") return q[0] ? q[0].gid : null;
+  return q.length; // "grid" (grilla extra)
+}
 function GridBoard({ grid, onTap, shake, bw, locked, spinning }) {
   const borders = useMemo(() => computeCellBorders(grid.size, grid.cellPiece), [grid.cellPiece]);
   // `spinning` es la cantidad de veces que le mandaron el ataque de girar
@@ -2485,9 +2505,11 @@ function GameRoom({ roomCode, myId, onBack }) {
     // del mismo tamaño/dificultad fácil que el resto de su cola (si no,
     // una sola grilla de 10x10 y 6 colores se le colaría de golpe).
     const targetIsLara = isLaraName((players.find((p) => p.id === targetId) || {}).name);
-    (async () => {
-      const fallbackCount = stage === "guerra" ? room.guerraGridCount : undefined;
-      const freshTarget = (await readPlayerState(roomCode, round, targetId)) || freshStateForStage(stage, targetIsLara, fallbackCount);
+    // Calcula el próximo estado del rival a partir de un freshTarget dado
+    // — separado en su propia función para poder RECALCULARLO en cada
+    // reintento de attackWithRetry (ver más abajo) con el estado más
+    // nuevo posible, en vez de quedarnos pegados al primero que leímos.
+    const computeNextTargetState = (freshTarget) => {
       let nextTargetState;
       if (type === "bw") {
         // Si ya lo tiene activo, mandarlo de nuevo lo cancela (vuelve a
@@ -2583,8 +2605,43 @@ function GameRoom({ roomCode, myId, onBack }) {
         const newQueue = [...(freshTarget.queue || []), extraGrid];
         nextTargetState = { ...freshTarget, queue: newQueue };
       }
-      await writePlayerState(roomCode, round, targetId, nextTargetState);
-      setPlayerStates((m) => ({ ...m, [targetId]: nextTargetState }));
+      return nextTargetState;
+    };
+    (async () => {
+      const fallbackCount = stage === "guerra" ? room.guerraGridCount : undefined;
+      // El rival tiene su PROPIO sync en segundo plano corriendo todo el
+      // tiempo (runSyncLoop) que también lee-y-escribe esta misma key —
+      // si toca justo en el medio de nuestra escritura (típico: el rival
+      // está tocando su grilla activamente cuando lo atacamos), su
+      // escritura puede basarse en una lectura de ANTES de la nuestra y
+      // pisarla enterita, revirtiendo el ataque sin que nadie se entere
+      // (ver memoria known-unfixed-kv-races, ítem 2 — carrera de dos
+      // escritores sobre la misma key). No hay compare-and-swap en KV
+      // para evitarlo de raíz, así que en vez de confiar en una sola
+      // escritura, VERIFICAMOS que haya quedado y reintentamos si no:
+      // escribimos, esperamos un toque, releemos, y si la "firma" de nuestro
+      // ataque (attackSignature) volvió exactamente a como estaba ANTES de
+      // mandarlo (la huella exacta de "me lo pisaron"), recalculamos desde
+      // el estado actual y reintentamos. Si en cambio cambió por otro
+      // motivo legítimo (el rival avanzó de grilla, o alguien más le mandó
+      // otro ataque mientras tanto), NO insistimos — reaplicar a ciegas
+      // podría pegarle a la grilla equivocada.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const freshTarget = (await readPlayerState(roomCode, round, targetId)) || freshStateForStage(stage, targetIsLara, fallbackCount);
+        const beforeSig = attackSignature(type, freshTarget);
+        const nextTargetState = computeNextTargetState(freshTarget);
+        await writePlayerState(roomCode, round, targetId, nextTargetState);
+        setPlayerStates((m) => ({ ...m, [targetId]: nextTargetState }));
+        const appliedSig = attackSignature(type, nextTargetState);
+        if (attempt === 2) break; // último intento: ya escribimos, no verificamos más
+        await new Promise((r) => setTimeout(r, 300));
+        const verify = await readPlayerState(roomCode, round, targetId);
+        const verifySig = attackSignature(type, verify);
+        if (verifySig === appliedSig) break; // quedó bien, listo
+        if (verifySig !== beforeSig) break; // cambió por otro motivo legítimo: no insistir
+        // volvió exactamente a como estaba antes de nuestro ataque — se
+        // lo pisaron, reintentamos desde el estado actual.
+      }
     })();
   };
 
