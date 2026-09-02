@@ -190,6 +190,13 @@ const GUERRA_FLICKER_MS = 15000; // "blanco y negro intermitente": cada vez que 
 const GUERRA_GIANT_SIZE_MULT = 2; // "grilla gigante": multiplica filas y columnas por esto en CADA aplicación — 1 vez: 4 veces más piezas; 2 veces (máximo): 16 veces más piezas
 const GUERRA_GIANT_CLEAR_COUNT = 4; // ...y cada tap limpia esto TIMES la cantidad de veces que se la mandaron (1 vez: 4 piezas; 2 veces: 8), para que no sea proporcionalmente más lenta de resolver
 const LARA_RAINBOW_COLOR_COUNT = 8; // "16 colores": para Lara, la mitad (8) — misma proporción que el resto de sus ventajas
+// Modo Guerra: si pasan 2 minutos SIN que te ataquen de nuevo, se te
+// sacan todos los ataques que tenías encima y la grilla que tenías
+// abierta vuelve a ser estándar (normal, sin gigante ni colores extra) —
+// pedido del usuario porque algunas combinaciones se vuelven demasiado
+// difíciles y sin esto podías quedar pegado para siempre si nadie te
+// atacaba de nuevo. Cada ataque nuevo que recibís reinicia la cuenta.
+const GUERRA_ATTACK_EXPIRE_MS = 120000;
 // Cantidad de grillas por etapa: fija (no elegible), así quedó después de
 // jugarlo en familia — de entrada son 3, la etapa de 3 jugadores son 4, y
 // la final son 3.
@@ -1734,6 +1741,7 @@ function freshStateForStage(stage, easy, forcedCount) {
     flickerUntil: null, // modo Guerra: ataque "blanco y negro intermitente"
     flickerStack: 0, // ...cuántas veces te lo mandaron en esta grilla (máx. GUERRA_MAX_STACK) — cada una alarga la fase en gris
     twoOneStack: 0, // modo Guerra: ataque "2-1" — 0 = no activo, 1 = "2-1" (cada 2 que borra reaparece 1), 2 = "4-3" (cada 4 reaparecen 3) — ver tapCell
+    lastAttackAt: null, // modo Guerra: cuándo me atacaron por última vez — ver GUERRA_ATTACK_EXPIRE_MS
     gridExtraSentTo: [], // modo Guerra: a quién ya le mandé el ataque "grilla extra" (solo una vez por rival, en toda la partida)
   };
 }
@@ -2013,6 +2021,7 @@ function GameRoom({ roomCode, myId, onBack }) {
           flickerUntil: useMyClearedAttacks ? liveNow.flickerUntil : fresh.flickerUntil,
           flickerStack: useMyClearedAttacks ? liveNow.flickerStack : fresh.flickerStack,
           twoOneStack: useMyClearedAttacks ? liveNow.twoOneStack : fresh.twoOneStack,
+          lastAttackAt: useMyClearedAttacks ? liveNow.lastAttackAt : fresh.lastAttackAt,
           // gridExtraSentTo solo lo modifico yo mismo (cuando ATACO a otro,
           // no cuando me atacan a mí), así que siempre vale mi copia local.
           gridExtraSentTo: liveNow.gridExtraSentTo || [],
@@ -2116,6 +2125,18 @@ function GameRoom({ roomCode, myId, onBack }) {
     const onCritterTap = () => onCritterTapRef.current();
     window.addEventListener("jx-critter-tap", onCritterTap);
     return () => window.removeEventListener("jx-critter-tap", onCritterTap);
+  }, []);
+
+  // Modo Guerra: cada 1s se fija si pasaron GUERRA_ATTACK_EXPIRE_MS (2min)
+  // desde el último ataque que recibí — si es así, se sacan (ver la lógica
+  // en expireAttacksRef.current, más abajo cerca de performAttack). Mismo
+  // patrón de ref-estable que onCritterTapRef, y por el mismo motivo:
+  // este setInterval tiene que registrarse ANTES del "if (!room) return"
+  // de acá abajo para no violar las Reglas de los Hooks.
+  const expireAttacksRef = useRef(() => {});
+  useEffect(() => {
+    const id = setInterval(() => expireAttacksRef.current(), 1000);
+    return () => clearInterval(id);
   }, []);
 
   if (!room) {
@@ -2333,7 +2354,9 @@ function GameRoom({ roomCode, myId, onBack }) {
                 CUALQUIER grilla te saca todos los ataques que tenías encima, así que arrancás la
                 siguiente limpio. La grilla extra (🧱, no confundir con colores extra) es distinta: no se
                 acumula en fuerza, pero a cada rival se la podés mandar una sola vez en toda la partida —
-                después ya no aparece esa opción para esa persona.
+                después ya no aparece esa opción para esa persona. 🕊️ Si pasan 2 minutos sin que te
+                ataquen de nuevo, se te sacan todos los ataques que tenías encima (la grilla vuelve a ser
+                estándar) — para no quedar pegado para siempre en una combinación demasiado difícil.
                 <br />
                 No se corta cuando alguien gana: se sigue jugando hasta que todos terminan su cola, y
                 quedan ordenados por el orden real en que van terminando.
@@ -2652,6 +2675,10 @@ function GameRoom({ roomCode, myId, onBack }) {
         const newQueue = [...(freshTarget.queue || []), extraGrid];
         nextTargetState = { ...freshTarget, queue: newQueue };
       }
+      // Modo Guerra: cada ataque que aterriza reinicia la cuenta de los 2
+      // minutos de "gracia" (GUERRA_ATTACK_EXPIRE_MS) — ver el efecto más
+      // abajo, cerca de tapCell.
+      if (stage === "guerra") nextTargetState = { ...nextTargetState, lastAttackAt: Date.now() };
       return nextTargetState;
     };
 
@@ -2753,6 +2780,41 @@ function GameRoom({ roomCode, myId, onBack }) {
     performAttack(target.id, type);
   };
 
+  // Modo Guerra, pedido del usuario: si pasan 2 minutos SIN que te
+  // ataquen de nuevo (GUERRA_ATTACK_EXPIRE_MS), se te sacan todos los
+  // ataques que tenías encima y la grilla vuelve a ser estándar — porque
+  // algunas combinaciones se vuelven demasiado difíciles, y sin esto
+  // podías quedar pegado para siempre si nadie te ataca de nuevo. Cada
+  // ataque que te llega reinicia la cuenta (ver el final de
+  // computeNextTargetState, en performAttack). Si la grilla actual está
+  // agrandada y/o con colores extra, se regenera una estándar (se pierde
+  // el progreso de esa, como con cualquier reemplazo de grilla) — si solo
+  // tenía girar/blanco y negro/2-1 sin tocar el tamaño, esos se sacan
+  // nomás, la grilla en sí sigue igual.
+  expireAttacksRef.current = () => {
+    if (stage !== "guerra") return;
+    const cur = myLiveStateRef.current;
+    if (!cur || !cur.lastAttackAt) return;
+    if (Date.now() - cur.lastAttackAt < GUERRA_ATTACK_EXPIRE_MS) return;
+    // Misma bandera que usa completeCurrentGrid al sacarse los ataques
+    // de encima al resolver una grilla — sin prenderla acá, el merge de
+    // la próxima sincronización (runSyncLoop) desconfía de mi limpieza
+    // local para estos campos y los vuelve a pisar con lo último leído
+    // del servidor (todavía con el lastAttackAt viejo), dejando el
+    // "vencimiento" sin efecto un instante después de aplicado.
+    myAttacksClearedPendingRef.current = true;
+    const q = cur.queue || [];
+    const currentGrid0 = q[0];
+    const wasModified = currentGrid0 && (currentGrid0.giant || (currentGrid0.rainbowStack || 0) > 0);
+    let newQueue = q;
+    if (wasModified) {
+      const size = myIsLara ? LARA_GRID_SIZE : GRID_SIZE;
+      const colorKeys = myIsLara ? PIECE_COLOR_KEYS.slice(0, LARA_COLOR_COUNT) : PIECE_COLOR_KEYS;
+      newQueue = [generateGrid(size, colorKeys), ...q.slice(1)];
+    }
+    setMyStateNow({ ...cur, queue: newQueue, spinning: 0, flickerUntil: null, flickerStack: 0, twoOneStack: 0, lastAttackAt: null });
+  };
+
   // Se llama cuando se completaron los colores de la grilla que está
   // primera en la cola: la saca de la cola YA (instantáneo).
   //  - Final: si no queda nada en la cola, terminé mis 3 grillas —
@@ -2813,7 +2875,7 @@ function GameRoom({ roomCode, myId, onBack }) {
       // algo desactualizado — si no, podría pisar con esto un ataque que
       // llegó justo en el medio.
       myAttacksClearedPendingRef.current = true;
-      setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: 0, flickerUntil: null, flickerStack: 0, twoOneStack: 0, finishedAt: isLastGrid ? Date.now() : cur.finishedAt || null });
+      setMyStateNow({ ...cur, queue: newQueue, solvedCount, spinning: 0, flickerUntil: null, flickerStack: 0, twoOneStack: 0, lastAttackAt: null, finishedAt: isLastGrid ? Date.now() : cur.finishedAt || null });
       const candidates = players.filter((p) => {
         if (p.id === myId) return false;
         const st = playerStates[p.id] || {};
