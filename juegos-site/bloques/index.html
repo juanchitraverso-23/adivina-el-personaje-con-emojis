@@ -187,17 +187,28 @@ const BW_DEBUFF_MS = 15000; // etapa de 3: "blanco y negro" dura como máximo es
 // con colores extra a la vez, cada ataque preserva el nivel del otro).
 const GUERRA_MAX_STACK = 2;
 const GUERRA_FLICKER_MS = 15000; // "blanco y negro intermitente": cada vez que te lo mandan (hasta 2 veces) se suma este tiempo a lo que te queda activo — mismo patrón que el freeze de Semifinal
-const GUERRA_GIANT_SIZE_MULT = 2; // "grilla gigante": multiplica filas y columnas por esto en CADA aplicación — 1 vez: 4 veces más piezas; 2 veces (máximo): 16 veces más piezas
-const GUERRA_GIANT_CLEAR_COUNT = 4; // ...y cada tap limpia esto TIMES la cantidad de veces que se la mandaron (1 vez: 4 piezas; 2 veces: 8), para que no sea proporcionalmente más lenta de resolver
+// "grilla gigante": el usuario probó las dos aplicaciones en familia y
+// pidió rebalancear — la de 1 vez (antes x2 por dimensión, 4 veces más
+// piezas) ya era "muy difícil", y la de 2 veces (antes x4, 16 veces más
+// piezas) resultaba "imposible". Se corrió todo un escalón: la de 1 vez
+// ahora es más liviana (x1.4 por dimensión, ~el doble de piezas), y la
+// de 2 veces (máximo) es lo que ANTES hacía una sola aplicación (x2 por
+// dimensión, 4 veces más piezas) — "un ataque más leve, y que dos
+// ataques sea lo mismo que hoy es uno solo". El tap también limpia menos
+// de golpe en el nivel liviano, proporcional al tamaño de cada uno.
+const GUERRA_GIANT_SIZE_MULT_BY_STACK = { 1: 1.4, 2: 2 };
+const GUERRA_GIANT_CLEAR_BY_STACK = { 1: 2, 2: 4 };
 const LARA_RAINBOW_COLOR_COUNT = 8; // "16 colores": para Lara, la mitad (8) — misma proporción que el resto de sus ventajas
-// Modo Guerra: si pasa 1 minuto SIN que limpies ni una pieza (ni una
+// Modo Guerra: si pasan 30 segundos SIN que limpies ni una pieza (ni una
 // sola, ver tapCell), se te sacan todos los ataques que tenías encima y
 // la grilla que tenías abierta vuelve a ser estándar (normal, sin
 // gigante ni colores extra) — pedido del usuario porque algunas
 // combinaciones se vuelven demasiado difíciles y sin esto podías quedar
-// pegado para siempre. Cualquier limpieza reinicia la cuenta (y también
-// un ataque nuevo, o pasar a la siguiente grilla — ver lastClearAt).
-const GUERRA_ATTACK_EXPIRE_MS = 60000;
+// pegado para siempre (al principio eran 2 minutos desde el último
+// ataque recibido; después pasó a 1 minuto sin limpiar nada; ahora la
+// mitad de eso). Cualquier limpieza reinicia la cuenta (y también un
+// ataque nuevo, o pasar a la siguiente grilla — ver lastClearAt).
+const GUERRA_ATTACK_EXPIRE_MS = 30000;
 // Cantidad de grillas por etapa: fija (no elegible), así quedó después de
 // jugarlo en familia — de entrada son 3, la etapa de 3 jugadores son 4, y
 // la final son 3.
@@ -1076,7 +1087,7 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
 const GUERRA_ATTACK_META = {
   spin: { emoji: "🌀", label: "Girar", desc: "Gira hasta que resuelva esa grilla. Recibirlo 2 veces duplica la velocidad.", title: "🌀 ¿A quién le hacés girar la grilla?", subtitle: "Si ya la tenía girando, ahora gira el doble de rápido (máximo)." },
   flicker: { emoji: "⚫⚪", label: "Blanco y negro intermitente", desc: "Parpadea entre color y gris. Recibirlo 2 veces suma tiempo y alarga la fase en gris.", title: "⚫⚪ ¿A quién le ponés blanco y negro intermitente?", subtitle: "Si ya lo tenía puesto, se suma tiempo y la fase en gris dura el doble (máximo)." },
-  giant: { emoji: "🔲", label: "Grilla gigante", desc: "Duplica filas y columnas de la grilla que tiene abierta. Recibirlo 2 veces la vuelve a duplicar.", title: "🔲 ¿A quién le agrandás la grilla?", subtitle: "Dura hasta que la resuelva — cada tap le limpia varias piezas de una, así no es taaan difícil. Si ya la tenía agrandada, se agranda de nuevo (máximo 2 veces)." },
+  giant: { emoji: "🔲", label: "Grilla gigante", desc: "Agranda un poco la grilla que tiene abierta. Recibirlo 2 veces la agranda al doble (como antes hacía una sola vez).", title: "🔲 ¿A quién le agrandás la grilla?", subtitle: "Dura hasta que la resuelva — cada tap le limpia varias piezas de una, así no es taaan difícil. Si ya la tenía agrandada, se agranda más (máximo 2 veces)." },
   rainbow: { emoji: "🌈", label: "Colores extra", desc: "La grilla que tiene abierta pasa a tener 16 colores en vez de 6. Recibirlo 2 veces hace que CADA pieza sea de un color distinto.", title: "🌈 ¿A quién le ponés colores extra?", subtitle: "Si ya tenía 16 colores, ahora cada pieza de la grilla queda de un color distinto (máximo)." },
   twoOne: { emoji: "♻️", label: "2-1", desc: "Cada 2 piezas que limpia, reaparece 1 en un lugar donde ya había limpiado. Recibirlo 2 veces lo vuelve '4-3'.", title: "♻️ ¿A quién le ponés el 2-1?", subtitle: "Si ya lo tenía puesto, pasa a '4-3': cada 4 que limpia, reaparecen 3 (máximo)." },
   grid: { emoji: "🧱", label: "Grilla extra", desc: "Le suma una grilla más a resolver.", title: "🧱 ¿A quién le mandás una grilla extra?", subtitle: "Ojo: a cada rival se la podés mandar una sola vez en toda la partida." },
@@ -2134,7 +2145,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     return () => window.removeEventListener("jx-critter-tap", onCritterTap);
   }, []);
 
-  // Modo Guerra: cada 1s se fija si pasó GUERRA_ATTACK_EXPIRE_MS (1min)
+  // Modo Guerra: cada 1s se fija si pasó GUERRA_ATTACK_EXPIRE_MS (30s)
   // sin que limpie ni una pieza — si es así, se sacan los ataques que
   // tenía encima (ver la lógica en expireAttacksRef.current, más abajo
   // cerca de performAttack). Mismo patrón de ref-estable que
@@ -2350,21 +2361,22 @@ function GameRoom({ roomCode, myId, onBack }) {
                 <br />
                 Girar, blanco y negro, grilla gigante, colores extra y 2-1 se pueden recibir hasta 2
                 veces en la misma grilla: la segunda no cancela, suma — girar el doble de rápido, blanco
-                y negro con la fase en gris más larga, grilla gigante otra vez más grande (¡hasta 16
-                veces más piezas si te la mandan 2 veces!, aunque cada tap limpia varias de una así no es
-                tan difícil), colores extra pasa de 16 colores fijos a que CADA pieza sea de un color
-                distinto (tantos colores como piezas tenga la grilla en ese momento), y 2-1 pasa a "4-3":
-                cada 2 piezas que limpiás reaparece 1 en un lugar donde ya habías limpiado (con un color
-                de los que te faltan) — al máximo, cada 4 que limpiás reaparecen 3. Deja de reaparecer
-                cuando quedan pocas piezas (2, o 4 al máximo), para que siempre se pueda terminar. Se
-                pueden combinar entre sí (por ejemplo, alguien puede estar girando Y en blanco y negro a
-                la vez, o tener la grilla gigante Y con colores extra al mismo tiempo) — y ojo, resolver
-                CUALQUIER grilla te saca todos los ataques que tenías encima, así que arrancás la
-                siguiente limpio. La grilla extra (🧱, no confundir con colores extra) es distinta: no se
-                acumula en fuerza, pero a cada rival se la podés mandar una sola vez en toda la partida —
-                después ya no aparece esa opción para esa persona. 🕊️ Si pasa 1 minuto sin que limpies
-                ni una pieza, se te sacan todos los ataques que tenías encima (la grilla vuelve a ser
-                estándar) — para no quedar pegado para siempre en una combinación demasiado difícil.
+                y negro con la fase en gris más larga, grilla gigante se agranda un poco más (la segunda
+                vez llega a lo que antes hacía una sola aplicación, aunque cada tap limpia varias piezas
+                de una así no es tan difícil), colores extra pasa de 16 colores fijos a que CADA pieza
+                sea de un color distinto (tantos colores como piezas tenga la grilla en ese momento), y
+                2-1 pasa a "4-3": cada 2 piezas que limpiás reaparece 1 en un lugar donde ya habías
+                limpiado (con un color de los que te faltan) — al máximo, cada 4 que limpiás reaparecen
+                3. Deja de reaparecer cuando quedan pocas piezas (2, o 4 al máximo), para que siempre se
+                pueda terminar. Se pueden combinar entre sí (por ejemplo, alguien puede estar girando Y
+                en blanco y negro a la vez, o tener la grilla gigante Y con colores extra al mismo
+                tiempo) — y ojo, resolver CUALQUIER grilla te saca todos los ataques que tenías encima,
+                así que arrancás la siguiente limpio. La grilla extra (🧱, no confundir con colores
+                extra) es distinta: no se acumula en fuerza, pero a cada rival se la podés mandar una
+                sola vez en toda la partida — después ya no aparece esa opción para esa persona. 🕊️ Si
+                pasan 30 segundos sin que limpies ni una pieza, se te sacan todos los ataques que tenías
+                encima (la grilla vuelve a ser estándar) — para no quedar pegado para siempre en una
+                combinación demasiado difícil.
                 <br />
                 No se corta cuando alguien gana: se sigue jugando hasta que todos terminan su cola, y
                 quedan ordenados por el orden real en que van terminando.
@@ -2627,25 +2639,25 @@ function GameRoom({ roomCode, myId, onBack }) {
         // Modo Guerra: "grilla gigante" — reemplaza la grilla que el rival
         // tiene abierta AHORA (se pierde el progreso de esa, arranca de
         // cero) por una más grande. Se puede recibir hasta GUERRA_MAX_STACK
-        // (2) veces en la misma grilla: cada vez multiplica filas y
-        // columnas de nuevo por GUERRA_GIANT_SIZE_MULT (1 vez: 4 veces más
-        // piezas; 2 veces: 16 veces más — el tap también limpia el doble de
-        // piezas de una, ver tapCell). Al tope, un tercer intento no hace
-        // nada más. Si no le queda ninguna grilla (ya terminó todas), no
-        // hay nada que agrandar: no debería pasar porque TargetPicker ya
-        // filtra a quien terminó, pero por las dudas no rompe si pasa. Si
-        // la grilla ya tenía colores extra puesto (16 fijos, o uno por
-        // pieza), la nueva grilla gigante conserva ese nivel — buildStackedGrid
-        // se encarga de recalcular los colores para el tamaño nuevo (si es
-        // "un color por pieza", ahora va a haber más piezas y por lo tanto
-        // más colores, no se queda pegado en la cantidad vieja).
+        // (2) veces en la misma grilla, cada nivel con su propio
+        // multiplicador (GUERRA_GIANT_SIZE_MULT_BY_STACK) — el tap también
+        // limpia más de una de golpe, según el nivel (GUERRA_GIANT_CLEAR_BY_STACK,
+        // ver tapCell). Al tope, un tercer intento no hace nada más. Si no
+        // le queda ninguna grilla (ya terminó todas), no hay nada que
+        // agrandar: no debería pasar porque TargetPicker ya filtra a quien
+        // terminó, pero por las dudas no rompe si pasa. Si la grilla ya
+        // tenía colores extra puesto (16 fijos, o uno por pieza), la nueva
+        // grilla gigante conserva ese nivel — buildStackedGrid se encarga
+        // de recalcular los colores para el tamaño nuevo (si es "un color
+        // por pieza", ahora va a haber más piezas y por lo tanto más
+        // colores, no se queda pegado en la cantidad vieja).
         const q = freshTarget.queue || [];
         const currentGrid0 = q[0];
         const currentStack = q.length > 0 ? (currentGrid0.giantStack || 0) : GUERRA_MAX_STACK;
         if (q.length > 0 && currentStack < GUERRA_MAX_STACK) {
           const newStack = currentStack + 1;
           const rainbowStack = currentGrid0.rainbowStack || 0;
-          const baseSize = (targetIsLara ? LARA_GRID_SIZE : GRID_SIZE) * Math.pow(GUERRA_GIANT_SIZE_MULT, newStack);
+          const baseSize = Math.round((targetIsLara ? LARA_GRID_SIZE : GRID_SIZE) * GUERRA_GIANT_SIZE_MULT_BY_STACK[newStack]);
           const giantGrid = { ...buildStackedGrid(baseSize, rainbowStack, targetIsLara), giant: true, giantStack: newStack };
           nextTargetState = { ...freshTarget, queue: [giantGrid, ...q.slice(1)] };
         } else {
@@ -2788,8 +2800,8 @@ function GameRoom({ roomCode, myId, onBack }) {
     performAttack(target.id, type);
   };
 
-  // Modo Guerra, pedido del usuario: si pasa 1 minuto SIN que limpie ni
-  // una pieza (GUERRA_ATTACK_EXPIRE_MS — ver tapCell, que reinicia la
+  // Modo Guerra, pedido del usuario: si pasan 30 segundos SIN que limpie
+  // ni una pieza (GUERRA_ATTACK_EXPIRE_MS — ver tapCell, que reinicia la
   // cuenta con cada limpieza), se sacan todos los ataques que tenía
   // encima y la grilla vuelve a ser estándar — porque algunas
   // combinaciones se vuelven demasiado difíciles y sin esto podía quedar
@@ -2948,15 +2960,13 @@ function GameRoom({ roomCode, myId, onBack }) {
       registerWrong(stage === "final" && cur.queue.length === 1);
       return;
     }
-    // Ataque "grilla gigante" (modo Guerra): la grilla tiene varias veces
-    // más piezas de lo normal (giantStack veces GUERRA_GIANT_SIZE_MULT al
-    // cuadrado), así que cada tap limpia GUERRA_GIANT_CLEAR_COUNT * giantStack
+    // Ataque "grilla gigante" (modo Guerra): la grilla tiene más piezas de
+    // lo normal, así que cada tap limpia GUERRA_GIANT_CLEAR_BY_STACK[nivel]
     // piezas del color activo de una (la tocada + las que hagan falta), no
-    // solo la tocada — con 2 aplicaciones limpia el doble, para que no sea
-    // proporcionalmente más lenta de resolver. En cualquier otra grilla
-    // (grid.giant es undefined) esto no cambia nada: se limpia solo la
-    // pieza tocada, como siempre.
-    const clearCount = grid.giant ? GUERRA_GIANT_CLEAR_COUNT * (grid.giantStack || 1) : 1;
+    // solo la tocada — para que no sea proporcionalmente más lenta de
+    // resolver. En cualquier otra grilla (grid.giant es undefined) esto no
+    // cambia nada: se limpia solo la pieza tocada, como siempre.
+    const clearCount = grid.giant ? GUERRA_GIANT_CLEAR_BY_STACK[grid.giantStack || 1] : 1;
     const extraIds = grid.pieces
       .filter((p) => p.color === activeColor && !p.cleared && p.id !== pieceId)
       .slice(0, clearCount - 1)
@@ -3008,8 +3018,8 @@ function GameRoom({ roomCode, myId, onBack }) {
       return;
     }
     const nextQueue = [newGrid, ...cur.queue.slice(1)];
-    // Modo Guerra: cada pieza limpiada reinicia la cuenta de "1 minuto
-    // sin progreso" (ver GUERRA_ATTACK_EXPIRE_MS / expireAttacksRef) —
+    // Modo Guerra: cada pieza limpiada reinicia la cuenta de "sin
+    // progreso" (30s, GUERRA_ATTACK_EXPIRE_MS / expireAttacksRef) —
     // así los ataques encima solo se sacan solos cuando de verdad no
     // lográs avanzar, no por simple mala suerte de timing.
     setMyStateNow({ ...cur, queue: nextQueue, ...(stage === "guerra" ? { lastClearAt: Date.now() } : {}) });
@@ -3147,7 +3157,7 @@ function GameRoom({ roomCode, myId, onBack }) {
           )}
           {currentGrid && currentGrid.giant && (
             <div style={{ textAlign: "center", color: "#4FC3F7", fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", fontSize: 14, marginTop: 12 }}>
-              🔲 ¡Te agrandaron la grilla{currentGrid.giantStack >= 2 ? " al máximo" : ""}! Cada tap limpia {GUERRA_GIANT_CLEAR_COUNT * (currentGrid.giantStack || 1)} piezas de una.
+              🔲 ¡Te agrandaron la grilla{currentGrid.giantStack >= 2 ? " al máximo" : ""}! Cada tap limpia {GUERRA_GIANT_CLEAR_BY_STACK[currentGrid.giantStack || 1]} piezas de una.
             </div>
           )}
           {currentGrid && currentGrid.rainbowStack === 1 && (
