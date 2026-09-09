@@ -149,6 +149,10 @@ const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 16;
 const STREAK_BONUS_AT = 3; // rondas seguidas ganando punto para el bonus
 const BONUS_POINTS = 1;
+// Pedido del usuario: al pedir "revelar resultados" con gente que todavía
+// no votó, en vez de cerrar la votación de una se da este plazo de gracia
+// para que lleguen esos votos — con cuenta regresiva visible para todos.
+const VOTING_CLOSE_GRACE_MS = 5000;
 
 const GRADIENT_BG = "radial-gradient(circle at 20% -10%, #4a1140 0%, #2a0e35 45%, #0c0620 100%)";
 const PLAYER_COLORS = [
@@ -187,6 +191,67 @@ async function readRoom(code) {
 }
 async function writeRoom(code, room) {
   await window.storage.set(STORAGE_PREFIX + code, JSON.stringify(room), true);
+}
+
+// Calcula quién ganó la mayoría de los votos de esta ronda y arma el
+// objeto de sala ya en fase "revealed" — puntaje, racha y bonus incluidos.
+// Es una función pura sobre `fresh` (no llama a readRoom/writeRoom): la
+// usan tanto requestReveal (cuando ya votaron todos, o el anfitrión/a
+// decide no esperar más) como checkVotingExpired (cuando se cumple el
+// plazo de gracia). Ganador: quien tiene el máximo de votos — sus
+// votantes se llevan un punto cada uno. Empate en el máximo: ganan un
+// punto TODOS los que votaron, sin importar a quién. 3 rondas seguidas
+// ganando punto suman 1 de bonus (y ahí se reinicia la racha).
+function computeRevealedRoom(fresh) {
+  const votes = fresh.votes || {};
+  const tally = {};
+  Object.values(votes).forEach((cid) => {
+    tally[cid] = (tally[cid] || 0) + 1;
+  });
+  const maxVotes = Math.max(0, ...Object.values(tally));
+  const winners = Object.keys(tally).filter((cid) => tally[cid] === maxVotes);
+  const isTie = winners.length > 1;
+  const voterIds = Object.keys(votes);
+  const pointsAwarded = isTie ? voterIds : voterIds.filter((vid) => winners.includes(votes[vid]));
+  const bonusAwarded = [];
+  const players = fresh.players.map((p) => {
+    const gotPoint = pointsAwarded.includes(p.id);
+    let streak = gotPoint ? (p.streak || 0) + 1 : 0;
+    let bonus = 0;
+    if (streak >= STREAK_BONUS_AT) {
+      bonus = BONUS_POINTS;
+      streak = 0;
+      bonusAwarded.push(p.id);
+    }
+    return {
+      ...p,
+      score: (p.score || 0) + (gotPoint ? 1 : 0) + bonus,
+      streak,
+      lastRoundPoints: (gotPoint ? 1 : 0) + bonus,
+      lastRoundBonus: bonus > 0,
+    };
+  });
+  return {
+    ...fresh,
+    players,
+    phase: "revealed",
+    votingClosesAt: null,
+    lastResult: { round: fresh.round, tally, maxVotes, winners, isTie, votes, bonusAwarded },
+  };
+}
+
+// Se llama desde el sondeo de CUALQUIER cliente conectado (no solo el del
+// anfitrión/a — mismo motivo que checkWritingComplete en Diccionario
+// Trucho: si la pestaña que arrancó el plazo de gracia se queda en
+// segundo plano, otra igual tiene que poder cerrarlo) mientras la sala
+// está en "voting" y tiene votingClosesAt puesto. Guarda de idempotencia:
+// si alguien más ya lo cerró (o el round ya cambió), no hace nada.
+async function checkVotingExpired(roomCode, round) {
+  const fresh = await readRoom(roomCode);
+  if (!fresh || fresh.phase !== "voting") return;
+  if (fresh.round !== round) return;
+  if (!fresh.votingClosesAt || Date.now() < fresh.votingClosesAt) return;
+  await writeRoom(roomCode, computeRevealedRoom(fresh));
 }
 
 // ==================== UI COMPARTIDA (mismo lenguaje visual que el resto del sitio) ====================
@@ -354,6 +419,21 @@ const inputStyle = {
   fontFamily: "'Nunito', sans-serif",
 };
 
+function pillStyle(active) {
+  return {
+    width: "100%",
+    padding: "10px 8px",
+    borderRadius: 12,
+    border: active ? "2px solid #FFD23F" : "1px solid rgba(255,255,255,0.15)",
+    background: active ? "rgba(255,210,63,0.15)" : "rgba(255,255,255,0.06)",
+    color: active ? "#FFD23F" : "#F3EEFF",
+    fontWeight: 800,
+    fontFamily: "'Baloo 2', sans-serif",
+    fontSize: 14,
+    cursor: "pointer",
+  };
+}
+
 function BgScene() {
   return (
     <>
@@ -503,7 +583,9 @@ function JoinScreen({ onJoined, onBack }) {
           phase: "lobby",
           round: 0,
           votes: {},
+          votingClosesAt: null,
           lastResult: null,
+          anonymous: false,
           createdAt: Date.now(),
         };
       } else {
@@ -686,6 +768,15 @@ function VoteGrid({ players, myVote, onVote }) {
 // ==================== SALA ====================
 function GameRoom({ roomCode, myId, onBack }) {
   const [room, setRoom] = useState(null);
+  // Solo para la cuenta regresiva del plazo de gracia (ver
+  // VOTING_CLOSE_GRACE_MS) — necesita re-renderizar seguido para que el
+  // número baje de a uno, mucho más seguido que el sondeo de red
+  // (POLL_MS). No dispara ningún pedido, es puramente local.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -693,6 +784,12 @@ function GameRoom({ roomCode, myId, onBack }) {
       const r = await readRoom(roomCode);
       if (cancelled || !r) return;
       setRoom(r);
+      // Si el plazo de gracia ya se cumplió, cualquier cliente conectado
+      // (no solo el del anfitrión/a) cierra la votación — ver el
+      // comentario grande de checkVotingExpired.
+      if (r.phase === "voting" && r.votingClosesAt && Date.now() >= r.votingClosesAt) {
+        await checkVotingExpired(roomCode, r.round);
+      }
     };
     tick();
     const id = setInterval(tick, POLL_MS);
@@ -723,6 +820,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     fresh.round = (fresh.round || 0) + 1;
     fresh.phase = "voting";
     fresh.votes = {};
+    fresh.votingClosesAt = null;
     fresh.lastResult = null;
     await writeRoom(roomCode, fresh);
     setRoom(fresh);
@@ -742,47 +840,36 @@ function GameRoom({ roomCode, myId, onBack }) {
     setRoom(fresh);
   };
 
-  // El anfitrión/a decide cuándo revelar (no hace falta que hayan votado
-  // todos — "las maneja el que creó la sala"). Calcula quién ganó la
-  // mayoría de los votos: sus votantes se llevan un punto cada uno. Si hay
-  // empate en el máximo, en cambio, ganan un punto TODOS los que votaron
-  // esa ronda (sin importar a quién). 3 rondas seguidas ganando punto
-  // suman 1 de bonus (y ahí se reinicia la racha, para que haga falta una
-  // tanda nueva de 3 para el próximo bonus).
-  const revealResults = async () => {
+  // El anfitrión/a pide revelar. Si ya votaron todos, no hay nada que
+  // esperar — se revela ya. Si falta gente, en cambio, se abre un plazo de
+  // gracia (VOTING_CLOSE_GRACE_MS) con cuenta regresiva visible para
+  // todos, así llegan a votar los que faltaban — pedido del usuario. El
+  // cierre real, pasado ese plazo, lo dispara checkVotingExpired desde el
+  // sondeo (no hace falta que el anfitrión/a siga con la pestaña abierta).
+  const requestReveal = async () => {
     const fresh = await readRoom(roomCode);
     if (!fresh || fresh.phase !== "voting") return;
-    const votes = fresh.votes || {};
-    const voterIds = Object.keys(votes);
-    if (voterIds.length === 0) return;
-    const tally = {};
-    Object.values(votes).forEach((cid) => {
-      tally[cid] = (tally[cid] || 0) + 1;
-    });
-    const maxVotes = Math.max(0, ...Object.values(tally));
-    const winners = Object.keys(tally).filter((cid) => tally[cid] === maxVotes);
-    const isTie = winners.length > 1;
-    const pointsAwarded = isTie ? voterIds : voterIds.filter((vid) => winners.includes(votes[vid]));
-    const bonusAwarded = [];
-    fresh.players = fresh.players.map((p) => {
-      const gotPoint = pointsAwarded.includes(p.id);
-      let streak = gotPoint ? (p.streak || 0) + 1 : 0;
-      let bonus = 0;
-      if (streak >= STREAK_BONUS_AT) {
-        bonus = BONUS_POINTS;
-        streak = 0;
-        bonusAwarded.push(p.id);
-      }
-      return {
-        ...p,
-        score: (p.score || 0) + (gotPoint ? 1 : 0) + bonus,
-        streak,
-        lastRoundPoints: (gotPoint ? 1 : 0) + bonus,
-        lastRoundBonus: bonus > 0,
-      };
-    });
-    fresh.phase = "revealed";
-    fresh.lastResult = { round: fresh.round, tally, maxVotes, winners, isTie, votes, bonusAwarded };
+    const votedCount = Object.keys(fresh.votes || {}).length;
+    if (votedCount === 0) return;
+    if (votedCount >= fresh.players.length) {
+      const revealed = computeRevealedRoom(fresh);
+      await writeRoom(roomCode, revealed);
+      setRoom(revealed);
+      return;
+    }
+    fresh.votingClosesAt = Date.now() + VOTING_CLOSE_GRACE_MS;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  // Host-only, como el modo de juego en Bloques en Cadena: mismo chequeo
+  // de "si ya está así, no escribas de nuevo" para no gastar cuota de KV
+  // al pedo si tocan el mismo botón dos veces.
+  const setAnonymous = async (value) => {
+    if (!!room.anonymous === value) return;
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.anonymous = value;
     await writeRoom(roomCode, fresh);
     setRoom(fresh);
   };
@@ -839,6 +926,26 @@ function GameRoom({ roomCode, myId, onBack }) {
             jugar tantas rondas como quieran.
           </div>
         </Card>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Modo de votación</div>
+          {isHost ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setAnonymous(false)} style={{ ...pillStyle(!room.anonymous), flex: 1 }}>
+                🗣️ Con nombres
+              </button>
+              <button onClick={() => setAnonymous(true)} style={{ ...pillStyle(!!room.anonymous), flex: 1 }}>
+                🕶️ Anónima
+              </button>
+            </div>
+          ) : (
+            <div style={{ color: "#F3EEFF", fontWeight: 700 }}>{room.anonymous ? "🕶️ Anónima" : "🗣️ Con nombres"}</div>
+          )}
+          <div style={{ fontSize: 12.5, color: "#8b7fa8", marginTop: 8, lineHeight: 1.4 }}>
+            {room.anonymous
+              ? "En el resultado no se muestra quién votó a quién — solo cantidad de votos y puntajes."
+              : "En el resultado se muestra quién votó a quién, además de los puntajes."}
+          </div>
+        </Card>
         {isHost ? (
           <BigButton onClick={startVoting} disabled={players.length < MIN_PLAYERS}>
             {players.length < MIN_PLAYERS ? `Esperando jugadores (mín. ${MIN_PLAYERS})...` : "Empezar 🎮"}
@@ -858,6 +965,8 @@ function GameRoom({ roomCode, myId, onBack }) {
     const votes = room.votes || {};
     const votedCount = Object.keys(votes).length;
     const myVote = votes[myId] || null;
+    const closing = !!room.votingClosesAt;
+    const closingSecs = closing ? Math.max(0, Math.ceil((room.votingClosesAt - now) / 1000)) : 0;
     return (
       <Screen homeConfirm="¿Salir de la sala?">
         <Title size={24}>Ronda {room.round}</Title>
@@ -869,8 +978,13 @@ function GameRoom({ roomCode, myId, onBack }) {
         <Sub style={{ marginTop: -6 }}>
           {votedCount}/{players.length} ya votaron
         </Sub>
-        {isHost ? (
-          <BigButton onClick={revealResults} disabled={votedCount === 0}>
+        {closing ? (
+          <Sub style={{ marginTop: -6, fontSize: 17 }}>
+            ⏱️ Cerrando la votación en{" "}
+            <b style={{ color: closingSecs <= 2 ? "#FF5D7A" : "#FFD23F" }}>{closingSecs}s</b>
+          </Sub>
+        ) : isHost ? (
+          <BigButton onClick={requestReveal} disabled={votedCount === 0}>
             {votedCount === 0 ? "Esperando votos..." : "Revelar resultados 🗳️"}
           </BigButton>
         ) : (
@@ -913,6 +1027,11 @@ function GameRoom({ roomCode, myId, onBack }) {
             llevan un punto.
           </Sub>
         )}
+        {room.anonymous && (
+          <Sub style={{ marginTop: -14, fontSize: 13, color: "#8b7fa8" }}>
+            🕶️ Votación anónima — no se muestra quién votó a quién.
+          </Sub>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 460, marginBottom: 14 }}>
           {sortedCandidates.map((p) => {
             const count = tally[p.id] || 0;
@@ -940,7 +1059,7 @@ function GameRoom({ roomCode, myId, onBack }) {
                     {count} {count === 1 ? "voto" : "votos"}
                   </span>
                 </div>
-                {voters.length > 0 && (
+                {!room.anonymous && voters.length > 0 && (
                   <div style={{ fontSize: 12.5, color: "#8b7fa8", marginTop: 4 }}>votado por: {voters.join(", ")}</div>
                 )}
               </div>
