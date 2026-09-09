@@ -466,9 +466,16 @@ function announceAttack(type, targetName) {
   if (!window.speechSynthesis) return;
   const meta = typeof GUERRA_ATTACK_META !== "undefined" ? GUERRA_ATTACK_META[type] : null;
   const shout = (meta && meta.shout) || (typeof EXTRA_ATTACK_SHOUTS !== "undefined" && EXTRA_ATTACK_SHOUTS[type]) || "¡ATAQUEEE!";
+  // Pedido del usuario: "dejemos un poquito mas de espacio para que no
+  // se mezcle el ataque y el nombre" — por default hay una pausa (los
+  // "...") entre el grito y el nombre, que va con su propio ¡...!. Los
+  // que ya terminan en una palabra que conecta directo (flowsIntoName,
+  // como "blanco y negro PARAAAA") van pegados al nombre, sin pausa ni
+  // exclamación propia en el medio.
+  const text = meta && meta.flowsIntoName ? `${shout} ${targetName}!` : `${shout}... ¡${targetName}!`;
   try {
     window.speechSynthesis.cancel(); // no se pisan uno arriba del otro si atacás rápido
-    const utter = new SpeechSynthesisUtterance(`${shout} ¡${targetName}!`);
+    const utter = new SpeechSynthesisUtterance(text);
     utter.lang = "es-AR";
     utter.rate = 0.92;
     utter.pitch = 0.55;
@@ -477,6 +484,70 @@ function announceAttack(type, targetName) {
     if (voice) utter.voice = voice;
     window.speechSynthesis.speak(utter);
   } catch {}
+}
+// Reacción cómica de quien RECIBE el ataque — pedido del usuario: "que el
+// juego diga ayy esta se complica! con voz graciosa". Voz opuesta a la
+// del locutor (agudo y rápido en vez de grave y pausado), para que se
+// note que es un personaje distinto reaccionando, no el mismo locutor.
+// No cancela lo que esté sonando (a diferencia de announceAttack): si
+// justo te atacaste a vos mismo, que se escuchen los dos en fila en vez
+// de cortarse uno a otro.
+const ATTACK_RECEIVED_LINES = [
+  "¡Ayyy, esta se complica!",
+  "¡Uy uy uy, la vas a pasar mal!",
+  "¡Nooo, así no vale!",
+  "¡Y ahora qué hago!",
+];
+function playAttackReceived() {
+  if (isSoundMuted()) return;
+  playTension();
+  if (!window.speechSynthesis) return;
+  try {
+    const line = ATTACK_RECEIVED_LINES[Math.floor(Math.random() * ATTACK_RECEIVED_LINES.length)];
+    const utter = new SpeechSynthesisUtterance(line);
+    utter.lang = "es-AR";
+    utter.rate = 1.2;
+    utter.pitch = 1.65;
+    utter.volume = 1;
+    window.speechSynthesis.speak(utter);
+  } catch {}
+}
+// Detecta "me acaban de atacar" comparando una "huella" chica de mi
+// estado (cuánto girar/blanco y negro/2-1 tengo encima, si mi grilla
+// está agrandada/con colores extra, cuántas grillas tengo en cola, y los
+// debuffs de Semifinal) contra la última que vi — si CUALQUIERA de esos
+// campos AUMENTÓ (nunca si bajó: eso es resolver una grilla o que se
+// vaya solo por inactividad, no un ataque nuevo), dispara la reacción
+// graciosa. checkForIncomingAttack se llama tanto desde el sondeo de
+// cada segundo (cuando estoy tranquilo, sin tocar nada) como desde
+// runSyncLoop (cuando estoy jugando activamente) — son los dos únicos
+// lugares donde mi propio estado se actualiza con lo que hay en el
+// servidor.
+function attackFingerprint(st) {
+  const q = (st && st.queue) || [];
+  const g = q[0] || {};
+  return {
+    spinning: st.spinning || 0,
+    flickerStack: st.flickerStack || 0,
+    twoOneStack: st.twoOneStack || 0,
+    giantStack: g.giantStack || 0,
+    rainbowStack: g.rainbowStack || 0,
+    queueLen: q.length,
+    bwUntil: st.bwUntil || 0,
+    freezeUntil: st.freezeUntil || 0,
+  };
+}
+function attackFingerprintIncreased(prev, next) {
+  return (
+    next.spinning > prev.spinning ||
+    next.flickerStack > prev.flickerStack ||
+    next.twoOneStack > prev.twoOneStack ||
+    next.giantStack > prev.giantStack ||
+    next.rainbowStack > prev.rainbowStack ||
+    next.queueLen > prev.queueLen ||
+    next.bwUntil > prev.bwUntil ||
+    next.freezeUntil > prev.freezeUntil
+  );
 }
 
 async function readRoom(code) {
@@ -1348,10 +1419,15 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
 // ataque (ver announceAttack) — más pegadizo y con onda que el label de
 // siempre, a propósito con vocales alargadas ("...OOO", "...EEE") porque
 // muchos motores de voz sí las estiran un toque al leerlas, quedando más
-// cerca de un grito de pelea que de una lectura plana.
+// cerca de un grito de pelea que de una lectura plana. Por default el
+// locutor deja una pausa entre el grito y el nombre (para que no se
+// mezclen, pedido del usuario) y dice el nombre aparte; `flowsIntoName:
+// true` es para los que ya terminan en una palabra que conecta directo
+// con el nombre (como "blanco y negro PARAAAA {nombre}"), sin pausa ni
+// exclamación propia en el medio.
 const GUERRA_ATTACK_META = {
-  spin: { emoji: "🌀", label: "Girar", shout: "¡TORBELLINOOO!", desc: "Gira hasta que resuelva esa grilla. Recibirlo 2 veces duplica la velocidad.", title: "🌀 ¿A quién le hacés girar la grilla?", subtitle: "Si ya la tenía girando, ahora gira el doble de rápido (máximo)." },
-  flicker: { emoji: "⚫⚪", label: "Blanco y negro intermitente", shout: "¡APAGÓN TOTAL!", desc: "Parpadea entre color y gris. Recibirlo 2 veces suma tiempo y alarga la fase en gris.", title: "⚫⚪ ¿A quién le ponés blanco y negro intermitente?", subtitle: "Si ya lo tenía puesto, se suma tiempo y la fase en gris dura el doble (máximo)." },
+  spin: { emoji: "🌀", label: "Girar", shout: "¡PONTE A GIRAR!", desc: "Gira hasta que resuelva esa grilla. Recibirlo 2 veces duplica la velocidad.", title: "🌀 ¿A quién le hacés girar la grilla?", subtitle: "Si ya la tenía girando, ahora gira el doble de rápido (máximo)." },
+  flicker: { emoji: "⚫⚪", label: "Blanco y negro intermitente", shout: "¡Blanco y Negro paraaaa", flowsIntoName: true, desc: "Parpadea entre color y gris. Recibirlo 2 veces suma tiempo y alarga la fase en gris.", title: "⚫⚪ ¿A quién le ponés blanco y negro intermitente?", subtitle: "Si ya lo tenía puesto, se suma tiempo y la fase en gris dura el doble (máximo)." },
   giant: { emoji: "🔲", label: "Grilla gigante", shout: "¡GRILLA GIGANTEEE!", desc: "Agranda un poco la grilla que tiene abierta. Recibirlo 2 veces la agranda al doble (como antes hacía una sola vez).", title: "🔲 ¿A quién le agrandás la grilla?", subtitle: "Dura hasta que la resuelva — cada tap le limpia varias piezas de una, así no es taaan difícil. Si ya la tenía agrandada, se agranda más (máximo 2 veces)." },
   rainbow: { emoji: "🌈", label: "Colores extra", shout: "¡EXPLOSIÓN DE COLOR!", desc: "La grilla que tiene abierta pasa a tener 16 colores en vez de 6. Recibirlo 2 veces hace que CADA pieza sea de un color distinto.", title: "🌈 ¿A quién le ponés colores extra?", subtitle: "Si ya tenía 16 colores, ahora cada pieza de la grilla queda de un color distinto (máximo)." },
   twoOne: { emoji: "♻️", label: "2-1", shout: "¡REGENERACIÓN BRUTAL!", desc: "Cada 2 piezas que limpia, reaparece 1 en un lugar donde ya había limpiado. Recibirlo 2 veces lo vuelve '4-3'.", title: "♻️ ¿A quién le ponés el 2-1?", subtitle: "Si ya lo tenía puesto, pasa a '4-3': cada 4 que limpia, reaparecen 3 (máximo)." },
@@ -2175,6 +2251,19 @@ function GameRoom({ roomCode, myId, onBack }) {
   // por ataque de grilla gigante/colores extra).
   const twoOneCounterRef = useRef(0);
   const twoOneGidRef = useRef(null);
+  // Última "huella" de ataques que vi en MI PROPIO estado (ver
+  // attackFingerprint/checkForIncomingAttack) — para notar cuándo me
+  // acaban de atacar y disparar la reacción cómica ("¡esta se
+  // complica!"), sin importar si en ese momento estoy jugando activo o
+  // tranquilo esperando.
+  const lastAttackFingerprintRef = useRef(null);
+  const checkForIncomingAttack = (st) => {
+    if (!st) return;
+    const next = attackFingerprint(st);
+    const prev = lastAttackFingerprintRef.current;
+    if (prev && attackFingerprintIncreased(prev, next)) playAttackReceived();
+    lastAttackFingerprintRef.current = next;
+  };
   // Agrupa varios clicks seguidos en UNA sola escritura al servidor, en
   // vez de una por click: sin esto, limpiar una grilla entera (decenas
   // de clicks en pocos segundos) gastaba una escritura de Workers KV por
@@ -2317,6 +2406,7 @@ function GameRoom({ roomCode, myId, onBack }) {
           // no cuando me atacan a mí), así que siempre vale mi copia local.
           gridExtraSentTo: liveNow.gridExtraSentTo || [],
         };
+        checkForIncomingAttack(merged);
         await writePlayerState(roomCode, round, myId, merged);
         lastKnownServerQueueIdsRef.current = merged.queue.map((g) => g.gid);
       }
@@ -2378,6 +2468,7 @@ function GameRoom({ roomCode, myId, onBack }) {
         // referencia síncrona que usan los clicks) con esta lectura del
         // server, que puede no reflejar todavía mi último click.
         if (!hasPendingWrite()) {
+          checkForIncomingAttack(states[myId]);
           myLiveStateRef.current = states[myId] || myLiveStateRef.current;
           lastKnownServerQueueIdsRef.current = ((myLiveStateRef.current && myLiveStateRef.current.queue) || []).map((g) => g.gid);
         }
