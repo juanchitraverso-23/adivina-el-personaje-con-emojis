@@ -675,7 +675,7 @@ function BigButton({ children, onClick, color = "#3E9EFF", disabled, style }) {
         fontFamily: "'Baloo 2', sans-serif",
         fontWeight: 700,
         fontSize: 18,
-        boxShadow: disabled ? "none" : "0 6px 0 rgba(0,0,0,0.28)",
+        boxShadow: disabled ? "none" : "0 6px 0 rgba(0,0,0,0.28), inset 0 2px 0 rgba(255,255,255,0.2)",
         cursor: disabled ? "default" : "pointer",
         marginBottom: 14,
         transition: "transform 0.08s ease",
@@ -780,6 +780,16 @@ function GridBoard({ grid, onTap, shake, bw, locked, spinning }) {
     <div
       className={spinStack > 0 ? "bloques-spin" : ""}
       style={{
+        // Pedido del usuario: relieve/3D en las piezas y transiciones más
+        // vivas, "sin perder velocidad" — por eso el relieve es un
+        // gradiente en vez de sombras (mucho más barato de pintar cuando
+        // hay cientos de celdas, como en una grilla gigante), y la
+        // animación de "tocada" es solo transform/opacity (acelerado por
+        // GPU, no dispara reflow) y se aplica nada más que a la pieza que
+        // se tocó, no a la grilla entera. Ver la clase .bloques-piece más
+        // abajo — mismo <style> que ya usa .bloques-spin, siempre
+        // presente porque GridBoard es compartido entre Guerra/etapas y
+        // Práctica.
         display: "grid",
         // minmax(0, 1fr) y no 1fr a secas: por default una columna de grid
         // no se achica más allá del contenido "mínimo" de lo que tiene
@@ -805,6 +815,17 @@ function GridBoard({ grid, onTap, shake, bw, locked, spinning }) {
         animationDuration: spinStack > 0 ? Math.round(SPIN_PERIOD_MS / spinStack) + "ms" : undefined,
       }}
     >
+      <style>{`
+        /* Relieve/3D de las piezas + feedback de toque, pedido por el
+           usuario ("meterle una especie de relieve"): el brillo es un
+           gradiente (una sola pintada, barato incluso con cientos de
+           celdas), y el "toque" es nada más que transform+filter — no
+           dispara layout ni pinta de nuevo la grilla entera, así que no
+           cuesta velocidad ni en una grilla gigante de cientos de piezas.
+        */
+        .bloques-piece { transition: transform 0.16s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.12s ease, opacity 0.25s ease; }
+        .bloques-piece:active:not(:disabled) { transform: scale(0.84); filter: brightness(1.25); }
+      `}</style>
       {grid.cellPiece.map((pieceId, i) => {
         const piece = pieceId >= 0 ? grid.pieces[pieceId] : null;
         const cleared = !piece || piece.cleared;
@@ -814,6 +835,7 @@ function GridBoard({ grid, onTap, shake, bw, locked, spinning }) {
         return (
           <button
             key={i}
+            className="bloques-piece"
             onClick={() => !cleared && !locked && onTap(i)}
             disabled={cleared || locked}
             style={{
@@ -835,7 +857,16 @@ function GridBoard({ grid, onTap, shake, bw, locked, spinning }) {
               borderLeft: b.left ? "2px solid " + borderColor : "2px solid transparent",
               borderRight: b.right ? "2px solid " + borderColor : "2px solid transparent",
               borderBottom: b.bottom ? "2px solid " + borderColor : "2px solid transparent",
-              background: cleared ? "rgba(255,255,255,0.04)" : colorDef.hex,
+              // El relieve: un brillo arriba a la izquierda que se apaga
+              // hacia una sombra abajo a la derecha, como una piecita de
+              // verdad en vez de un cuadrado plano. Al limpiarla, un
+              // pequeño achique + desvanecido (transform/opacity, ver
+              // .bloques-piece) en vez del cambio brusco de antes.
+              background: cleared
+                ? "rgba(255,255,255,0.04)"
+                : `linear-gradient(155deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0.05) 45%, rgba(0,0,0,0.18) 100%), ${colorDef.hex}`,
+              transform: cleared ? "scale(0.78)" : "scale(1)",
+              opacity: cleared ? 0.7 : 1,
             }}
           />
         );
@@ -866,13 +897,19 @@ function ColorIndicator({ grid, bw }) {
         transition: "filter 0.6s ease",
       }}
     >
+      <style>{`
+        @keyframes bloques-swatch-pop { 0% { transform: scale(0.7); } 60% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        .bloques-swatch { animation: bloques-swatch-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1); }
+      `}</style>
       <div
+        key={activeColor}
+        className="bloques-swatch"
         style={{
           width: 72,
           height: 72,
           borderRadius: 18,
-          background: colorDef.hex,
-          boxShadow: "0 6px 0 rgba(0,0,0,0.3), inset 0 0 0 3px rgba(255,255,255,0.35)",
+          background: `radial-gradient(circle at 32% 26%, rgba(255,255,255,0.65), rgba(255,255,255,0) 45%), ${colorDef.hex}`,
+          boxShadow: "0 6px 0 rgba(0,0,0,0.3), inset 0 0 0 3px rgba(255,255,255,0.35), inset 0 -10px 14px rgba(0,0,0,0.2)",
         }}
       />
       <div
@@ -1040,6 +1077,7 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
               return (
                 <button
                   key={p.id}
+                  className="bloques-3dbtn"
                   onClick={() => onAttack(p.id)}
                   style={{
                     aspectRatio: "1",
@@ -1047,7 +1085,7 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
                     alignItems: "center",
                     justifyContent: "center",
                     textAlign: "center",
-                    background: color,
+                    background: `linear-gradient(155deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0.1) 100%), ${color}`,
                     border: "none",
                     borderRadius: 16,
                     padding: 10,
@@ -1056,7 +1094,7 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
                     fontWeight: 800,
                     fontSize: 18,
                     lineHeight: 1.15,
-                    boxShadow: "0 6px 0 rgba(0,0,0,0.28)",
+                    boxShadow: "0 6px 0 rgba(0,0,0,0.28), inset 0 2px 0 rgba(255,255,255,0.3)",
                     cursor: "pointer",
                   }}
                 >
@@ -1176,6 +1214,7 @@ function GuerraAttackPicker({ onChoose, onSkip, hideGridExtra }) {
           {visibleTypes.map(([type, meta]) => (
             <button
               key={type}
+              className="bloques-3dbtn"
               onClick={() => onChoose(type)}
               style={{
                 position: "relative",
@@ -1184,7 +1223,7 @@ function GuerraAttackPicker({ onChoose, onSkip, hideGridExtra }) {
                 borderRadius: 16,
                 padding: 0,
                 cursor: "pointer",
-                boxShadow: "0 6px 0 rgba(0,0,0,0.28)",
+                boxShadow: "0 6px 0 rgba(0,0,0,0.28), inset 0 2px 0 rgba(255,255,255,0.25)",
               }}
             >
               <AttackIcon type={type} />
@@ -3051,6 +3090,11 @@ function GameRoom({ roomCode, myId, onBack }) {
       <style>{`
         @keyframes bloques-spin { to { transform: rotate(360deg); } }
         .bloques-spin { animation: bloques-spin ${SPIN_PERIOD_MS}ms linear infinite; }
+        /* Botones "3D" (a quién atacar, qué ataque mandar): se hunden un
+           toque al tocarlos, como un botón de verdad — nada más que
+           transform, así no cuesta velocidad. */
+        .bloques-3dbtn { transition: transform 0.1s ease; }
+        .bloques-3dbtn:active { transform: translateY(4px) scale(0.97); }
       `}</style>
 
       {inCountdown && (
