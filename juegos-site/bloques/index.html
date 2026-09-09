@@ -2548,7 +2548,16 @@ function GameRoom({ roomCode, myId, onBack }) {
     scheduleSync();
   };
 
+  // Pedido del usuario, bug reportado: un solo click sin querer (por
+  // ejemplo, apuntarle al bichito de critter.js justo cuando pasa por esta
+  // misma zona de la pantalla, o simplemente un mal cálculo con el mouse)
+  // sacaba de la sala de una sin avisar — a diferencia del botón "Menú" de
+  // arriba, que hace exactamente lo mismo (dejar la sala) y YA pedía
+  // confirmación (ver HomeButton/homeConfirm, unas líneas más arriba). Acá
+  // sumamos la misma confirmación, así un click de más no tira por la
+  // borda una partida en curso.
   const leaveRoom = async () => {
+    if (!window.confirm("¿Salir de la sala?")) return;
     try {
       const fresh = await readRoom(roomCode);
       if (fresh) {
