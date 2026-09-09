@@ -1181,8 +1181,45 @@ function GridBoard({ grid, onTap, shake, bw, locked, spinning }) {
   // con la duración calculada acá para poder variar la velocidad; en las
   // demás etapas spinning nunca pasa de 1, así que se ve igual que antes.
   const spinStack = spinning || 0;
+
+  // Pedido del usuario: multitouch — poder limpiar varias piezas a la vez
+  // tocándolas con varios dedos juntos. El onClick de siempre (más abajo)
+  // NO alcanza para esto: los navegadores solo emulan un evento "click" a
+  // partir del PRIMER dedo de un gesto multitouch — el resto de los dedos
+  // que tocan al mismo tiempo no generan click en absoluto (así lo define
+  // el estándar de Touch Events). Por eso acá se escucha "touchstart" a
+  // mano, con addEventListener directo (NO el onTouchStart de React: desde
+  // React 17 ese listener se registra "passive", y ahí preventDefault() no
+  // hace nada — necesitamos que sí haga algo, para evitar el click
+  // duplicado del dedo principal). onTapRef mantiene siempre la versión más
+  // nueva de `onTap` sin tener que volver a registrar el listener en cada
+  // render (mismo patrón que onCritterTapRef/expireAttacksRef en GameRoom).
+  const onTapRef = useRef(onTap);
+  onTapRef.current = onTap;
+  const boardRef = useRef(null);
+  useEffect(() => {
+    const el = boardRef.current;
+    if (!el) return;
+    const handleTouchStart = (e) => {
+      // Frena el click emulado del dedo principal (si no, esa pieza se
+      // tocaría dos veces: una acá, otra por el onClick de siempre) y
+      // cualquier gesto propio del navegador (zoom, scroll) en esta zona.
+      e.preventDefault();
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        const target = document.elementFromPoint(t.clientX, t.clientY);
+        const btn = target && target.closest && target.closest("[data-cell-idx]");
+        if (!btn || btn.disabled) continue;
+        onTapRef.current(Number(btn.dataset.cellIdx));
+      }
+    };
+    el.addEventListener("touchstart", handleTouchStart, { passive: false });
+    return () => el.removeEventListener("touchstart", handleTouchStart);
+  }, []);
+
   return (
     <div
+      ref={boardRef}
       className={spinStack > 0 ? "bloques-spin" : ""}
       style={{
         // Pedido del usuario: relieve/3D en las piezas y transiciones más
@@ -1217,6 +1254,10 @@ function GridBoard({ grid, onTap, shake, bw, locked, spinning }) {
         opacity: locked ? 0.55 : 1,
         transition: "filter 0.6s ease, opacity 0.15s ease",
         boxSizing: "border-box",
+        // Refuerza el preventDefault() de arriba: sin esto, en el ratito
+        // antes de que el listener de touchstart corra, el navegador puede
+        // igual arrancar a interpretar el gesto como scroll/zoom.
+        touchAction: "none",
         animationDuration: spinStack > 0 ? Math.round(SPIN_PERIOD_MS / spinStack) + "ms" : undefined,
       }}
     >
@@ -1241,6 +1282,7 @@ function GridBoard({ grid, onTap, shake, bw, locked, spinning }) {
           <button
             key={i}
             className="bloques-piece"
+            data-cell-idx={i}
             onClick={() => !cleared && !locked && onTap(i)}
             disabled={cleared || locked}
             style={{
@@ -1758,6 +1800,20 @@ function PracticeGame({ onBack }) {
   // detrás de otra. La última (la 5ta) parpadea entre colores y blanco y
   // negro cada 5 segundos, como en la final del modo batalla.
   const [queue, setQueue] = useState(null);
+  // Espejo síncrono de `queue`, para el multitouch (ver tapCell y el
+  // useEffect de touchstart en GridBoard): si tocás dos piezas con dos
+  // dedos a la vez, tapCell se llama dos veces SEGUIDAS en el mismo tick de
+  // JS, antes de que React vuelva a renderizar — si la segunda llamada
+  // leyera `queue` (el closure de React, que recién se actualiza en el
+  // próximo render), no vería lo que acaba de limpiar la primera y la
+  // pisaría. Leyendo/escribiendo este ref en cambio, cada llamada parte del
+  // resultado real de la anterior. Mismo mecanismo que myLiveStateRef en
+  // GameRoom (ver ahí el comentario grande, es el mismo problema).
+  const queueRef = useRef(null);
+  const setQueueNow = (next) => {
+    queueRef.current = next;
+    setQueue(next);
+  };
   const [gridCount, setGridCount] = useState(DEFAULT_GRID_COUNT);
   const [solvedCount, setSolvedCount] = useState(0);
   const [startTime, setStartTime] = useState(null);
@@ -1804,7 +1860,7 @@ function PracticeGame({ onBack }) {
   const fmt = (ms) => (Math.max(0, ms) / 1000).toFixed(1) + "s";
 
   const newRun = () => {
-    setQueue(Array.from({ length: gridCount }, () => newQueuedGrid()));
+    setQueueNow(Array.from({ length: gridCount }, () => newQueuedGrid()));
     setSolvedCount(0);
     setFinished(false);
     setFinalMs(null);
@@ -1828,9 +1884,19 @@ function PracticeGame({ onBack }) {
     }
   };
 
+  // Lee y escribe queueRef (no el `queue` del closure) para que el
+  // multitouch funcione bien: si tocás dos piezas del mismo color con dos
+  // dedos, esto se llama dos veces seguidas ANTES de que React vuelva a
+  // renderizar, así que la segunda llamada tiene que ver lo que la primera
+  // acaba de limpiar (ver el comentario grande en queueRef, más arriba).
   const tapCell = (idx) => {
-    if (!queue || finished || locked) return;
-    const grid = queue[0];
+    if (!queueRef.current || finished || locked) return;
+    const grid = queueRef.current[0];
+    // Puede ser undefined si un dedo terminó la última grilla y, en el
+    // mismo tick, otro dedo todavía estaba tocando algo — `finished` recién
+    // se refleja acá en el próximo render, así que este chequeo (y no ese
+    // closure stale) es lo que evita reventar leyendo cellPiece de nada.
+    if (!grid) return;
     const pieceId = grid.cellPiece[idx];
     if (pieceId < 0) return;
     const piece = grid.pieces[pieceId];
@@ -1848,19 +1914,20 @@ function PracticeGame({ onBack }) {
 
     if (newIndex >= grid.colorOrder.length) {
       playGridDone();
-      const newQueue = queue.slice(1);
+      const newQueue = queueRef.current.slice(1);
       const newSolvedCount = solvedCount + 1;
+      queueRef.current = newQueue;
       if (newQueue.length === 0) {
         finishRun(Date.now() - startTime);
         setSolvedCount(newSolvedCount);
       } else {
-        setQueue(newQueue);
+        setQueueNow(newQueue);
         setSolvedCount(newSolvedCount);
       }
       return;
     }
     const newGrid = { ...grid, pieces: newPieces, activeColorIndex: newIndex };
-    setQueue([newGrid, ...queue.slice(1)]);
+    setQueueNow([newGrid, ...queueRef.current.slice(1)]);
   };
 
   if (!queue) {
