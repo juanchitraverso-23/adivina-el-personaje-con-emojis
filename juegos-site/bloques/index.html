@@ -387,23 +387,94 @@ function playTension() {
   osc.start(t0);
   osc.stop(t0 + 0.55);
 }
-// Locutor de pelea al mandar un ataque — "Hurricane to Gaspi!". Usa
-// GUERRA_ATTACK_META para el nombre lindo del ataque (definido más abajo
-// en el archivo — para cuando esta función se LLAME, en pleno juego, ya
-// está inicializado hace rato). Si el navegador no tiene voces en
-// español instaladas usa la que tenga por default; no rompe nada.
+// Ruido blanco reusable (un solo buffer, se arma una vez) — la base de
+// playImpactHit de acá abajo. No hay forma de generar ruido con un
+// osciilador común, hay que rellenar un buffer a mano.
+let bloquesNoiseBuffer = null;
+function getNoiseBuffer(ctx) {
+  if (bloquesNoiseBuffer) return bloquesNoiseBuffer;
+  const size = Math.floor(ctx.sampleRate * 0.3);
+  const buffer = ctx.createBuffer(1, size, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < size; i++) data[i] = Math.random() * 2 - 1;
+  bloquesNoiseBuffer = buffer;
+  return buffer;
+}
+// El "golpe" tipo videojuego de pelea que acompaña al grito del locutor:
+// un thump grave (como un bombo) + un chasquido de ruido filtrado
+// encima, los dos bien cortos — pedido del usuario: "onda fatality...
+// sin saturar", así que es un golpe seco, no un redoble largo.
+function playImpactHit() {
+  if (isSoundMuted()) return;
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const oscGain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(160, t0);
+  osc.frequency.exponentialRampToValueAtTime(45, t0 + 0.18);
+  oscGain.gain.setValueAtTime(0.4, t0);
+  oscGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+  osc.connect(oscGain);
+  oscGain.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.25);
+  const noise = ctx.createBufferSource();
+  noise.buffer = getNoiseBuffer(ctx);
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.value = 1400;
+  filter.Q.value = 0.6;
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.setValueAtTime(0.28, t0);
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+  noise.connect(filter);
+  filter.connect(noiseGain);
+  noiseGain.connect(ctx.destination);
+  noise.start(t0);
+  noise.stop(t0 + 0.15);
+}
+// Busca, entre las voces en español que tenga el navegador/sistema, la
+// que suene más grave/masculina (por nombre — la Web Speech API no
+// expone el tono real de cada voz) — así el locutor se acerca más a un
+// grito de pelea ("Jorge" en macOS/iOS, por ejemplo, es una voz grave en
+// español). Si no encuentra ninguna conocida, se queda con la primera
+// voz en español que haya, o la que el navegador use por default.
+const ANNOUNCER_VOICE_HINTS = ["jorge", "diego", "carlos", "male", "hombre"];
+function pickAnnouncerVoice() {
+  if (!window.speechSynthesis) return null;
+  const voices = window.speechSynthesis.getVoices() || [];
+  const esVoices = voices.filter((v) => /^es/i.test(v.lang));
+  const deep = esVoices.find((v) => ANNOUNCER_VOICE_HINTS.some((hint) => v.name.toLowerCase().includes(hint)));
+  return deep || esVoices[0] || null;
+}
+// Locutor de pelea al mandar un ataque — pedido por el usuario: "las
+// voces tienen que ser como un grito de fatality en mortal kombat...
+// onda los de Killer Instinct: ULTRA COMBOOOO". No hay forma de meter un
+// audio grabado de verdad (con nombres de jugador que no conocemos de
+// antemano, y sin usar clips de juegos ajenos), así que se arma con lo
+// que hay a mano: la síntesis de voz del navegador, con el tono bien
+// grave y la voz más "macho" que encuentre (pickAnnouncerVoice), el
+// nombre del ataque gritado en su versión "de combo" (GUERRA_ATTACK_META
+// .shout, con vocales alargadas — definido más abajo en el archivo, ya
+// inicializado para cuando esto se llama en pleno juego), más un golpe
+// seco (playImpactHit) que acompaña el grito para que pegue más fuerte.
 function announceAttack(type, targetName) {
   if (isSoundMuted()) return;
+  playImpactHit();
   if (!window.speechSynthesis) return;
   const meta = typeof GUERRA_ATTACK_META !== "undefined" ? GUERRA_ATTACK_META[type] : null;
-  const label = (meta && meta.label) || "Ataque";
+  const shout = (meta && meta.shout) || (typeof EXTRA_ATTACK_SHOUTS !== "undefined" && EXTRA_ATTACK_SHOUTS[type]) || "¡ATAQUEEE!";
   try {
     window.speechSynthesis.cancel(); // no se pisan uno arriba del otro si atacás rápido
-    const utter = new SpeechSynthesisUtterance(`¡${label}, para ${targetName}!`);
+    const utter = new SpeechSynthesisUtterance(`${shout} ¡${targetName}!`);
     utter.lang = "es-AR";
-    utter.rate = 1.05;
-    utter.pitch = 0.85;
+    utter.rate = 0.92;
+    utter.pitch = 0.55;
     utter.volume = 1;
+    const voice = pickAnnouncerVoice();
+    if (voice) utter.voice = voice;
     window.speechSynthesis.speak(utter);
   } catch {}
 }
@@ -1273,14 +1344,23 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
 // cada rival UNA vez en toda la partida (gridExtraSentTo) — por eso en
 // GuerraAttackPicker desaparece del todo cuando ya se la mandaste a
 // todos.
+// `shout` es el nombre "de combo" que grita el locutor al mandar ese
+// ataque (ver announceAttack) — más pegadizo y con onda que el label de
+// siempre, a propósito con vocales alargadas ("...OOO", "...EEE") porque
+// muchos motores de voz sí las estiran un toque al leerlas, quedando más
+// cerca de un grito de pelea que de una lectura plana.
 const GUERRA_ATTACK_META = {
-  spin: { emoji: "🌀", label: "Girar", desc: "Gira hasta que resuelva esa grilla. Recibirlo 2 veces duplica la velocidad.", title: "🌀 ¿A quién le hacés girar la grilla?", subtitle: "Si ya la tenía girando, ahora gira el doble de rápido (máximo)." },
-  flicker: { emoji: "⚫⚪", label: "Blanco y negro intermitente", desc: "Parpadea entre color y gris. Recibirlo 2 veces suma tiempo y alarga la fase en gris.", title: "⚫⚪ ¿A quién le ponés blanco y negro intermitente?", subtitle: "Si ya lo tenía puesto, se suma tiempo y la fase en gris dura el doble (máximo)." },
-  giant: { emoji: "🔲", label: "Grilla gigante", desc: "Agranda un poco la grilla que tiene abierta. Recibirlo 2 veces la agranda al doble (como antes hacía una sola vez).", title: "🔲 ¿A quién le agrandás la grilla?", subtitle: "Dura hasta que la resuelva — cada tap le limpia varias piezas de una, así no es taaan difícil. Si ya la tenía agrandada, se agranda más (máximo 2 veces)." },
-  rainbow: { emoji: "🌈", label: "Colores extra", desc: "La grilla que tiene abierta pasa a tener 16 colores en vez de 6. Recibirlo 2 veces hace que CADA pieza sea de un color distinto.", title: "🌈 ¿A quién le ponés colores extra?", subtitle: "Si ya tenía 16 colores, ahora cada pieza de la grilla queda de un color distinto (máximo)." },
-  twoOne: { emoji: "♻️", label: "2-1", desc: "Cada 2 piezas que limpia, reaparece 1 en un lugar donde ya había limpiado. Recibirlo 2 veces lo vuelve '4-3'.", title: "♻️ ¿A quién le ponés el 2-1?", subtitle: "Si ya lo tenía puesto, pasa a '4-3': cada 4 que limpia, reaparecen 3 (máximo)." },
-  grid: { emoji: "🧱", label: "Grilla extra", desc: "Le suma una grilla más a resolver.", title: "🧱 ¿A quién le mandás una grilla extra?", subtitle: "Ojo: a cada rival se la podés mandar una sola vez en toda la partida." },
+  spin: { emoji: "🌀", label: "Girar", shout: "¡TORBELLINOOO!", desc: "Gira hasta que resuelva esa grilla. Recibirlo 2 veces duplica la velocidad.", title: "🌀 ¿A quién le hacés girar la grilla?", subtitle: "Si ya la tenía girando, ahora gira el doble de rápido (máximo)." },
+  flicker: { emoji: "⚫⚪", label: "Blanco y negro intermitente", shout: "¡APAGÓN TOTAL!", desc: "Parpadea entre color y gris. Recibirlo 2 veces suma tiempo y alarga la fase en gris.", title: "⚫⚪ ¿A quién le ponés blanco y negro intermitente?", subtitle: "Si ya lo tenía puesto, se suma tiempo y la fase en gris dura el doble (máximo)." },
+  giant: { emoji: "🔲", label: "Grilla gigante", shout: "¡GRILLA GIGANTEEE!", desc: "Agranda un poco la grilla que tiene abierta. Recibirlo 2 veces la agranda al doble (como antes hacía una sola vez).", title: "🔲 ¿A quién le agrandás la grilla?", subtitle: "Dura hasta que la resuelva — cada tap le limpia varias piezas de una, así no es taaan difícil. Si ya la tenía agrandada, se agranda más (máximo 2 veces)." },
+  rainbow: { emoji: "🌈", label: "Colores extra", shout: "¡EXPLOSIÓN DE COLOR!", desc: "La grilla que tiene abierta pasa a tener 16 colores en vez de 6. Recibirlo 2 veces hace que CADA pieza sea de un color distinto.", title: "🌈 ¿A quién le ponés colores extra?", subtitle: "Si ya tenía 16 colores, ahora cada pieza de la grilla queda de un color distinto (máximo)." },
+  twoOne: { emoji: "♻️", label: "2-1", shout: "¡REGENERACIÓN BRUTAL!", desc: "Cada 2 piezas que limpia, reaparece 1 en un lugar donde ya había limpiado. Recibirlo 2 veces lo vuelve '4-3'.", title: "♻️ ¿A quién le ponés el 2-1?", subtitle: "Si ya lo tenía puesto, pasa a '4-3': cada 4 que limpia, reaparecen 3 (máximo)." },
+  grid: { emoji: "🧱", label: "Grilla extra", shout: "¡CASTIGO EXTRA!", desc: "Le suma una grilla más a resolver.", title: "🧱 ¿A quién le mandás una grilla extra?", subtitle: "Ojo: a cada rival se la podés mandar una sola vez en toda la partida." },
 };
+// Los dos ataques de la Semifinal no viven en GUERRA_ATTACK_META (esa
+// etapa no tiene el resto de sus campos — label/desc/etc. — porque no
+// pasan por GuerraAttackPicker), pero el locutor los cubre igual.
+const EXTRA_ATTACK_SHOUTS = { bw: "¡BLACKOUT!", freeze: "¡CONGELADOOO!" };
 
 // Ícono grande y clarísimo de cada ataque — el CUADRO entero es el ícono
 // (no un emoji chiquito en una lista), como pidió el usuario: "+1" negro
