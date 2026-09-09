@@ -309,7 +309,20 @@ const MY_DEVICE_ID = (() => {
 // antemano. Con mute persistente para no volverse molesto en partidas
 // largas — ver SoundToggleButton, en Screen.
 const SOUND_MUTE_KEY = "bloques:sonido:mute";
+// Pedido nuevo del usuario: además del mute personal de arriba (por
+// dispositivo, en localStorage), el anfitrión/a de una sala Guerra/Torneo
+// puede apagar el sonido para TODA la sala (room.soundOff) — es una sola
+// decisión que vale para todos los jugadores. GameRoom mantiene esta
+// variable de módulo sincronizada con room.soundOff (ver el useEffect
+// cerca de expireAttacksRef), así isSoundMuted() sirve como el único
+// chequeo que ya usan todas las funciones de sonido, sin tener que
+// pasarles `room` a cada una.
+let bloquesRoomSoundOff = false;
+function setBloquesRoomSoundOff(value) {
+  bloquesRoomSoundOff = !!value;
+}
 function isSoundMuted() {
+  if (bloquesRoomSoundOff) return true;
   try {
     return localStorage.getItem(SOUND_MUTE_KEY) === "1";
   } catch {
@@ -460,65 +473,155 @@ function pickAnnouncerVoice() {
 // .shout, con vocales alargadas — definido más abajo en el archivo, ya
 // inicializado para cuando esto se llama en pleno juego), más un golpe
 // seco (playImpactHit) que acompaña el grito para que pegue más fuerte.
+// Cachea, por nombre de archivo (sin ".mp3"), tanto el AudioBuffer ya
+// decodificado como el recorte de silencio inicial/final que le calculamos
+// la primera vez (ver trimSilence) — así de la segunda vez en adelante
+// reproducirlo es instantáneo, y encima ya sale sin el aire de más al
+// principio/final típico de una grabación casera de celular.
+const bloquesClipCache = {};
+const bloquesClipLoadPromises = {};
+// Recorta silencio del principio y el final de un AudioBuffer ya
+// decodificado, SIN tocar el archivo — no hay ffmpeg/sox/pydub instalados
+// en este entorno para reescribirlo de antemano, así que el recorte se
+// calcula en el navegador, una sola vez, analizando las muestras del
+// primer canal: busca dónde el volumen supera un umbral chico relativo al
+// pico de la grabación, y deja un colchón corto (paddingSec) de cada lado
+// para no morder el arranque o el final del grito. Si algo sale mal (o el
+// audio ya viene "seco"), no recorta nada.
+function trimSilence(buffer, thresholdRatio = 0.04, paddingSec = 0.03) {
+  try {
+    const data = buffer.getChannelData(0);
+    let peak = 0;
+    for (let i = 0; i < data.length; i++) {
+      const abs = Math.abs(data[i]);
+      if (abs > peak) peak = abs;
+    }
+    if (!peak) return { offset: 0, duration: buffer.duration };
+    const threshold = peak * thresholdRatio;
+    let start = 0;
+    while (start < data.length && Math.abs(data[start]) < threshold) start++;
+    let end = data.length - 1;
+    while (end > start && Math.abs(data[end]) < threshold) end--;
+    const padSamples = Math.round(paddingSec * buffer.sampleRate);
+    const startSample = Math.max(0, start - padSamples);
+    const endSample = Math.min(data.length - 1, end + padSamples);
+    const offset = startSample / buffer.sampleRate;
+    const duration = Math.max(0.05, (endSample - startSample) / buffer.sampleRate);
+    return { offset, duration };
+  } catch {
+    return { offset: 0, duration: buffer.duration };
+  }
+}
+function loadTrimmedBuffer(ctx, name) {
+  if (bloquesClipCache[name]) return Promise.resolve(bloquesClipCache[name]);
+  if (!bloquesClipLoadPromises[name]) {
+    bloquesClipLoadPromises[name] = fetch(`sounds/${name}.mp3`)
+      .then((r) => r.arrayBuffer())
+      .then((data) => ctx.decodeAudioData(data))
+      .then((decoded) => {
+        const clip = { buffer: decoded, ...trimSilence(decoded) };
+        bloquesClipCache[name] = clip;
+        return clip;
+      })
+      .catch(() => null);
+  }
+  return bloquesClipLoadPromises[name];
+}
+// Dice SOLO el nombre del rival, después de que ya sonó el grito grabado
+// (ver announceAttack) — el grito ya trae el "poder" dicho con onda real,
+// así que acá alcanza con el nombre. flowsIntoName (blanco y negro, que
+// termina en "...paraaaa") lo dice pegado, sin pausa ni exclamación
+// propia; el resto espera un toque (150ms) para que no se mezcle con la
+// cola del audio grabado — el "un poquito mas de espacio" que pidió el
+// usuario, ahora entre un audio real y la voz en vez de dentro de una sola
+// frase hablada.
+function speakAttackName(targetName, flowsIntoName) {
+  if (!window.speechSynthesis) return;
+  const text = flowsIntoName ? `${targetName}!` : `¡${targetName}!`;
+  const doSpeak = () => {
+    if (isSoundMuted()) return;
+    try {
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = "es-AR";
+      utter.rate = 0.92;
+      utter.pitch = 0.55;
+      utter.volume = 1;
+      const voice = pickAnnouncerVoice();
+      if (voice) utter.voice = voice;
+      window.speechSynthesis.speak(utter);
+    } catch {}
+  };
+  if (flowsIntoName) doSpeak();
+  else setTimeout(doSpeak, 150);
+}
+// Locutor de pelea al mandar un ataque. Desde que el usuario grabó sus
+// propios gritos de ataque (spin/flicker/giant/rainbow/twoOne — ver el
+// campo `sound` en GUERRA_ATTACK_META), esos 5 reproducen su clip real en
+// vez de síntesis de voz, y solo el NOMBRE del rival (que no podemos tener
+// grabado de antemano) se dice con SpeechSynthesis una vez que termina el
+// clip. Los que todavía no tienen grabación (grid/bw/freeze) siguen con el
+// locutor 100% sintetizado de antes (voz grave, shout + nombre en una sola
+// frase) — y si un clip grabado llegara a fallar al cargar (sin conexión,
+// 404, etc.), también cae a ese mismo camino de respaldo en vez de quedar
+// mudo.
 function announceAttack(type, targetName) {
   if (isSoundMuted()) return;
-  playImpactHit();
-  if (!window.speechSynthesis) return;
   const meta = typeof GUERRA_ATTACK_META !== "undefined" ? GUERRA_ATTACK_META[type] : null;
-  const shout = (meta && meta.shout) || (typeof EXTRA_ATTACK_SHOUTS !== "undefined" && EXTRA_ATTACK_SHOUTS[type]) || "¡ATAQUEEE!";
-  // Pedido del usuario: "dejemos un poquito mas de espacio para que no
-  // se mezcle el ataque y el nombre" — por default hay una pausa (los
-  // "...") entre el grito y el nombre, que va con su propio ¡...!. Los
-  // que ya terminan en una palabra que conecta directo (flowsIntoName,
-  // como "blanco y negro PARAAAA") van pegados al nombre, sin pausa ni
-  // exclamación propia en el medio.
-  const text = meta && meta.flowsIntoName ? `${shout} ${targetName}!` : `${shout}... ¡${targetName}!`;
-  try {
-    window.speechSynthesis.cancel(); // no se pisan uno arriba del otro si atacás rápido
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = "es-AR";
-    utter.rate = 0.92;
-    utter.pitch = 0.55;
-    utter.volume = 1;
-    const voice = pickAnnouncerVoice();
-    if (voice) utter.voice = voice;
-    window.speechSynthesis.speak(utter);
-  } catch {}
+  const speakFullShout = () => {
+    playImpactHit();
+    if (!window.speechSynthesis) return;
+    const shout = (meta && meta.shout) || (typeof EXTRA_ATTACK_SHOUTS !== "undefined" && EXTRA_ATTACK_SHOUTS[type]) || "¡ATAQUEEE!";
+    const text = meta && meta.flowsIntoName ? `${shout} ${targetName}!` : `${shout}... ¡${targetName}!`;
+    try {
+      window.speechSynthesis.cancel(); // no se pisan uno arriba del otro si atacás rápido
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = "es-AR";
+      utter.rate = 0.92;
+      utter.pitch = 0.55;
+      utter.volume = 1;
+      const voice = pickAnnouncerVoice();
+      if (voice) utter.voice = voice;
+      window.speechSynthesis.speak(utter);
+    } catch {}
+  };
+  if (meta && meta.sound) {
+    const ctx = getAudioCtx();
+    if (!ctx) {
+      speakFullShout();
+      return;
+    }
+    loadTrimmedBuffer(ctx, meta.sound).then((clip) => {
+      if (!clip || isSoundMuted()) {
+        speakFullShout();
+        return;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = clip.buffer;
+      src.connect(ctx.destination);
+      src.onended = () => speakAttackName(targetName, meta.flowsIntoName);
+      src.start(0, clip.offset, clip.duration);
+    });
+    return;
+  }
+  speakFullShout();
 }
 // Reacción de quien RECIBE el ataque: un "BOOM" de verdad, grabado por
 // el propio usuario (juegos-site/bloques/sounds/boom.mp3) — probamos
 // antes con voces sintetizadas ("¡Ayyy, esta se complica!") pero el
 // usuario las probó y no le gustaron nada, así que se reemplazan por su
-// propio audio en vez de insistir con síntesis de voz. Se decodifica una
-// sola vez (fetch + decodeAudioData) y se cachea en memoria — de ahí en
-// más, reproducirlo es instantáneo. Como pasa por el mismo AudioContext
-// que el resto de los sonidos, respeta el mismo mute.
-let bloquesBoomBuffer = null;
-let bloquesBoomLoadPromise = null;
-function loadBoomBuffer(ctx) {
-  if (bloquesBoomBuffer) return Promise.resolve(bloquesBoomBuffer);
-  if (!bloquesBoomLoadPromise) {
-    bloquesBoomLoadPromise = fetch("sounds/boom.mp3")
-      .then((r) => r.arrayBuffer())
-      .then((data) => ctx.decodeAudioData(data))
-      .then((decoded) => {
-        bloquesBoomBuffer = decoded;
-        return decoded;
-      })
-      .catch(() => null);
-  }
-  return bloquesBoomLoadPromise;
-}
+// propio audio en vez de insistir con síntesis de voz. Usa el mismo cache
+// de clips recortados que announceAttack (loadTrimmedBuffer).
 function playAttackReceived() {
   if (isSoundMuted()) return;
   const ctx = getAudioCtx();
   if (!ctx) return;
-  loadBoomBuffer(ctx).then((buffer) => {
-    if (!buffer || isSoundMuted()) return; // puede haberse silenciado mientras cargaba
+  loadTrimmedBuffer(ctx, "boom").then((clip) => {
+    if (!clip || isSoundMuted()) return; // puede haberse silenciado mientras cargaba
     const src = ctx.createBufferSource();
-    src.buffer = buffer;
+    src.buffer = clip.buffer;
     src.connect(ctx.destination);
-    src.start();
+    src.start(0, clip.offset, clip.duration);
   });
 }
 // Detecta "me acaban de atacar" comparando una "huella" chica de mi
@@ -1433,13 +1536,18 @@ function TargetPicker({ players, playerStates, myId, myLastAttacked, elimination
 // mezclen, pedido del usuario) y dice el nombre aparte; `flowsIntoName:
 // true` es para los que ya terminan en una palabra que conecta directo
 // con el nombre (como "blanco y negro PARAAAA {nombre}"), sin pausa ni
-// exclamación propia en el medio.
+// exclamación propia en el medio. `sound` (cuando existe) es el nombre de
+// un clip grabado de verdad por el usuario en juegos-site/bloques/sounds/
+// — cuando está, reemplaza al `shout` sintetizado: suena el audio real y
+// después solo se dice el nombre del rival con SpeechSynthesis (ver
+// announceAttack). `shout` se deja igual como respaldo, por si ese clip
+// no llegara a cargar.
 const GUERRA_ATTACK_META = {
-  spin: { emoji: "🌀", label: "Girar", shout: "¡PONTE A GIRAR!", desc: "Gira hasta que resuelva esa grilla. Recibirlo 2 veces duplica la velocidad.", title: "🌀 ¿A quién le hacés girar la grilla?", subtitle: "Si ya la tenía girando, ahora gira el doble de rápido (máximo)." },
-  flicker: { emoji: "⚫⚪", label: "Blanco y negro intermitente", shout: "¡Blanco y Negro paraaaa", flowsIntoName: true, desc: "Parpadea entre color y gris. Recibirlo 2 veces suma tiempo y alarga la fase en gris.", title: "⚫⚪ ¿A quién le ponés blanco y negro intermitente?", subtitle: "Si ya lo tenía puesto, se suma tiempo y la fase en gris dura el doble (máximo)." },
-  giant: { emoji: "🔲", label: "Grilla gigante", shout: "¡GRILLA GIGANTEEE!", desc: "Agranda un poco la grilla que tiene abierta. Recibirlo 2 veces la agranda al doble (como antes hacía una sola vez).", title: "🔲 ¿A quién le agrandás la grilla?", subtitle: "Dura hasta que la resuelva — cada tap le limpia varias piezas de una, así no es taaan difícil. Si ya la tenía agrandada, se agranda más (máximo 2 veces)." },
-  rainbow: { emoji: "🌈", label: "Colores extra", shout: "¡EXPLOSIÓN DE COLOR!", desc: "La grilla que tiene abierta pasa a tener 16 colores en vez de 6. Recibirlo 2 veces hace que CADA pieza sea de un color distinto.", title: "🌈 ¿A quién le ponés colores extra?", subtitle: "Si ya tenía 16 colores, ahora cada pieza de la grilla queda de un color distinto (máximo)." },
-  twoOne: { emoji: "♻️", label: "2-1", shout: "¡REGENERACIÓN BRUTAL!", desc: "Cada 2 piezas que limpia, reaparece 1 en un lugar donde ya había limpiado. Recibirlo 2 veces lo vuelve '4-3'.", title: "♻️ ¿A quién le ponés el 2-1?", subtitle: "Si ya lo tenía puesto, pasa a '4-3': cada 4 que limpia, reaparecen 3 (máximo)." },
+  spin: { emoji: "🌀", label: "Girar", shout: "¡PONTE A GIRAR!", sound: "spin", desc: "Gira hasta que resuelva esa grilla. Recibirlo 2 veces duplica la velocidad.", title: "🌀 ¿A quién le hacés girar la grilla?", subtitle: "Si ya la tenía girando, ahora gira el doble de rápido (máximo)." },
+  flicker: { emoji: "⚫⚪", label: "Blanco y negro intermitente", shout: "¡Blanco y Negro paraaaa", flowsIntoName: true, sound: "flicker", desc: "Parpadea entre color y gris. Recibirlo 2 veces suma tiempo y alarga la fase en gris.", title: "⚫⚪ ¿A quién le ponés blanco y negro intermitente?", subtitle: "Si ya lo tenía puesto, se suma tiempo y la fase en gris dura el doble (máximo)." },
+  giant: { emoji: "🔲", label: "Grilla gigante", shout: "¡GRILLA GIGANTEEE!", sound: "giant", desc: "Agranda un poco la grilla que tiene abierta. Recibirlo 2 veces la agranda al doble (como antes hacía una sola vez).", title: "🔲 ¿A quién le agrandás la grilla?", subtitle: "Dura hasta que la resuelva — cada tap le limpia varias piezas de una, así no es taaan difícil. Si ya la tenía agrandada, se agranda más (máximo 2 veces)." },
+  rainbow: { emoji: "🌈", label: "Colores extra", shout: "¡EXPLOSIÓN DE COLOR!", sound: "rainbow", desc: "La grilla que tiene abierta pasa a tener 16 colores en vez de 6. Recibirlo 2 veces hace que CADA pieza sea de un color distinto.", title: "🌈 ¿A quién le ponés colores extra?", subtitle: "Si ya tenía 16 colores, ahora cada pieza de la grilla queda de un color distinto (máximo)." },
+  twoOne: { emoji: "♻️", label: "2-1", shout: "¡REGENERACIÓN BRUTAL!", sound: "twoOne", desc: "Cada 2 piezas que limpia, reaparece 1 en un lugar donde ya había limpiado. Recibirlo 2 veces lo vuelve '4-3'.", title: "♻️ ¿A quién le ponés el 2-1?", subtitle: "Si ya lo tenía puesto, pasa a '4-3': cada 4 que limpia, reaparecen 3 (máximo)." },
   grid: { emoji: "🧱", label: "Grilla extra", shout: "¡CASTIGO EXTRA!", desc: "Le suma una grilla más a resolver.", title: "🧱 ¿A quién le mandás una grilla extra?", subtitle: "Ojo: a cada rival se la podés mandar una sola vez en toda la partida." },
 };
 // Los dos ataques de la Semifinal no viven en GUERRA_ATTACK_META (esa
@@ -2531,6 +2639,19 @@ function GameRoom({ roomCode, myId, onBack }) {
     return () => clearInterval(id);
   }, []);
 
+  // Pedido del usuario: el anfitrión/a puede apagar el sonido para TODA la
+  // sala (room.soundOff — ver el Card "Sonido" en el lobby, más abajo), a
+  // diferencia del botón 🔊/🔇 de arriba que es una preferencia personal
+  // por dispositivo. isSoundMuted() ya chequea las dos cosas (ver su
+  // definición, cerca del resto del motor de sonido), así que acá alcanza
+  // con mantener sincronizada esa variable de módulo cada vez que cambia
+  // room.soundOff. Mismo motivo que los dos hooks de arriba para ir ANTES
+  // del "if (!room) return": tiene que correr también en el primer render,
+  // cuando room todavía es null.
+  useEffect(() => {
+    setBloquesRoomSoundOff(!!(room && room.soundOff));
+  }, [room && room.soundOff]);
+
   if (!room) {
     return (
       <Screen style={{ justifyContent: "center" }}>
@@ -2634,6 +2755,15 @@ function GameRoom({ roomCode, myId, onBack }) {
     setRoom(fresh);
   };
 
+  const setRoomSoundOff = async (value) => {
+    if (!!room.soundOff === value) return; // mismo motivo que en setRoomMode
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.soundOff = value;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
   const playAgain = async () => {
     const fresh = await readRoom(roomCode);
     if (!fresh) return;
@@ -2684,6 +2814,21 @@ function GameRoom({ roomCode, myId, onBack }) {
             <div style={{ color: "#F3EEFF", fontWeight: 700 }}>
               {roomMode === "final" ? "🏁 Final directa" : roomMode === "guerra" ? "💥 Guerra" : "🏆 Torneo por etapas"}
             </div>
+          )}
+        </Card>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Sonido</div>
+          {isHost ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setRoomSoundOff(false)} style={{ ...pillStyle(!room.soundOff), flex: 1 }}>
+                🔊 Con sonido
+              </button>
+              <button onClick={() => setRoomSoundOff(true)} style={{ ...pillStyle(!!room.soundOff), flex: 1 }}>
+                🔇 Sin sonido
+              </button>
+            </div>
+          ) : (
+            <div style={{ color: "#F3EEFF", fontWeight: 700 }}>{room.soundOff ? "🔇 Sin sonido" : "🔊 Con sonido"}</div>
           )}
         </Card>
         {roomMode === "guerra" && (
