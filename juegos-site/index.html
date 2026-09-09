@@ -155,6 +155,35 @@
   }
   .counter b { color: #FFD23F; font-family: 'Baloo 2', sans-serif; }
 
+  /* ---------- Separador entre tandas de juegos ("Primera hora"/"Segunda
+     hora") — pedido del usuario para que la lista no se sienta tan
+     apretada a medida que se suman juegos nuevos. Es puro adorno (una
+     línea fina a cada lado del texto): no agrupa nada en el DOM, así el
+     contador de numeritos de .card (counter-increment: game-num) sigue
+     una sola secuencia continua 1→8→... en vez de reiniciarse por tanda. ---------- */
+  .hour-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    max-width: 380px;
+    font-family: 'Baloo 2', sans-serif;
+    font-weight: 800;
+    font-size: 14px;
+    color: #C9B8F0;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin: 6px 0 14px;
+    opacity: 0.85;
+  }
+  .hour-title:not(:first-of-type) { margin-top: 22px; }
+  .hour-title::before, .hour-title::after {
+    content: "";
+    height: 1px;
+    flex: 1;
+    background: rgba(255,255,255,0.2);
+  }
+
   /* ---------- Cada juego es un botón 3D con relieve, el mismo lenguaje
      que ya usan los botones adentro de cada juego (BigButton): fondo
      sólido de color + un "labio" grueso hecho con box-shadow sin blur
@@ -211,6 +240,7 @@
   .card:nth-of-type(5) { --card-color: #B983FF; animation-delay: 0.29s; }
   .card:nth-of-type(6) { --card-color: #3E9EFF; animation-delay: 0.35s; }
   .card:nth-of-type(7) { --card-color: #3DDC84; animation-delay: 0.41s; }
+  .card:nth-of-type(8) { --card-color: #2EC4B6; animation-delay: 0.47s; }
   @keyframes card-in {
     to { opacity: 1; transform: translateY(0); }
   }
@@ -258,6 +288,8 @@
       <h1>Juegos de JX</h1>
     </div>
     <div class="counter" id="playerCounter"></div>
+
+    <div class="hour-title">🕐 Primera hora</div>
 
     <a class="card" href="./quien-soy/">
       <div class="emoji">🕵️‍♂️</div>
@@ -312,6 +344,16 @@
       <div>
         <div class="name">Diccionario Trucho</div>
         <div class="tag">Inventá la definición, votá la verdadera</div>
+      </div>
+    </a>
+
+    <div class="hour-title">🕑 Segunda hora</div>
+
+    <a class="card" href="./votacion/">
+      <div class="emoji">🗳️</div>
+      <div>
+        <div class="name">El Más Votado</div>
+        <div class="tag">Votá y ganá con la mayoría</div>
       </div>
     </a>
   </div>

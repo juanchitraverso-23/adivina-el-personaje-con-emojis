@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>El Más Votado — Votá y ganá con la mayoría</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="El Más Votado" />
+<meta name="theme-color" content="#3a0e2e" />
+<!-- Adelanta la conexión (DNS + TLS) a los dos hosts externos de los que
+     depende esta página para arrancar — la tipografía y React/Babel —
+     así cuando el HTML llega a pedirlos de verdad, la conexión ya está
+     lista y se ahorra esa ida y vuelta. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="preconnect" href="https://unpkg.com" crossorigin />
+<style>
+  /* El fondo real (sol + nubes + piso) lo pinta React recién al montar;
+     hasta entonces se ve este mismo degradé de cielo (idéntico al de
+     BgScene) en vez de un color plano, para que la llegada desde la home
+     se sienta continua y no como un salto a "página negra". */
+  html, body { margin:0; padding:0; background: linear-gradient(180deg, #2A0F5E 0%, #5A1F94 20%, #9435B0 42%, #E84F8C 62%, #FF6B3D 80%, #FFC93D 100%); background-attachment: fixed; }
+  #root { min-height: 100vh; }
+
+  /* ---------- Escena estática (sol+nubes+piso) idéntica a BgScene, pero en
+     HTML/CSS puro: pinta YA, sin esperar a que cargue React, para que la
+     llegada desde la home se sienta tan fluida como la vuelta al menú
+     (que es 100% estática). En cuanto React monta algo en #root, un
+     script la saca y queda la escena real. ---------- */
+  .jxpre-scene { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+  .jxpre-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #2A0F5E 0%, #5A1F94 20%, #9435B0 42%, #E84F8C 62%, #FF6B3D 80%, #FFC93D 100%); }
+  .jxpre-sun {
+    position: absolute; left: 50%; top: 7%; width: 120px; height: 120px; margin-left: -60px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 34% 30%, #fff8d8, #ffd23f 55%, #ff9a1c 100%);
+    box-shadow: 0 0 80px 22px rgba(255,199,82,0.5);
+    animation: jxpre-sun-pulse 3.2s ease-in-out infinite;
+  }
+  @keyframes jxpre-sun-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  .jxpre-clouds { position: absolute; inset: 0; overflow: hidden; }
+  .jxpre-cloud { position: absolute; font-size: 30px; opacity: 0.92; filter: drop-shadow(0 3px 0 rgba(0,0,0,0.18)); animation: jxpre-drift linear infinite; }
+  .jxpre-cloud.c1 { top: -5.6%; font-size: 38px; animation-duration: 48s; animation-delay: -25s; }
+  .jxpre-cloud.c2 { top: -3.9%; font-size: 52px; animation-duration: 32s; animation-delay: -34s; }
+  .jxpre-cloud.c3 { top: 0.3%; font-size: 40px; animation-duration: 40s; animation-delay: -23s; }
+  .jxpre-cloud.c4 { top: 3.7%; font-size: 24px; animation-duration: 30s; animation-delay: -28s; }
+  .jxpre-cloud.c5 { top: 8.7%; font-size: 34px; animation-duration: 46s; animation-delay: -2s; }
+  .jxpre-cloud.c6 { top: 12.0%; font-size: 50px; animation-duration: 22s; animation-delay: -9s; }
+  .jxpre-cloud.c7 { top: 16.2%; font-size: 44px; animation-duration: 44s; animation-delay: -12s; }
+  .jxpre-cloud.c8 { top: 17.3%; font-size: 40px; animation-duration: 36s; animation-delay: -3s; }
+  .jxpre-cloud.c9 { top: 21.8%; font-size: 32px; animation-duration: 38s; animation-delay: -9s; }
+  .jxpre-cloud.c10 { top: 24.1%; font-size: 36px; animation-duration: 24s; animation-delay: -4s; }
+  .jxpre-cloud.c11 { top: 28.2%; font-size: 44px; animation-duration: 34s; animation-delay: -11s; }
+  .jxpre-cloud.c12 { top: 32.5%; font-size: 30px; animation-duration: 24s; animation-delay: -25s; }
+  .jxpre-cloud.c13 { top: 34.6%; font-size: 28px; animation-duration: 38s; animation-delay: -15s; }
+  .jxpre-cloud.c14 { top: 38.6%; font-size: 48px; animation-duration: 30s; animation-delay: -15s; }
+  .jxpre-cloud.c15 { top: 43.4%; font-size: 30px; animation-duration: 48s; animation-delay: -8s; }
+  .jxpre-cloud.c16 { top: 46.6%; font-size: 46px; animation-duration: 42s; animation-delay: -11s; }
+  @keyframes jxpre-drift { from { transform: translateX(115vw); } to { transform: translateX(-45vw); } }
+  .jxpre-floor {
+    position: absolute; left: -70%; right: -70%; bottom: -4%; height: 36vh;
+    background-color: #3a1665;
+    background-image: linear-gradient(90deg, rgba(255,255,255,0.16) 50%, transparent 50%), linear-gradient(rgba(255,255,255,0.16) 50%, transparent 50%);
+    background-size: 64px 64px;
+    transform: perspective(280px) rotateX(58deg);
+    transform-origin: bottom;
+    animation: jxpre-floor-move 1.1s linear infinite;
+  }
+  @keyframes jxpre-floor-move { from { background-position: 0 0, 0 0; } to { background-position: 64px 0, 0 64px; } }
+  .jxpre-fade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(12,6,32,0) 0%, rgba(12,6,32,0.15) 40%, rgba(12,6,32,0.6) 75%, rgba(12,6,32,0.9) 100%); }
+  @media (prefers-reduced-motion: reduce) {
+    .jxpre-sun, .jxpre-cloud, .jxpre-floor { animation: none; }
+  }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" defer></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" defer></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js" defer></script>
+</head>
+<body>
+<div class="jxpre-scene" id="jxPreScene">
+  <div class="jxpre-sky"></div>
+  <div class="jxpre-sun"></div>
+  <div class="jxpre-clouds">
+    <span class="jxpre-cloud c1">☁️</span>
+    <span class="jxpre-cloud c2">☁️</span>
+    <span class="jxpre-cloud c3">☁️</span>
+    <span class="jxpre-cloud c4">☁️</span>
+    <span class="jxpre-cloud c5">☁️</span>
+    <span class="jxpre-cloud c6">☁️</span>
+    <span class="jxpre-cloud c7">☁️</span>
+    <span class="jxpre-cloud c8">☁️</span>
+    <span class="jxpre-cloud c9">☁️</span>
+    <span class="jxpre-cloud c10">☁️</span>
+    <span class="jxpre-cloud c11">☁️</span>
+    <span class="jxpre-cloud c12">☁️</span>
+    <span class="jxpre-cloud c13">☁️</span>
+    <span class="jxpre-cloud c14">☁️</span>
+    <span class="jxpre-cloud c15">☁️</span>
+    <span class="jxpre-cloud c16">☁️</span>
+  </div>
+  <div class="jxpre-floor"></div>
+  <div class="jxpre-fade"></div>
+</div>
+<div id="root"></div>
+<script>
+  // Apenas React mete el primer contenido en #root, sacamos esta escena
+  // estática (ya cumplió su función) y queda la real. OJO: este script
+  // tiene que ir DESPUÉS del <div id="root">, si no getElementById("root")
+  // da null (el parser todavía no llegó a esa línea) y el observer nunca
+  // se arma.
+  (function () {
+    var root = document.getElementById("root");
+    var pre = document.getElementById("jxPreScene");
+    if (!root || !pre) return;
+    var obs = new MutationObserver(function () {
+      if (root.childElementCount > 0) {
+        pre.remove();
+        obs.disconnect();
+      }
+    });
+    obs.observe(root, { childList: true });
+  })();
+</script>
+<script src="../storage.js"></script>
+<script src="../critter.js"></script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+// ==================== CONFIG DEL JUEGO ====================
+// El Más Votado: juego 100% hablado — entre todos proponen en voz alta una
+// pregunta tipo "¿quién se baña más veces?" y la app solo se ocupa de la
+// votación y el puntaje. El anfitrión/a abre cada votación cuando quiere
+// (número ilimitado de rondas), todos tocan a quién votan, y cuando el
+// anfitrión/a revela: quien se lleva la mayoría de los votos hace ganar un
+// punto a TODOS los que lo votaron (no al votado — a sus votantes). Si hay
+// empate en el máximo, ganan un punto TODOS los que votaron esa ronda,
+// sin importar a quién. Encadenar 3 rondas seguidas ganando punto suma 1
+// de bonus.
+
+const STORAGE_PREFIX = "voto:sala:";
+const SESSION_KEY = "voto:sesion";
+const POLL_MS = 1500;
+// El listado de "salas abiertas" (JoinScreen) usa list() de Workers KV,
+// que en el plan gratuito tiene una cuota diaria mucho más chica que
+// get() (1.000/día contra 100.000/día, compartida por todo el sitio). No
+// hace falta que se actualice cada segundo, así que sondea más espaciado.
+const LOBBY_LIST_POLL_MS = 8000;
+const MIN_PLAYERS = 3;
+const MAX_PLAYERS = 16;
+const STREAK_BONUS_AT = 3; // rondas seguidas ganando punto para el bonus
+const BONUS_POINTS = 1;
+
+const GRADIENT_BG = "radial-gradient(circle at 20% -10%, #4a1140 0%, #2a0e35 45%, #0c0620 100%)";
+const PLAYER_COLORS = [
+  "#3DDC84", "#FFD23F", "#FF9F1C", "#F0454B",
+  "#FF5D7A", "#B983FF", "#3E9EFF", "#2EC4B6",
+  "#C9E265", "#FF8AD8", "#7C9BFF", "#F4A261",
+];
+
+function randomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+function randomId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+const MY_DEVICE_ID = (() => {
+  const KEY = "voto:deviceId";
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id = randomId();
+    localStorage.setItem(KEY, id);
+  }
+  return id;
+})();
+
+async function readRoom(code) {
+  try {
+    const res = await window.storage.get(STORAGE_PREFIX + code, true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writeRoom(code, room) {
+  await window.storage.set(STORAGE_PREFIX + code, JSON.stringify(room), true);
+}
+
+// ==================== UI COMPARTIDA (mismo lenguaje visual que el resto del sitio) ====================
+function useInjectFont() {
+  useEffect(() => {
+    if (document.getElementById("aq-fonts")) return;
+    const link = document.createElement("link");
+    link.id = "aq-fonts";
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap";
+    document.head.appendChild(link);
+  }, []);
+}
+
+function Screen({ children, style, homeConfirm }) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        width: "100%",
+        background: GRADIENT_BG,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        padding: "28px 18px 40px",
+        fontFamily: "'Nunito', sans-serif",
+        color: "#F3EEFF",
+        boxSizing: "border-box",
+        ...style,
+      }}
+    >
+      {homeConfirm !== null && <HomeButton confirmMessage={homeConfirm} />}
+      {children}
+    </div>
+  );
+}
+
+function HomeButton({ confirmMessage }) {
+  return (
+    <a
+      href="../"
+      onClick={(e) => {
+        if (confirmMessage && !window.confirm(confirmMessage)) e.preventDefault();
+      }}
+      title="Volver al menú de juegos"
+      style={{
+        position: "fixed",
+        top: "calc(env(safe-area-inset-top, 0px) + 14px)",
+        left: 14,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "9px 16px 9px 11px",
+        borderRadius: 30,
+        background: "rgba(0,0,0,0.6)",
+        border: "1.5px solid rgba(255,255,255,0.4)",
+        color: "#fff",
+        fontFamily: "'Nunito', sans-serif",
+        fontWeight: 800,
+        fontSize: 15,
+        textDecoration: "none",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+      }}
+    >
+      <span style={{ fontSize: 19 }}>🏠</span> Menú
+    </a>
+  );
+}
+
+function Title({ children, size = 30 }) {
+  return (
+    <h1
+      style={{
+        fontFamily: "'Baloo 2', sans-serif",
+        fontWeight: 800,
+        fontSize: size,
+        color: "#FFD23F",
+        textShadow: "0 3px 0 rgba(0,0,0,0.35)",
+        margin: "0 0 6px",
+        textAlign: "center",
+        letterSpacing: 0.3,
+      }}
+    >
+      {children}
+    </h1>
+  );
+}
+
+function Sub({ children, style }) {
+  return (
+    <p style={{ color: "#C9B8F0", fontSize: 16, textAlign: "center", margin: "0 0 22px", lineHeight: 1.4, ...style }}>
+      {children}
+    </p>
+  );
+}
+
+function BigButton({ children, onClick, color = "#B983FF", disabled, style }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        boxSizing: "border-box",
+        width: "100%",
+        maxWidth: 380,
+        padding: "16px 20px",
+        borderRadius: 18,
+        border: disabled ? "none" : `1.5px solid color-mix(in srgb, ${color} 70%, transparent)`,
+        background: disabled ? "#4a3d63" : `color-mix(in srgb, ${color} 50%, transparent)`,
+        color: disabled ? "#8b7fa8" : "#F3EEFF",
+        textShadow: disabled ? "none" : "0 1px 3px rgba(0,0,0,0.45)",
+        fontFamily: "'Baloo 2', sans-serif",
+        fontWeight: 700,
+        fontSize: 18,
+        boxShadow: disabled ? "none" : "0 6px 0 rgba(0,0,0,0.28)",
+        cursor: disabled ? "default" : "pointer",
+        marginBottom: 14,
+        transition: "transform 0.08s ease",
+        ...style,
+      }}
+      onMouseDown={(e) => { if (!disabled) e.currentTarget.style.transform = "translateY(4px)"; }}
+      onMouseUp={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
+      onTouchStart={(e) => { if (!disabled) e.currentTarget.style.transform = "translateY(4px)"; }}
+      onTouchEnd={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Card({ children, style }) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 420,
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.12)",
+        borderRadius: 22,
+        padding: 20,
+        boxSizing: "border-box",
+        marginBottom: 16,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.15)",
+  background: "rgba(0,0,0,0.25)",
+  color: "#F3EEFF",
+  fontSize: 17,
+  marginBottom: 10,
+  outline: "none",
+  fontFamily: "'Nunito', sans-serif",
+};
+
+function BgScene() {
+  return (
+    <>
+      <style>{`
+        @keyframes bgsun-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+        @keyframes bgcloud-drift { from { transform: translateX(115vw); } to { transform: translateX(-45vw); } }
+        @keyframes bgfloor-move { from { background-position: 0 0, 0 0; } to { background-position: 64px 0, 0 64px; } }
+        .bgscene-sun { animation: bgsun-pulse 3.2s ease-in-out infinite; }
+        .bgscene-cloud { animation: bgcloud-drift linear infinite; }
+        .bgscene-floor { animation: bgfloor-move 1.1s linear infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .bgscene-sun, .bgscene-cloud, .bgscene-floor { animation: none; }
+        }
+      `}</style>
+      <div style={{ position: "fixed", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none" }}>
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, #2A0F5E 0%, #5A1F94 20%, #9435B0 42%, #E84F8C 62%, #FF6B3D 80%, #FFC93D 100%)" }} />
+        <div className="bgscene-sun" style={{ position: "absolute", left: "50%", top: "7%", width: 120, height: 120, marginLeft: -60, borderRadius: "50%", background: "radial-gradient(circle at 34% 30%, #fff8d8, #ffd23f 55%, #ff9a1c 100%)", boxShadow: "0 0 80px 22px rgba(255,199,82,0.5)" }} />
+        <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "-5.6%", fontSize: 38, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "48s", animationDelay: "-25s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "-3.9%", fontSize: 52, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "32s", animationDelay: "-34s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "0.3%", fontSize: 40, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "40s", animationDelay: "-23s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "3.7%", fontSize: 24, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "30s", animationDelay: "-28s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "8.7%", fontSize: 34, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "46s", animationDelay: "-2s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "12.0%", fontSize: 50, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "22s", animationDelay: "-9s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "16.2%", fontSize: 44, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "44s", animationDelay: "-12s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "17.3%", fontSize: 40, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "36s", animationDelay: "-3s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "21.8%", fontSize: 32, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "38s", animationDelay: "-9s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "24.1%", fontSize: 36, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "24s", animationDelay: "-4s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "28.2%", fontSize: 44, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "34s", animationDelay: "-11s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "32.5%", fontSize: 30, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "24s", animationDelay: "-25s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "34.6%", fontSize: 28, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "38s", animationDelay: "-15s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "38.6%", fontSize: 48, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "30s", animationDelay: "-15s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "43.4%", fontSize: 30, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "48s", animationDelay: "-8s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "46.6%", fontSize: 46, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "42s", animationDelay: "-11s" }}>☁️</span>
+        </div>
+        <div className="bgscene-floor" style={{ position: "absolute", left: "-70%", right: "-70%", bottom: "-4%", height: "36vh", backgroundColor: "#3a1665", backgroundImage: "linear-gradient(90deg, rgba(255,255,255,0.16) 50%, transparent 50%), linear-gradient(rgba(255,255,255,0.16) 50%, transparent 50%)", backgroundSize: "64px 64px", transform: "perspective(280px) rotateX(58deg)", transformOrigin: "bottom" }} />
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(12,6,32,0) 0%, rgba(12,6,32,0.15) 40%, rgba(12,6,32,0.6) 75%, rgba(12,6,32,0.9) 100%)" }} />
+      </div>
+    </>
+  );
+}
+
+function Home({ onSelect }) {
+  return (
+    <Screen style={{ justifyContent: "center", background: "transparent" }}>
+      <BgScene />
+      <div style={{ position: "relative", zIndex: 1, width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div style={{ fontSize: 64, marginBottom: 6 }}>🗳️</div>
+        <Title size={30}>El Más Votado</Title>
+        <Card style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <Sub>
+            Juego 100% hablado: entre todos proponen una pregunta tipo "¿quién se baña más
+            veces?" y todos votan tocando un nombre. Quien se lleva la mayoría hace ganar un punto
+            a todos sus votantes — si hay empate, ganan un punto todos los que votaron.
+          </Sub>
+          <BigButton onClick={() => onSelect("game")}>🎮 Jugar con otros</BigButton>
+        </Card>
+      </div>
+    </Screen>
+  );
+}
+
+// ==================== JOIN ====================
+function JoinScreen({ onJoined, onBack }) {
+  const [name, setName] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [openRooms, setOpenRooms] = useState([]);
+  const [resumable, setResumable] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const entries = await window.storage.list(STORAGE_PREFIX);
+        if (cancelled) return;
+        const rooms = entries
+          .map((e) => {
+            if (!/^voto:sala:[^:]+$/.test(e.key)) return null;
+            try {
+              return JSON.parse(e.value);
+            } catch {
+              return null;
+            }
+          })
+          .filter((r) => r && r.phase === "lobby" && Date.now() - (r.createdAt || 0) < 3 * 60 * 60 * 1000)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setOpenRooms(rooms);
+      } catch {}
+    };
+    tick();
+    const id = setInterval(tick, LOBBY_LIST_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let saved;
+      try {
+        saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+      } catch {
+        saved = null;
+      }
+      if (!saved || !saved.code || !saved.playerId) {
+        setResumable(null);
+        return;
+      }
+      const existing = await readRoom(saved.code);
+      if (cancelled) return;
+      if (existing && existing.players.some((p) => p.id === saved.playerId)) {
+        setResumable({ code: saved.code, playerId: saved.playerId, name: (existing.players.find((p) => p.id === saved.playerId) || {}).name });
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+        setResumable(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const doJoin = async (codeMaybe) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setJoinError("Escribí tu nombre.");
+      return;
+    }
+    setJoining(true);
+    setJoinError("");
+    try {
+      const code = codeMaybe || (codeInput.trim() ? codeInput.trim().toUpperCase() : randomCode());
+      let existing = await readRoom(code);
+      if (existing && existing.phase !== "lobby") {
+        setJoinError("Esa sala ya está jugando. Esperá a la próxima partida.");
+        setJoining(false);
+        return;
+      }
+      const me = { id: randomId(), name: trimmed, deviceId: MY_DEVICE_ID, joinedAt: Date.now(), score: 0, streak: 0, lastRoundPoints: 0, lastRoundBonus: false };
+      if (!existing) {
+        existing = {
+          code,
+          hostId: me.id,
+          players: [me],
+          phase: "lobby",
+          round: 0,
+          votes: {},
+          lastResult: null,
+          createdAt: Date.now(),
+        };
+      } else {
+        if (existing.players.length >= MAX_PLAYERS) {
+          setJoinError(`Sala llena (máximo ${MAX_PLAYERS} jugadores).`);
+          setJoining(false);
+          return;
+        }
+        if (existing.players.some((p) => p.name.toLowerCase() === trimmed.toLowerCase())) {
+          setJoinError(`Ya hay alguien llamado "${trimmed}" en esa sala. Cambiá el nombre.`);
+          setJoining(false);
+          return;
+        }
+        existing.players = [...existing.players, me];
+      }
+      await writeRoom(code, existing);
+      window.storage.incrementCounter("players").catch(() => {});
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: me.id }));
+      onJoined(code, me.id);
+    } catch (e) {
+      setJoinError(window.storage.friendlyErrorMessage(e));
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  return (
+    <Screen>
+      <Title size={26}>El Más Votado</Title>
+      <Sub style={{ marginTop: -10 }}>De {MIN_PLAYERS} a {MAX_PLAYERS} jugadores, cada uno en su celu</Sub>
+      <Card style={{ width: "100%", maxWidth: 420 }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Tu nombre" style={inputStyle} />
+        <input
+          value={codeInput}
+          onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+          placeholder="Código de sala (opcional)"
+          style={inputStyle}
+        />
+        {joinError && <div style={{ color: "#FF5D7A", fontSize: 13, marginBottom: 8 }}>{joinError}</div>}
+        <BigButton onClick={() => doJoin(null)} disabled={joining}>
+          {codeInput.trim() ? "Unirme a esa sala" : "Crear sala nueva"}
+        </BigButton>
+      </Card>
+
+      {resumable && (
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <Sub style={{ marginTop: 0 }}>Ya estabas en la sala <b>{resumable.code}</b> como {resumable.name}</Sub>
+          <BigButton onClick={() => onJoined(resumable.code, resumable.playerId)} color="#3E9EFF">
+            Volver a esa sala
+          </BigButton>
+        </Card>
+      )}
+
+      {openRooms.length > 0 && (
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", fontWeight: 700, marginBottom: 8 }}>Salas abiertas ahora</div>
+          {openRooms.map((r) => (
+            <button
+              key={r.code}
+              onClick={() => { setCodeInput(r.code); doJoin(r.code); }}
+              style={{ display: "flex", justifyContent: "space-between", width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, padding: "10px 12px", marginBottom: 6, color: "#F3EEFF", cursor: "pointer", fontWeight: 700 }}
+            >
+              <span>{r.code}</span>
+              <span style={{ color: "#8b7fa8" }}>{(r.players || []).length}/{MAX_PLAYERS} jugadores</span>
+            </button>
+          ))}
+        </Card>
+      )}
+
+      <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+        Volver
+      </BigButton>
+    </Screen>
+  );
+}
+
+// ==================== TABLA DE PUNTAJE ====================
+// showRoundPoints solo se prende en la pantalla de resultados — durante la
+// votación de la ronda siguiente no tiene sentido seguir mostrando el "+N"
+// de la ronda ya pasada.
+function Scoreboard({ players, myId, showRoundPoints }) {
+  const ranked = [...players].sort((a, b) => (b.score || 0) - (a.score || 0));
+  const medals = ["🥇", "🥈", "🥉"];
+  return (
+    <Card style={{ width: "100%", maxWidth: 420 }}>
+      <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Puntaje</div>
+      {ranked.map((p, i) => (
+        <div
+          key={p.id}
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "6px 2px",
+            borderBottom: i < ranked.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none",
+          }}
+        >
+          <span>
+            {medals[i] || `${i + 1}°`} {p.name}
+            {p.id === myId ? " (vos)" : ""}
+            {p.streak >= 2 ? ` 🔥${p.streak}` : ""}
+          </span>
+          <span>
+            {showRoundPoints && p.lastRoundPoints ? (
+              <span style={{ color: "#3DDC84", fontWeight: 700, marginRight: 8 }}>+{p.lastRoundPoints}</span>
+            ) : null}
+            <b style={{ color: "#FFD23F" }}>{p.score || 0}</b>
+          </span>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+// ==================== GRILLA DE VOTO ====================
+// Un botón grande y colorido por jugador — "los votones de a quién votás"
+// pedidos por el usuario. Tocar cambia el voto (se puede cambiar de
+// opinión hasta que el anfitrión/a revele); el propio voto queda marcado
+// con un borde y un check.
+function VoteGrid({ players, myVote, onVote }) {
+  return (
+    <>
+      <style>{`
+        .voto-3dbtn { transition: transform 0.1s ease; }
+        .voto-3dbtn:active { transform: translateY(4px) scale(0.97); }
+      `}</style>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+          gap: 10,
+          width: "100%",
+          maxWidth: 460,
+          marginBottom: 14,
+        }}
+      >
+        {players.map((p, i) => {
+          const color = PLAYER_COLORS[i % PLAYER_COLORS.length];
+          const selected = myVote === p.id;
+          return (
+            <button
+              key={p.id}
+              className="voto-3dbtn"
+              onClick={() => onVote(p.id)}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 6,
+                padding: "16px 8px",
+                borderRadius: 16,
+                border: selected ? "3px solid #FFD23F" : "3px solid transparent",
+                background: `linear-gradient(155deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0.05) 45%, rgba(0,0,0,0.18) 100%), ${color}`,
+                boxShadow: selected ? "0 4px 0 rgba(0,0,0,0.28), 0 0 0 2px rgba(255,210,63,0.4)" : "0 6px 0 rgba(0,0,0,0.28)",
+                cursor: "pointer",
+              }}
+            >
+              <span style={{ fontSize: 26 }}>{selected ? "✅" : "🗳️"}</span>
+              <span
+                style={{
+                  fontFamily: "'Baloo 2', sans-serif",
+                  fontWeight: 800,
+                  fontSize: 15,
+                  color: "#1B1035",
+                  textAlign: "center",
+                  wordBreak: "break-word",
+                  textShadow: "0 1px 2px rgba(255,255,255,0.25)",
+                }}
+              >
+                {p.name}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+// ==================== SALA ====================
+function GameRoom({ roomCode, myId, onBack }) {
+  const [room, setRoom] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const r = await readRoom(roomCode);
+      if (cancelled || !r) return;
+      setRoom(r);
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [roomCode]);
+
+  if (!room) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <Sub>Cargando sala...</Sub>
+      </Screen>
+    );
+  }
+
+  const players = room.players || [];
+  const effectiveHost =
+    players.find((p) => p.id === room.hostId) ||
+    [...players].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0] ||
+    null;
+  const isHost = !!effectiveHost && effectiveHost.id === myId;
+
+  const startVoting = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh || fresh.players.length < MIN_PLAYERS) return;
+    fresh.round = (fresh.round || 0) + 1;
+    fresh.phase = "voting";
+    fresh.votes = {};
+    fresh.lastResult = null;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  // Escritura simple, sin verificar-y-reintentar: si dos personas votan en
+  // el mismo instante exacto, en el peor caso se pisa un voto — mismo tipo
+  // de carrera aceptada en otros juegos del sitio (no hay compare-and-swap
+  // en Workers KV). El impacto acá es chico y fácil de notar/arreglar a
+  // mano (alcanza con tocar el nombre de nuevo), así que no vale la pena
+  // la complejidad extra de un lee-escribe-verifica como el de Bloques.
+  const castVote = async (candidateId) => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh || fresh.phase !== "voting") return;
+    fresh.votes = { ...(fresh.votes || {}), [myId]: candidateId };
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  // El anfitrión/a decide cuándo revelar (no hace falta que hayan votado
+  // todos — "las maneja el que creó la sala"). Calcula quién ganó la
+  // mayoría de los votos: sus votantes se llevan un punto cada uno. Si hay
+  // empate en el máximo, en cambio, ganan un punto TODOS los que votaron
+  // esa ronda (sin importar a quién). 3 rondas seguidas ganando punto
+  // suman 1 de bonus (y ahí se reinicia la racha, para que haga falta una
+  // tanda nueva de 3 para el próximo bonus).
+  const revealResults = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh || fresh.phase !== "voting") return;
+    const votes = fresh.votes || {};
+    const voterIds = Object.keys(votes);
+    if (voterIds.length === 0) return;
+    const tally = {};
+    Object.values(votes).forEach((cid) => {
+      tally[cid] = (tally[cid] || 0) + 1;
+    });
+    const maxVotes = Math.max(0, ...Object.values(tally));
+    const winners = Object.keys(tally).filter((cid) => tally[cid] === maxVotes);
+    const isTie = winners.length > 1;
+    const pointsAwarded = isTie ? voterIds : voterIds.filter((vid) => winners.includes(votes[vid]));
+    const bonusAwarded = [];
+    fresh.players = fresh.players.map((p) => {
+      const gotPoint = pointsAwarded.includes(p.id);
+      let streak = gotPoint ? (p.streak || 0) + 1 : 0;
+      let bonus = 0;
+      if (streak >= STREAK_BONUS_AT) {
+        bonus = BONUS_POINTS;
+        streak = 0;
+        bonusAwarded.push(p.id);
+      }
+      return {
+        ...p,
+        score: (p.score || 0) + (gotPoint ? 1 : 0) + bonus,
+        streak,
+        lastRoundPoints: (gotPoint ? 1 : 0) + bonus,
+        lastRoundBonus: bonus > 0,
+      };
+    });
+    fresh.phase = "revealed";
+    fresh.lastResult = { round: fresh.round, tally, maxVotes, winners, isTie, votes, bonusAwarded };
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  // Un solo click sin querer no debería sacarte de una partida en curso —
+  // mismo motivo (y mismo arreglo) que en Bloques en Cadena: el botón
+  // "Menú" de arriba ya pedía confirmación, así que este, que hace lo
+  // mismo, también la pide.
+  const leaveRoom = async () => {
+    if (!window.confirm("¿Salir de la sala?")) return;
+    try {
+      const fresh = await readRoom(roomCode);
+      if (fresh) {
+        fresh.players = (fresh.players || []).filter((p) => p.id !== myId);
+        await writeRoom(roomCode, fresh);
+      }
+    } catch {}
+    localStorage.removeItem(SESSION_KEY);
+    onBack();
+  };
+
+  // ---------- LOBBY ----------
+  if (room.phase === "lobby") {
+    return (
+      <Screen homeConfirm="¿Salir de la sala?">
+        <Title size={26}>Sala {room.code}</Title>
+        <Sub style={{ marginTop: -10 }}>
+          Compartí el código para que se sumen ({players.length}/{MAX_PLAYERS}). Mínimo {MIN_PLAYERS} jugadores.
+        </Sub>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          {players.map((p) => (
+            <div key={p.id} style={{ padding: "6px 2px", color: "#F3EEFF" }}>
+              {p.id === effectiveHost?.id ? "👑 " : "• "}
+              {p.name}
+              {p.id === myId ? " (vos)" : ""}
+            </div>
+          ))}
+        </Card>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Cómo se juega</div>
+          <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "#F3EEFF" }}>
+            🗣️ Es un juego hablado: entre todos proponen en voz alta una pregunta tipo "¿quién se
+            baña más veces?" o "¿quién llega tarde siempre?".
+            <br />
+            🗳️ El anfitrión/a abre la votación y todos tocan el nombre de a quién votan (se puede
+            cambiar de opinión hasta que se revele).
+            <br />
+            🏆 Gana la mayoría de los votos: TODOS los que votaron a esa persona se llevan un
+            punto cada uno. Si hay empate en el máximo, ganan un punto TODOS los que votaron.
+            <br />
+            🔥 Ganar punto 3 rondas seguidas suma 1 punto extra de bonus.
+            <br />
+            El anfitrión/a maneja cuándo arranca cada votación y cuándo se revela — se puede
+            jugar tantas rondas como quieran.
+          </div>
+        </Card>
+        {isHost ? (
+          <BigButton onClick={startVoting} disabled={players.length < MIN_PLAYERS}>
+            {players.length < MIN_PLAYERS ? `Esperando jugadores (mín. ${MIN_PLAYERS})...` : "Empezar 🎮"}
+          </BigButton>
+        ) : (
+          <Sub>Esperando a que {effectiveHost ? effectiveHost.name : "el anfitrión/a"} empiece...</Sub>
+        )}
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- VOTACIÓN ----------
+  if (room.phase === "voting") {
+    const votes = room.votes || {};
+    const votedCount = Object.keys(votes).length;
+    const myVote = votes[myId] || null;
+    return (
+      <Screen homeConfirm="¿Salir de la sala?">
+        <Title size={24}>Ronda {room.round}</Title>
+        <Sub style={{ marginTop: -10 }}>
+          Digan en voz alta la pregunta y toquen a quién votan.
+        </Sub>
+        <Scoreboard players={players} myId={myId} />
+        <VoteGrid players={players} myVote={myVote} onVote={castVote} />
+        <Sub style={{ marginTop: -6 }}>
+          {votedCount}/{players.length} ya votaron
+        </Sub>
+        {isHost ? (
+          <BigButton onClick={revealResults} disabled={votedCount === 0}>
+            {votedCount === 0 ? "Esperando votos..." : "Revelar resultados 🗳️"}
+          </BigButton>
+        ) : (
+          <Sub>Esperando a que {effectiveHost ? effectiveHost.name : "el anfitrión/a"} revele los resultados...</Sub>
+        )}
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  // ---------- RESULTADOS ----------
+  if (room.phase === "revealed") {
+    const result = room.lastResult || {};
+    const tally = result.tally || {};
+    const votes = result.votes || {};
+    const winners = result.winners || [];
+    const isTie = !!result.isTie;
+    const sortedCandidates = [...players].sort((a, b) => (tally[b.id] || 0) - (tally[a.id] || 0));
+    const voterNamesFor = (candidateId) =>
+      Object.entries(votes)
+        .filter(([, cid]) => cid === candidateId)
+        .map(([voterId]) => (players.find((p) => p.id === voterId) || {}).name || "?");
+    const bonusNames = (result.bonusAwarded || [])
+      .map((id) => (players.find((p) => p.id === id) || {}).name)
+      .filter(Boolean);
+    const winnerName = !isTie && winners[0] ? (players.find((p) => p.id === winners[0]) || {}).name : null;
+
+    return (
+      <Screen homeConfirm="¿Salir de la sala?">
+        <Title size={24}>Ronda {result.round} — Resultados</Title>
+        {isTie ? (
+          <Sub style={{ marginTop: -10, color: "#FFD23F", fontWeight: 700 }}>
+            🤝 ¡Empate! Todos los que votaron se llevan un punto.
+          </Sub>
+        ) : (
+          <Sub style={{ marginTop: -10 }}>
+            Ganó el voto <b style={{ color: "#FFD23F" }}>{winnerName || "?"}</b> — sus votantes se
+            llevan un punto.
+          </Sub>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 460, marginBottom: 14 }}>
+          {sortedCandidates.map((p) => {
+            const count = tally[p.id] || 0;
+            const isWinner = winners.includes(p.id);
+            const voters = voterNamesFor(p.id);
+            const colorIdx = players.findIndex((pp) => pp.id === p.id);
+            const color = PLAYER_COLORS[(colorIdx < 0 ? 0 : colorIdx) % PLAYER_COLORS.length];
+            return (
+              <div
+                key={p.id}
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 16,
+                  border: isWinner ? "2px solid #FFD23F" : "1.5px solid rgba(255,255,255,0.15)",
+                  background: isWinner ? "rgba(255,210,63,0.15)" : "rgba(255,255,255,0.06)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontWeight: 800, fontFamily: "'Baloo 2', sans-serif" }}>
+                    {isWinner ? "🏆 " : ""}
+                    {p.name}
+                    {p.id === myId ? " (vos)" : ""}
+                  </span>
+                  <span style={{ fontWeight: 800, color }}>
+                    {count} {count === 1 ? "voto" : "votos"}
+                  </span>
+                </div>
+                {voters.length > 0 && (
+                  <div style={{ fontSize: 12.5, color: "#8b7fa8", marginTop: 4 }}>votado por: {voters.join(", ")}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {bonusNames.length > 0 && (
+          <Sub style={{ marginTop: -6, color: "#3DDC84", fontWeight: 700 }}>
+            🔥 {bonusNames.join(", ")} {bonusNames.length === 1 ? "ganó" : "ganaron"} 3 rondas seguidas — ¡punto bonus!
+          </Sub>
+        )}
+        <Scoreboard players={players} myId={myId} showRoundPoints />
+        {isHost ? (
+          <BigButton onClick={startVoting}>Nueva votación ➜</BigButton>
+        ) : (
+          <Sub>Esperando a que {effectiveHost ? effectiveHost.name : "el anfitrión/a"} siga...</Sub>
+        )}
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen style={{ justifyContent: "center" }}>
+      <Sub>Cargando...</Sub>
+    </Screen>
+  );
+}
+
+function App() {
+  useInjectFont();
+  const [mode, setMode] = useState("home");
+  const [roomCode, setRoomCode] = useState(null);
+  const [myId, setMyId] = useState(null);
+
+  if (mode === "home") return <Home onSelect={setMode} />;
+  if (mode === "game" && roomCode && myId) {
+    return (
+      <GameRoom
+        roomCode={roomCode}
+        myId={myId}
+        onBack={() => {
+          setRoomCode(null);
+          setMyId(null);
+          setMode("home");
+        }}
+      />
+    );
+  }
+  return (
+    <JoinScreen
+      onJoined={(code, id) => {
+        setRoomCode(code);
+        setMyId(id);
+      }}
+      onBack={() => setMode("home")}
+    />
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
