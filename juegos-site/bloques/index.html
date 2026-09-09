@@ -485,32 +485,41 @@ function announceAttack(type, targetName) {
     window.speechSynthesis.speak(utter);
   } catch {}
 }
-// Reacción cómica de quien RECIBE el ataque — pedido del usuario: "que el
-// juego diga ayy esta se complica! con voz graciosa". Voz opuesta a la
-// del locutor (agudo y rápido en vez de grave y pausado), para que se
-// note que es un personaje distinto reaccionando, no el mismo locutor.
-// No cancela lo que esté sonando (a diferencia de announceAttack): si
-// justo te atacaste a vos mismo, que se escuchen los dos en fila en vez
-// de cortarse uno a otro.
-const ATTACK_RECEIVED_LINES = [
-  "¡Ayyy, esta se complica!",
-  "¡Uy uy uy, la vas a pasar mal!",
-  "¡Nooo, así no vale!",
-  "¡Y ahora qué hago!",
-];
+// Reacción de quien RECIBE el ataque: un "BOOM" de verdad, grabado por
+// el propio usuario (juegos-site/bloques/sounds/boom.mp3) — probamos
+// antes con voces sintetizadas ("¡Ayyy, esta se complica!") pero el
+// usuario las probó y no le gustaron nada, así que se reemplazan por su
+// propio audio en vez de insistir con síntesis de voz. Se decodifica una
+// sola vez (fetch + decodeAudioData) y se cachea en memoria — de ahí en
+// más, reproducirlo es instantáneo. Como pasa por el mismo AudioContext
+// que el resto de los sonidos, respeta el mismo mute.
+let bloquesBoomBuffer = null;
+let bloquesBoomLoadPromise = null;
+function loadBoomBuffer(ctx) {
+  if (bloquesBoomBuffer) return Promise.resolve(bloquesBoomBuffer);
+  if (!bloquesBoomLoadPromise) {
+    bloquesBoomLoadPromise = fetch("sounds/boom.mp3")
+      .then((r) => r.arrayBuffer())
+      .then((data) => ctx.decodeAudioData(data))
+      .then((decoded) => {
+        bloquesBoomBuffer = decoded;
+        return decoded;
+      })
+      .catch(() => null);
+  }
+  return bloquesBoomLoadPromise;
+}
 function playAttackReceived() {
   if (isSoundMuted()) return;
-  playTension();
-  if (!window.speechSynthesis) return;
-  try {
-    const line = ATTACK_RECEIVED_LINES[Math.floor(Math.random() * ATTACK_RECEIVED_LINES.length)];
-    const utter = new SpeechSynthesisUtterance(line);
-    utter.lang = "es-AR";
-    utter.rate = 1.2;
-    utter.pitch = 1.65;
-    utter.volume = 1;
-    window.speechSynthesis.speak(utter);
-  } catch {}
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  loadBoomBuffer(ctx).then((buffer) => {
+    if (!buffer || isSoundMuted()) return; // puede haberse silenciado mientras cargaba
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(ctx.destination);
+    src.start();
+  });
 }
 // Detecta "me acaban de atacar" comparando una "huella" chica de mi
 // estado (cuánto girar/blanco y negro/2-1 tengo encima, si mi grilla
