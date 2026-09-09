@@ -380,26 +380,6 @@ function playGridDone() {
   if (isSoundMuted()) return;
   [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => playTone(f, { duration: 0.22, type: "square", gain: 0.15, delay: i * 0.07 }));
 }
-// "Sting" de tensión: un glissando cortito hacia arriba cuando entrás al
-// ÚLTIMO color de la grilla — "ruidito... cuando vas terminando".
-function playTension() {
-  if (isSoundMuted()) return;
-  const ctx = getAudioCtx();
-  if (!ctx) return;
-  const t0 = ctx.currentTime;
-  const osc = ctx.createOscillator();
-  const g = ctx.createGain();
-  osc.type = "sawtooth";
-  osc.frequency.setValueAtTime(110, t0);
-  osc.frequency.exponentialRampToValueAtTime(220, t0 + 0.45);
-  g.gain.setValueAtTime(0, t0);
-  g.gain.linearRampToValueAtTime(0.09, t0 + 0.05);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
-  osc.connect(g);
-  g.connect(ctx.destination);
-  osc.start(t0);
-  osc.stop(t0 + 0.55);
-}
 // Ruido blanco reusable (un solo buffer, se arma una vez) — la base de
 // playImpactHit de acá abajo. No hay forma de generar ruido con un
 // osciilador común, hay que rellenar un buffer a mano.
@@ -1910,7 +1890,6 @@ function PracticeGame({ onBack }) {
     const remaining = newPieces.some((p) => p.color === activeColor && !p.cleared);
     const newIndex = remaining ? grid.activeColorIndex : grid.activeColorIndex + 1;
     playPlop(grid.colorOrder.indexOf(activeColor));
-    if (!remaining && newIndex === grid.colorOrder.length - 1) playTension();
 
     if (newIndex >= grid.colorOrder.length) {
       playGridDone();
@@ -3577,7 +3556,6 @@ function GameRoom({ roomCode, myId, onBack }) {
     const remaining = newPieces.some((p) => p.color === activeColor && !p.cleared);
     const newIndex = remaining ? grid.activeColorIndex : grid.activeColorIndex + 1;
     playPlop(grid.colorOrder.indexOf(activeColor));
-    if (!remaining && newIndex === grid.colorOrder.length - 1) playTension();
 
     // Ataque "2-1" (modo Guerra): mientras esté activo, cada N piezas que
     // limpio reaparecen M en algún lugar donde ya había limpiado — nivel 1
