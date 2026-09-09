@@ -297,6 +297,117 @@ const MY_DEVICE_ID = (() => {
   return id;
 })();
 
+// ---------- Sonido ----------
+// Pedido del usuario: "sonidos divertidos... plop cuando vas terminando
+// grillas... y cuando atacamos que se escuche fuerte el nombre de quien
+// atacaste y el poder que tiraste". Todo generado con la Web Audio API
+// (osciladores + envolventes) en vez de archivos de sonido — mismo
+// espíritu que critter.js (nada de assets externos, así no hay
+// problema de licencias ni peso agregado al sitio). El relato del
+// ataque usa la síntesis de voz del navegador (SpeechSynthesis): es la
+// única forma de "decir" un nombre de jugador que no conocemos de
+// antemano. Con mute persistente para no volverse molesto en partidas
+// largas — ver SoundToggleButton, en Screen.
+const SOUND_MUTE_KEY = "bloques:sonido:mute";
+function isSoundMuted() {
+  try {
+    return localStorage.getItem(SOUND_MUTE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function setSoundMuted(muted) {
+  try {
+    localStorage.setItem(SOUND_MUTE_KEY, muted ? "1" : "0");
+  } catch {}
+}
+let bloquesAudioCtx = null;
+function getAudioCtx() {
+  // Los navegadores exigen un gesto del usuario para arrancar/reanudar el
+  // audio — como esto solo se llama desde adentro de un onClick (tocar
+  // una pieza, mandar un ataque), siempre estamos dentro de ese gesto.
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  if (!bloquesAudioCtx) bloquesAudioCtx = new AC();
+  if (bloquesAudioCtx.state === "suspended") bloquesAudioCtx.resume();
+  return bloquesAudioCtx;
+}
+// Un tono cortito con ataque instantáneo y caída exponencial — la base de
+// todos los efectos de acá. type/gain/duration bajitos a propósito: se
+// dispara en cada tap, así que tiene que ser un click satisfactorio, no
+// un ruido cansador a la centésima vez.
+function playTone(freq, { duration = 0.12, type = "sine", gain = 0.16, delay = 0 } = {}) {
+  if (isSoundMuted()) return;
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const t0 = ctx.currentTime + delay;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(gain, t0 + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+  osc.connect(g);
+  g.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + duration + 0.03);
+}
+// "Plop" al limpiar una pieza: una escala tipo marimba (una nota por
+// posición en colorOrder), así cada color suena distinto en vez del
+// mismo click repetido todo el rato — el "algo más sutil por colores"
+// que pidió el usuario.
+const PLOP_SCALE = [523.25, 587.33, 659.25, 698.46, 783.99, 880.0, 987.77, 1046.5, 1174.66, 1318.51];
+function playPlop(colorIndex) {
+  const i = ((colorIndex % PLOP_SCALE.length) + PLOP_SCALE.length) % PLOP_SCALE.length;
+  playTone(PLOP_SCALE[i], { duration: 0.1, type: "triangle", gain: 0.13 });
+}
+// Fanfarria cortita al terminar una grilla entera.
+function playGridDone() {
+  if (isSoundMuted()) return;
+  [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => playTone(f, { duration: 0.22, type: "square", gain: 0.15, delay: i * 0.07 }));
+}
+// "Sting" de tensión: un glissando cortito hacia arriba cuando entrás al
+// ÚLTIMO color de la grilla — "ruidito... cuando vas terminando".
+function playTension() {
+  if (isSoundMuted()) return;
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(110, t0);
+  osc.frequency.exponentialRampToValueAtTime(220, t0 + 0.45);
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(0.09, t0 + 0.05);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+  osc.connect(g);
+  g.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.55);
+}
+// Locutor de pelea al mandar un ataque — "Hurricane to Gaspi!". Usa
+// GUERRA_ATTACK_META para el nombre lindo del ataque (definido más abajo
+// en el archivo — para cuando esta función se LLAME, en pleno juego, ya
+// está inicializado hace rato). Si el navegador no tiene voces en
+// español instaladas usa la que tenga por default; no rompe nada.
+function announceAttack(type, targetName) {
+  if (isSoundMuted()) return;
+  if (!window.speechSynthesis) return;
+  const meta = typeof GUERRA_ATTACK_META !== "undefined" ? GUERRA_ATTACK_META[type] : null;
+  const label = (meta && meta.label) || "Ataque";
+  try {
+    window.speechSynthesis.cancel(); // no se pisan uno arriba del otro si atacás rápido
+    const utter = new SpeechSynthesisUtterance(`¡${label}, para ${targetName}!`);
+    utter.lang = "es-AR";
+    utter.rate = 1.05;
+    utter.pitch = 0.85;
+    utter.volume = 1;
+    window.speechSynthesis.speak(utter);
+  } catch {}
+}
+
 async function readRoom(code) {
   try {
     const res = await window.storage.get(STORAGE_PREFIX + code, true);
@@ -583,8 +694,48 @@ function Screen({ children, style, homeConfirm }) {
       }}
     >
       {homeConfirm !== null && <HomeButton confirmMessage={homeConfirm} />}
+      <SoundToggleButton />
       {children}
     </div>
+  );
+}
+
+// Silenciar/activar los sonidos y el locutor — arriba a la derecha,
+// simétrico al botón de Menú. Se guarda en localStorage (isSoundMuted/
+// setSoundMuted, ver el motor de sonido más arriba en el archivo), así
+// que la preferencia sobrevive entre partidas.
+function SoundToggleButton() {
+  const [muted, setMuted] = useState(isSoundMuted());
+  return (
+    <button
+      onClick={() => {
+        const next = !muted;
+        setSoundMuted(next);
+        setMuted(next);
+        if (next && window.speechSynthesis) window.speechSynthesis.cancel();
+      }}
+      title={muted ? "Activar sonido" : "Silenciar"}
+      style={{
+        position: "fixed",
+        top: "calc(env(safe-area-inset-top, 0px) + 14px)",
+        right: 14,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 40,
+        height: 40,
+        borderRadius: "50%",
+        background: "rgba(0,0,0,0.6)",
+        border: "1.5px solid rgba(255,255,255,0.4)",
+        color: "#fff",
+        fontSize: 18,
+        cursor: "pointer",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+      }}
+    >
+      {muted ? "🔇" : "🔊"}
+    </button>
   );
 }
 
@@ -1419,8 +1570,11 @@ function PracticeGame({ onBack }) {
     const newPieces = grid.pieces.map((p) => (p.id === pieceId ? { ...p, cleared: true } : p));
     const remaining = newPieces.some((p) => p.color === activeColor && !p.cleared);
     const newIndex = remaining ? grid.activeColorIndex : grid.activeColorIndex + 1;
+    playPlop(grid.colorOrder.indexOf(activeColor));
+    if (!remaining && newIndex === grid.colorOrder.length - 1) playTension();
 
     if (newIndex >= grid.colorOrder.length) {
+      playGridDone();
       const newQueue = queue.slice(1);
       const newSolvedCount = solvedCount + 1;
       if (newQueue.length === 0) {
@@ -2608,6 +2762,13 @@ function GameRoom({ roomCode, myId, onBack }) {
   const performAttack = (targetId, forcedType) => {
     const type = forcedType || (attackCtx ? attackCtx.type : "grid");
     setAttackCtx(null);
+    // Locutor de pelea, pedido por el usuario ("que se escuche fuerte el
+    // nombre de quien atacaste y el poder que tiraste... onda Hurricane to
+    // Gaspi!") — solo en la pantalla de quien ataca (no hay forma barata
+    // de avisarle al rival apenas aterriza, sin agregar otra vuelta de
+    // red). Ver announceAttack cerca del resto de las funciones de sonido,
+    // arriba del todo del archivo.
+    announceAttack(type, (players.find((p) => p.id === targetId) || {}).name || "alguien");
     const cur = myLiveStateRef.current;
     if (cur) {
       // En Guerra, la grilla extra queda registrada como "ya se la mandé a
@@ -3014,6 +3175,8 @@ function GameRoom({ roomCode, myId, onBack }) {
     let newPieces = grid.pieces.map((p) => (idsToClear.has(p.id) ? { ...p, cleared: true } : p));
     const remaining = newPieces.some((p) => p.color === activeColor && !p.cleared);
     const newIndex = remaining ? grid.activeColorIndex : grid.activeColorIndex + 1;
+    playPlop(grid.colorOrder.indexOf(activeColor));
+    if (!remaining && newIndex === grid.colorOrder.length - 1) playTension();
 
     // Ataque "2-1" (modo Guerra): mientras esté activo, cada N piezas que
     // limpio reaparecen M en algún lugar donde ya había limpiado — nivel 1
@@ -3053,6 +3216,7 @@ function GameRoom({ roomCode, myId, onBack }) {
     const newGrid = { ...grid, pieces: newPieces, activeColorIndex: newIndex };
 
     if (newIndex >= grid.colorOrder.length) {
+      playGridDone();
       completeCurrentGrid(cur);
       return;
     }
