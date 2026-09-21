@@ -21,6 +21,12 @@
      BgScene) en vez de un color plano, para que la llegada desde la home
      se sienta continua y no como un salto a "página negra". */
   html, body { margin:0; padding:0; background: linear-gradient(180deg, #2A0F5E 0%, #5A1F94 20%, #9435B0 42%, #E84F8C 62%, #FF6B3D 80%, #FFC93D 100%); background-attachment: fixed; }
+  /* Pedido del usuario: en iPhone, arrastrar una pieza también arrastraba
+     el fondo (el rebote elástico de Safari al hacer scroll). El
+     preventDefault() en los eventos de touchmove del arrastre (ver
+     PuzzleRound) frena la causa directa; esto de acá es un refuerzo a
+     nivel de toda la página, por si algún gesto se escapa. */
+  html, body { overscroll-behavior: none; touch-action: pan-y; }
   #root { min-height: 100vh; }
 
   /* ---------- Escena estática (sol+nubes+piso) idéntica a BgScene, pero en
@@ -148,11 +154,11 @@ const { useState, useEffect, useRef } = React;
 // correcto, encastra sola. Termina cuando encastró todas las piezas que
 // sí formaban la figura (no hace falta tocar las que sobran).
 
-const CELL = 36; // px por celda del tablero — grande para dedos en celu
-const TRAY_CELL = 20; // px por celda de las fichitas en la bandeja (más chico)
-const GRID_COLS = 8;
-const GRID_ROWS = 8;
-const TOTAL_PIECES = 10;
+const CELL = 44; // px por celda del tablero — grande para dedos en celu
+const TRAY_CELL = 26; // px por celda de las fichitas en la bandeja (más chico)
+const GRID_COLS = 6;
+const GRID_ROWS = 6;
+const TOTAL_PIECES = 5; // pedido del usuario: bajar de 10 a 5, ronda más rápida
 const ROUND_OPTIONS = [3, 5, 8];
 const DEFAULT_ROUNDS = 3;
 const PRACTICE_BEST_KEY = "sinvueltas:mejor";
@@ -188,14 +194,11 @@ function shuffleArr(arr) {
 function cellKey(x, y) {
   return x + "," + y;
 }
-// Cuántas piezas de las 10 NO forman parte de la figura ("dejando
-// posiblemente alguna pieza afuera") — la mayoría de las rondas no tiene
-// ninguna, para no frustrar de entrada; después se van sumando.
+// Cuántas piezas de las 5 NO forman parte de la figura ("dejando
+// posiblemente alguna pieza afuera") — con solo 5 piezas alcanza con 0 o
+// 1 (2 dejaría una figura muy chica, de 3 piezas nomás).
 function randomDecoyCount() {
-  const r = Math.random();
-  if (r < 0.5) return 0;
-  if (r < 0.85) return 1;
-  return 2;
+  return Math.random() < 0.7 ? 0 : 1;
 }
 
 // Intenta acomodar `count` piezas en una sola mancha conexa (cada pieza
@@ -247,12 +250,21 @@ function tryPlacePieces(count) {
   return placed;
 }
 
-// Arma una ronda completa: la figura (piezas solución ya ubicadas) + la
-// bandeja de 10 piezas mezcladas (solución + las que sobran, si hay). Si
-// el armado se traba mucho (raro, pero el algoritmo es al azar), baja de
-// a una la cantidad de piezas solución hasta que encuentra una figura
-// válida — así SIEMPRE sale una ronda jugable, nunca deja al jugador
-// trabado esperando algo que no va a aparecer.
+// Arma una ronda completa: la figura (unión de celdas que hay que
+// llenar) + la bandeja de 5 piezas mezcladas (las que arman la figura +
+// las que sobran, si hay). Si el armado se traba mucho (raro, pero el
+// algoritmo es al azar), baja de a una la cantidad de piezas solución
+// hasta que encuentra una figura válida — así SIEMPRE sale una ronda
+// jugable, nunca deja al jugador trabado esperando algo que no va a
+// aparecer.
+//
+// Pedido del usuario: ya NO hace falta soltar cada pieza en su posición
+// "correcta" original — se puede colocar en cualquier lado del tablero y
+// reacomodar después (ver PuzzleRound). Por eso acá ya no hace falta
+// guardar a qué posición pertenecía cada pieza: solo importan sus TIPOS
+// (para la bandeja) y la unión de celdas de la figura (targetCells) —
+// ganás cuando esas celdas quedan cubiertas por las piezas que pusiste,
+// sea cual sea la combinación que uses para lograrlo.
 function generateRound() {
   let decoyCount = randomDecoyCount();
   let solutionCount = TOTAL_PIECES - decoyCount;
@@ -264,13 +276,7 @@ function generateRound() {
     if (!placed) solutionCount--;
   }
   decoyCount = TOTAL_PIECES - solutionCount;
-  const solutionPieces = placed.map((p, i) => ({
-    id: "s" + i,
-    type: p.type,
-    anchorX: p.anchorX,
-    anchorY: p.anchorY,
-    isDecoy: false,
-  }));
+  const solutionPieces = placed.map((p, i) => ({ id: "s" + i, type: p.type, isDecoy: false }));
   const decoyPieces = Array.from({ length: decoyCount }, (_, i) => ({
     id: "d" + i,
     type: TETROMINO_TYPES[randInt(0, TETROMINO_TYPES.length - 1)],
@@ -283,6 +289,9 @@ function generateRound() {
     targetCells,
     solutionCount,
   };
+}
+function pieceCellsAt(type, x, y) {
+  return TETROMINOES[type].cells.map(([dx, dy]) => [x + dx, y + dy]);
 }
 
 // ==================== UI COMPARTIDA (mismo lenguaje visual que el resto del sitio) ====================
@@ -504,9 +513,9 @@ function Home({ onSelect }) {
         <Title size={30}>Sin Vueltas</Title>
         <Card style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", alignItems: "center" }}>
           <Sub>
-            Te damos 10 piezas de Tetris. Arrastralas para encastrar una figura — pero OJO, nada de
-            girarlas: cada una entra tal cual la ves. Puede que te sobre alguna pieza que no entra en
-            ningún lado.
+            Te damos 5 piezas de Tetris. Arrastralas para cubrir una figura — pero OJO, nada de
+            girarlas: cada una entra tal cual la ves. Si la ponés mal, no pasa nada: la volvés a agarrar
+            y la reacomodás. Puede que te sobre alguna pieza que no haga falta usar.
           </Sub>
           <BigButton onClick={() => onSelect("game")}>🎮 Jugar</BigButton>
         </Card>
@@ -548,39 +557,55 @@ function PieceShape({ type, cellSize, style }) {
 // mano en vez del onClick de siempre). Un solo dedo a la vez alcanza acá
 // (no hace falta soltar varias piezas juntas), así que un pointer normal
 // (mouse+touch unificado) es más simple que separar touch/mouse.
+//
+// Pedido del usuario: las piezas NO tienen que caer justo en su lugar
+// "correcto" original para quedar puestas — se pueden soltar en
+// CUALQUIER posición libre del tablero (sin pisar otra pieza ni salirse
+// del tablero) y después levantarlas de nuevo para reacomodarlas, tantas
+// veces como haga falta, hasta que la figura entera quede cubierta. Por
+// eso `placed` guarda la posición ACTUAL de cada pieza puesta (no una
+// posición fija) — se actualiza cada vez que se suelta una pieza en un
+// lugar válido, sea la primera vez (viene de la bandeja) o reacomodando
+// una que ya estaba en el tablero.
 function PuzzleRound({ round, onSolved }) {
-  const [placedIds, setPlacedIds] = useState(() => new Set());
-  // drag = { id, type, isDecoy, anchorX, anchorY (si es de solución), x, y (px, esquina sup-izq relativa al viewport) }
+  const [placed, setPlaced] = useState([]); // [{ id, type, isDecoy, x, y }]
+  // drag = { id, type, isDecoy, fromBoard, x, y (px, esquina sup-izq relativa al tablero) }
   const [drag, setDrag] = useState(null);
   const boardRef = useRef(null);
-  const dragRef = useRef(null); // espejo síncrono de `drag`, para leer la posición más nueva en pointerup sin depender del closure de React
+  const dragRef = useRef(null); // espejo síncrono de `drag`/`placed`, para leer lo más nuevo en pointerup sin depender del closure de React
+  const placedRef = useRef(placed);
   dragRef.current = drag;
+  placedRef.current = placed;
 
   const boardW = GRID_COLS * CELL;
   const boardH = GRID_ROWS * CELL;
 
-  const startDrag = (piece, e) => {
+  const startDrag = (piece, e, fromBoard) => {
     e.preventDefault();
     const rect = boardRef.current.getBoundingClientRect();
     const px = e.clientX ?? e.touches?.[0]?.clientX;
     const py = e.clientY ?? e.touches?.[0]?.clientY;
     const shape = TETROMINOES[piece.type];
     // Centra la pieza (a tamaño de tablero) bajo el dedo/cursor.
-    const next = {
+    setDrag({
       id: piece.id,
       type: piece.type,
       isDecoy: piece.isDecoy,
-      anchorX: piece.anchorX,
-      anchorY: piece.anchorY,
+      fromBoard: !!fromBoard,
       x: px - (shape.w * CELL) / 2 - rect.left,
       y: py - (shape.h * CELL) / 2 - rect.top,
-    };
-    setDrag(next);
+    });
   };
 
   useEffect(() => {
     if (!drag) return;
     const move = (e) => {
+      // Frena el scroll/rebote de la página en iPhone: sin esto, arrastrar
+      // una pieza también arrastraba el fondo entero (el touchmove sigue
+      // significando "scroll" para Safari hasta que alguien le dice que
+      // no). Con { passive: false } al registrar el listener (más abajo)
+      // este preventDefault sí tiene efecto.
+      if (e.cancelable) e.preventDefault();
       const rect = boardRef.current.getBoundingClientRect();
       const px = e.clientX ?? e.touches?.[0]?.clientX;
       const py = e.clientY ?? e.touches?.[0]?.clientY;
@@ -588,25 +613,31 @@ function PuzzleRound({ round, onSolved }) {
       const shape = TETROMINOES[dragRef.current.type];
       setDrag((d) => (d ? { ...d, x: px - (shape.w * CELL) / 2 - rect.left, y: py - (shape.h * CELL) / 2 - rect.top } : d));
     };
-    const up = () => {
+    const up = (e) => {
+      if (e.cancelable) e.preventDefault();
       const d = dragRef.current;
       if (d) {
         const gx = Math.round(d.x / CELL);
         const gy = Math.round(d.y / CELL);
-        if (!d.isDecoy && gx === d.anchorX && gy === d.anchorY) {
-          setPlacedIds((prev) => {
-            const next = new Set(prev);
-            next.add(d.id);
-            return next;
-          });
+        const cells = pieceCellsAt(d.type, gx, gy);
+        const inBounds = cells.every(([x, y]) => x >= 0 && x < GRID_COLS && y >= 0 && y < GRID_ROWS);
+        const others = placedRef.current.filter((p) => p.id !== d.id);
+        const overlaps = cells.some(([x, y]) =>
+          others.some((p) => pieceCellsAt(p.type, p.x, p.y).some(([ox, oy]) => ox === x && oy === y))
+        );
+        if (inBounds && !overlaps) {
+          setPlaced((prev) => [...prev.filter((p) => p.id !== d.id), { id: d.id, type: d.type, isDecoy: d.isDecoy, x: gx, y: gy }]);
         }
+        // Si no es válido, no se toca `placed` — si venía del tablero,
+        // sigue ahí en su posición anterior (nunca se le sacó); si venía
+        // de la bandeja, vuelve a la bandeja sola (no estaba en `placed`).
       }
       setDrag(null);
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", up, { passive: false });
     window.addEventListener("touchmove", move, { passive: false });
-    window.addEventListener("touchend", up);
+    window.addEventListener("touchend", up, { passive: false });
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
@@ -615,24 +646,34 @@ function PuzzleRound({ round, onSolved }) {
     };
   }, [!!drag]);
 
+  // Gana cuando cada celda de la figura quedó cubierta por alguna pieza
+  // puesta — no importa cuál combinación de piezas se usó para lograrlo.
   useEffect(() => {
-    if (placedIds.size > 0 && placedIds.size === round.solutionCount) onSolved();
-  }, [placedIds.size]);
+    const covered = new Set();
+    placed.forEach((p) => pieceCellsAt(p.type, p.x, p.y).forEach(([x, y]) => covered.add(cellKey(x, y))));
+    const done = [...round.targetCells].every((k) => covered.has(k));
+    if (done) onSolved();
+  }, [placed]);
 
   // Posición "fantasma" de la pieza que se está arrastrando, encajada a
-  // la celda más cercana — verde si es justo su lugar, gris si no.
+  // la celda más cercana — verde si ahí entra (no se pisa con nada y no
+  // se sale del tablero), gris si no.
   let ghost = null;
   if (drag) {
     const gx = Math.round(drag.x / CELL);
     const gy = Math.round(drag.y / CELL);
-    const correct = !drag.isDecoy && gx === drag.anchorX && gy === drag.anchorY;
-    ghost = { gx, gy, correct, type: drag.type };
+    const cells = pieceCellsAt(drag.type, gx, gy);
+    const inBounds = cells.every(([x, y]) => x >= 0 && x < GRID_COLS && y >= 0 && y < GRID_ROWS);
+    const others = placed.filter((p) => p.id !== drag.id);
+    const overlaps = cells.some(([x, y]) => others.some((p) => pieceCellsAt(p.type, p.x, p.y).some(([ox, oy]) => ox === x && oy === y)));
+    ghost = { gx, gy, valid: inBounds && !overlaps, type: drag.type };
   }
 
-  const trayPieces = round.tray.filter((p) => !placedIds.has(p.id));
+  const boardPieces = placed.filter((p) => !drag || p.id !== drag.id);
+  const trayPieces = round.tray.filter((p) => !placed.some((pp) => pp.id === p.id) && (!drag || drag.id !== p.id));
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%", touchAction: "none" }}>
       <div
         ref={boardRef}
         data-board="1"
@@ -641,10 +682,17 @@ function PuzzleRound({ round, onSolved }) {
           width: boardW,
           height: boardH,
           margin: "0 auto 18px",
+          padding: 10,
+          boxSizing: "content-box",
+          borderRadius: 18,
+          background: "rgba(12,6,32,0.55)",
+          border: "1px solid rgba(255,255,255,0.12)",
           touchAction: "none",
         }}
       >
-        {/* Casilleros vacíos de la figura — el "molde" a rellenar. */}
+        {/* Casilleros vacíos de la figura — el "molde" a rellenar, con un
+            color bien distinto tanto del fondo del tablero como de las
+            piezas, para que se note claro qué hay que cubrir. */}
         {[...round.targetCells].map((key) => {
           const [x, y] = key.split(",").map(Number);
           return (
@@ -652,35 +700,41 @@ function PuzzleRound({ round, onSolved }) {
               key={key}
               style={{
                 position: "absolute",
-                left: x * CELL,
-                top: y * CELL,
+                left: 10 + x * CELL,
+                top: 10 + y * CELL,
                 width: CELL,
                 height: CELL,
                 boxSizing: "border-box",
-                border: "1.5px dashed rgba(255,255,255,0.22)",
-                borderRadius: 3,
-                background: "rgba(255,255,255,0.04)",
+                border: "1.5px solid rgba(255,210,63,0.35)",
+                borderRadius: 4,
+                background: "rgba(255,210,63,0.12)",
               }}
             />
           );
         })}
-        {/* Piezas ya encastradas correctamente. */}
-        {round.tray
-          .filter((p) => !p.isDecoy && placedIds.has(p.id))
-          .map((p) => (
-            <div key={p.id} style={{ position: "absolute", left: p.anchorX * CELL, top: p.anchorY * CELL }}>
-              <PieceShape type={p.type} cellSize={CELL} />
-            </div>
-          ))}
+        {/* Piezas puestas en el tablero (en su posición actual, sea o no
+            la que arma la figura de verdad) — se pueden volver a agarrar
+            para reacomodar. */}
+        {boardPieces.map((p) => (
+          <div
+            key={p.id}
+            data-piece-id={p.id}
+            onPointerDown={(e) => startDrag(p, e, true)}
+            onTouchStart={(e) => startDrag(p, e, true)}
+            style={{ position: "absolute", left: 10 + p.x * CELL, top: 10 + p.y * CELL, cursor: "grab" }}
+          >
+            <PieceShape type={p.type} cellSize={CELL} />
+          </div>
+        ))}
         {/* Fantasma de la pieza en arrastre, encajado a la celda más cercana. */}
         {ghost && (
           <div
             style={{
               position: "absolute",
-              left: ghost.gx * CELL,
-              top: ghost.gy * CELL,
-              opacity: ghost.correct ? 0.9 : 0.35,
-              filter: ghost.correct ? "none" : "grayscale(0.6)",
+              left: 10 + ghost.gx * CELL,
+              top: 10 + ghost.gy * CELL,
+              opacity: ghost.valid ? 0.9 : 0.3,
+              filter: ghost.valid ? "none" : "grayscale(0.7)",
               transition: "opacity 0.08s ease",
               pointerEvents: "none",
             }}
@@ -693,8 +747,8 @@ function PuzzleRound({ round, onSolved }) {
           <div
             style={{
               position: "absolute",
-              left: drag.x,
-              top: drag.y,
+              left: 10 + drag.x,
+              top: 10 + drag.y,
               zIndex: 20,
               pointerEvents: "none",
               filter: "drop-shadow(0 8px 10px rgba(0,0,0,0.45))",
@@ -706,8 +760,8 @@ function PuzzleRound({ round, onSolved }) {
         )}
       </div>
 
-      {/* Bandeja: las piezas que todavía no encastraron (de solución o de
-          sobra, mezcladas — no se distinguen a simple vista). */}
+      {/* Bandeja: las piezas que todavía no se pusieron en el tablero (de
+          la figura o de sobra, mezcladas — no se distinguen a simple vista). */}
       <div
         style={{
           display: "flex",
@@ -718,18 +772,19 @@ function PuzzleRound({ round, onSolved }) {
           maxWidth: 460,
           padding: 12,
           borderRadius: 18,
-          background: "rgba(255,255,255,0.05)",
+          background: "rgba(12,6,32,0.45)",
           border: "1px solid rgba(255,255,255,0.1)",
           minHeight: TRAY_CELL * 2 + 24,
+          touchAction: "none",
         }}
       >
         {trayPieces.map((p) => (
           <div
             key={p.id}
             data-piece-id={p.id}
-            onPointerDown={(e) => startDrag(p, e)}
-            onTouchStart={(e) => startDrag(p, e)}
-            style={{ cursor: "grab", opacity: drag && drag.id === p.id ? 0.25 : 1, transition: "opacity 0.1s ease" }}
+            onPointerDown={(e) => startDrag(p, e, false)}
+            onTouchStart={(e) => startDrag(p, e, false)}
+            style={{ cursor: "grab" }}
           >
             <PieceShape type={p.type} cellSize={TRAY_CELL} />
           </div>
@@ -796,68 +851,79 @@ function PracticeGame({ onBack }) {
 
   if (!session) {
     return (
-      <Screen>
-        <Title size={26}>🧩 Sin Vueltas</Title>
-        <Sub style={{ marginTop: -10 }}>Encastrá las piezas sin girarlas, contra el reloj</Sub>
-        <Card style={{ width: "100%", maxWidth: 420 }}>
-          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Cantidad de figuras</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {ROUND_OPTIONS.map((n) => (
-              <button key={n} onClick={() => setRoundCount(n)} style={pillStyle(roundCount === n)}>
-                {n}
-              </button>
-            ))}
-          </div>
-        </Card>
-        <Card style={{ width: "100%", maxWidth: 420 }}>
-          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Cómo se juega</div>
-          <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "#F3EEFF" }}>
-            🧩 Aparecen 10 piezas de Tetris abajo. Arrastrá cada una al lugar que le corresponde en la
-            figura de arriba — sin girarlas, tal cual las ves.
-            <br />
-            👻 Mientras arrastrás, se ve un fantasma de dónde caería: se pone bien visible cuando estás
-            justo en su lugar.
-            <br />
-            🎯 No hace falta usar las 10 — a veces sobra alguna que no entra en ningún lado.
-          </div>
-        </Card>
-        {bestMs != null && (
-          <Sub style={{ marginTop: -6 }}>
-            🏆 Tu mejor tiempo: <b style={{ color: "#FFD23F" }}>{fmt(bestMs)}</b>
-          </Sub>
-        )}
-        <BigButton onClick={newRun}>Empezar ▶️</BigButton>
-        <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
-          Volver
-        </BigButton>
+      <Screen style={{ background: "transparent" }}>
+        <BgScene />
+        <div style={{ position: "relative", zIndex: 1, width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <Title size={26}>🧩 Sin Vueltas</Title>
+          <Sub style={{ marginTop: -10 }}>Encastrá las piezas, contra el reloj</Sub>
+          <Card style={{ width: "100%", maxWidth: 420 }}>
+            <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Cantidad de figuras</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {ROUND_OPTIONS.map((n) => (
+                <button key={n} onClick={() => setRoundCount(n)} style={pillStyle(roundCount === n)}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </Card>
+          <Card style={{ width: "100%", maxWidth: 420 }}>
+            <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Cómo se juega</div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "#F3EEFF" }}>
+              🧩 Aparecen 5 piezas de Tetris abajo. Arrastrá cada una al tablero — sin girarlas, tal cual
+              las ves.
+              <br />
+              🔁 No hace falta acertar a la primera: podés soltarla en cualquier lugar libre y después
+              volver a agarrarla para reacomodarla, las veces que quieras.
+              <br />
+              🟡 Las celdas amarillas marcan la figura a cubrir. Termina cuando quedan todas tapadas.
+              <br />
+              🎯 A veces sobra alguna pieza que no hace falta usar.
+            </div>
+          </Card>
+          {bestMs != null && (
+            <Sub style={{ marginTop: -6 }}>
+              🏆 Tu mejor tiempo: <b style={{ color: "#FFD23F" }}>{fmt(bestMs)}</b>
+            </Sub>
+          )}
+          <BigButton onClick={newRun}>Empezar ▶️</BigButton>
+          <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+            Volver
+          </BigButton>
+        </div>
       </Screen>
     );
   }
 
   return (
-    <Screen homeConfirm={finished ? null : "¿Salir? Perdés el progreso de este intento."} style={{ padding: "20px 10px 40px" }}>
-      <Title size={24}>🧩 Sin Vueltas</Title>
-      <div style={{ fontSize: 36, fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", color: finished ? (isNewBest ? "#3DDC84" : "#FFD23F") : "#F3EEFF", marginBottom: 2 }}>
-        {fmt(finished ? finalMs : elapsedMs)}
-      </div>
-      {bestMs != null && <Sub style={{ marginTop: 0, fontSize: 13 }}>Mejor marca: {fmt(bestMs)}</Sub>}
+    <Screen
+      homeConfirm={finished ? null : "¿Salir? Perdés el progreso de este intento."}
+      style={{ padding: "20px 10px 40px", background: "transparent" }}
+    >
+      <BgScene />
+      <div style={{ position: "relative", zIndex: 1, width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <Title size={24}>🧩 Sin Vueltas</Title>
+        <div style={{ fontSize: 36, fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", color: finished ? (isNewBest ? "#3DDC84" : "#FFD23F") : "#F3EEFF", marginBottom: 2 }}>
+          {fmt(finished ? finalMs : elapsedMs)}
+        </div>
+        {bestMs != null && <Sub style={{ marginTop: 0, fontSize: 13 }}>Mejor marca: {fmt(bestMs)}</Sub>}
 
-      {finished ? (
-        <Card style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
-          {isNewBest && <div style={{ color: "#3DDC84", fontWeight: 800, marginBottom: 10 }}>🎉 ¡Nueva mejor marca!</div>}
-          <BigButton onClick={newRun}>Otra 🔁</BigButton>
-          <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
-            Volver al menú
-          </BigButton>
-        </Card>
-      ) : (
-        <>
-          <Sub style={{ marginTop: 0, marginBottom: 10 }}>
-            Figura <b style={{ color: "#FFD23F" }}>{session.index + 1}</b> de {session.rounds.length}
-          </Sub>
-          <PuzzleRound key={session.index} round={session.rounds[session.index]} onSolved={onRoundSolved} />
-        </>
-      )}
+        {finished ? (
+          <Card style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
+            {isNewBest && <div style={{ color: "#3DDC84", fontWeight: 800, marginBottom: 10 }}>🎉 ¡Nueva mejor marca!</div>}
+            <BigButton onClick={newRun}>Otra 🔁</BigButton>
+            <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+              Volver al menú
+            </BigButton>
+          </Card>
+        ) : (
+          <>
+            <Sub style={{ marginTop: 0, marginBottom: 10 }}>
+              Figura <b style={{ color: "#FFD23F" }}>{session.index + 1}</b> de {session.rounds.length}
+            </Sub>
+            <PuzzleRound key={session.index} round={session.rounds[session.index]} onSolved={onRoundSolved} />
+          </>
+        )}
+      </div>
     </Screen>
   );
 }
