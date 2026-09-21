@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Sin Vueltas — Encastrá las piezas sin girarlas</title>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Sin Vueltas" />
+<meta name="theme-color" content="#0e2a3a" />
+<!-- Adelanta la conexión (DNS + TLS) a los dos hosts externos de los que
+     depende esta página para arrancar — la tipografía y React/Babel —
+     así cuando el HTML llega a pedirlos de verdad, la conexión ya está
+     lista y se ahorra esa ida y vuelta. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="preconnect" href="https://unpkg.com" crossorigin />
+<style>
+  /* El fondo real (sol + nubes + piso) lo pinta React recién al montar;
+     hasta entonces se ve este mismo degradé de cielo (idéntico al de
+     BgScene) en vez de un color plano, para que la llegada desde la home
+     se sienta continua y no como un salto a "página negra". */
+  html, body { margin:0; padding:0; background: linear-gradient(180deg, #2A0F5E 0%, #5A1F94 20%, #9435B0 42%, #E84F8C 62%, #FF6B3D 80%, #FFC93D 100%); background-attachment: fixed; }
+  #root { min-height: 100vh; }
+
+  /* ---------- Escena estática (sol+nubes+piso) idéntica a BgScene, pero en
+     HTML/CSS puro: pinta YA, sin esperar a que cargue React, para que la
+     llegada desde la home se sienta tan fluida como la vuelta al menú
+     (que es 100% estática). En cuanto React monta algo en #root, un
+     script la saca y queda la escena real. ---------- */
+  .jxpre-scene { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+  .jxpre-sky { position: absolute; inset: 0; background: linear-gradient(180deg, #2A0F5E 0%, #5A1F94 20%, #9435B0 42%, #E84F8C 62%, #FF6B3D 80%, #FFC93D 100%); }
+  .jxpre-sun {
+    position: absolute; left: 50%; top: 7%; width: 120px; height: 120px; margin-left: -60px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 34% 30%, #fff8d8, #ffd23f 55%, #ff9a1c 100%);
+    box-shadow: 0 0 80px 22px rgba(255,199,82,0.5);
+    animation: jxpre-sun-pulse 3.2s ease-in-out infinite;
+  }
+  @keyframes jxpre-sun-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  .jxpre-clouds { position: absolute; inset: 0; overflow: hidden; }
+  .jxpre-cloud { position: absolute; font-size: 30px; opacity: 0.92; filter: drop-shadow(0 3px 0 rgba(0,0,0,0.18)); animation: jxpre-drift linear infinite; }
+  .jxpre-cloud.c1 { top: -5.6%; font-size: 38px; animation-duration: 48s; animation-delay: -25s; }
+  .jxpre-cloud.c2 { top: -3.9%; font-size: 52px; animation-duration: 32s; animation-delay: -34s; }
+  .jxpre-cloud.c3 { top: 0.3%; font-size: 40px; animation-duration: 40s; animation-delay: -23s; }
+  .jxpre-cloud.c4 { top: 3.7%; font-size: 24px; animation-duration: 30s; animation-delay: -28s; }
+  .jxpre-cloud.c5 { top: 8.7%; font-size: 34px; animation-duration: 46s; animation-delay: -2s; }
+  .jxpre-cloud.c6 { top: 12.0%; font-size: 50px; animation-duration: 22s; animation-delay: -9s; }
+  .jxpre-cloud.c7 { top: 16.2%; font-size: 44px; animation-duration: 44s; animation-delay: -12s; }
+  .jxpre-cloud.c8 { top: 17.3%; font-size: 40px; animation-duration: 36s; animation-delay: -3s; }
+  .jxpre-cloud.c9 { top: 21.8%; font-size: 32px; animation-duration: 38s; animation-delay: -9s; }
+  .jxpre-cloud.c10 { top: 24.1%; font-size: 36px; animation-duration: 24s; animation-delay: -4s; }
+  .jxpre-cloud.c11 { top: 28.2%; font-size: 44px; animation-duration: 34s; animation-delay: -11s; }
+  .jxpre-cloud.c12 { top: 32.5%; font-size: 30px; animation-duration: 24s; animation-delay: -25s; }
+  .jxpre-cloud.c13 { top: 34.6%; font-size: 28px; animation-duration: 38s; animation-delay: -15s; }
+  .jxpre-cloud.c14 { top: 38.6%; font-size: 48px; animation-duration: 30s; animation-delay: -15s; }
+  .jxpre-cloud.c15 { top: 43.4%; font-size: 30px; animation-duration: 48s; animation-delay: -8s; }
+  .jxpre-cloud.c16 { top: 46.6%; font-size: 46px; animation-duration: 42s; animation-delay: -11s; }
+  @keyframes jxpre-drift { from { transform: translateX(115vw); } to { transform: translateX(-45vw); } }
+  .jxpre-floor {
+    position: absolute; left: -70%; right: -70%; bottom: -4%; height: 36vh;
+    background-color: #3a1665;
+    background-image: linear-gradient(90deg, rgba(255,255,255,0.16) 50%, transparent 50%), linear-gradient(rgba(255,255,255,0.16) 50%, transparent 50%);
+    background-size: 64px 64px;
+    transform: perspective(280px) rotateX(58deg);
+    transform-origin: bottom;
+    animation: jxpre-floor-move 1.1s linear infinite;
+  }
+  @keyframes jxpre-floor-move { from { background-position: 0 0, 0 0; } to { background-position: 64px 0, 0 64px; } }
+  .jxpre-fade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(12,6,32,0) 0%, rgba(12,6,32,0.15) 40%, rgba(12,6,32,0.6) 75%, rgba(12,6,32,0.9) 100%); }
+  @media (prefers-reduced-motion: reduce) {
+    .jxpre-sun, .jxpre-cloud, .jxpre-floor { animation: none; }
+  }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" defer></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" defer></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js" defer></script>
+</head>
+<body>
+<div class="jxpre-scene" id="jxPreScene">
+  <div class="jxpre-sky"></div>
+  <div class="jxpre-sun"></div>
+  <div class="jxpre-clouds">
+    <span class="jxpre-cloud c1">☁️</span>
+    <span class="jxpre-cloud c2">☁️</span>
+    <span class="jxpre-cloud c3">☁️</span>
+    <span class="jxpre-cloud c4">☁️</span>
+    <span class="jxpre-cloud c5">☁️</span>
+    <span class="jxpre-cloud c6">☁️</span>
+    <span class="jxpre-cloud c7">☁️</span>
+    <span class="jxpre-cloud c8">☁️</span>
+    <span class="jxpre-cloud c9">☁️</span>
+    <span class="jxpre-cloud c10">☁️</span>
+    <span class="jxpre-cloud c11">☁️</span>
+    <span class="jxpre-cloud c12">☁️</span>
+    <span class="jxpre-cloud c13">☁️</span>
+    <span class="jxpre-cloud c14">☁️</span>
+    <span class="jxpre-cloud c15">☁️</span>
+    <span class="jxpre-cloud c16">☁️</span>
+  </div>
+  <div class="jxpre-floor"></div>
+  <div class="jxpre-fade"></div>
+</div>
+<div id="root"></div>
+<script>
+  // Apenas React mete el primer contenido en #root, sacamos esta escena
+  // estática (ya cumplió su función) y queda la real. OJO: este script
+  // tiene que ir DESPUÉS del <div id="root">, si no getElementById("root")
+  // da null (el parser todavía no llegó a esa línea) y el observer nunca
+  // se arma.
+  (function () {
+    var root = document.getElementById("root");
+    var pre = document.getElementById("jxPreScene");
+    if (!root || !pre) return;
+    var obs = new MutationObserver(function () {
+      if (root.childElementCount > 0) {
+        pre.remove();
+        obs.disconnect();
+      }
+    });
+    obs.observe(root, { childList: true });
+  })();
+</script>
+<script src="../storage.js"></script>
+<script src="../critter.js"></script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+// ==================== CONFIG DEL JUEGO ====================
+// Sin Vueltas: pedido del usuario — "juego con piezas de tetris, hay que
+// acomodarlas para formar una forma que aparece... rápido, no giramos
+// piezas, tocar y arrastrar. Me das 10 piezas, las coloco para llenar una
+// figura de cuadraditos, dejando posiblemente alguna pieza afuera."
+//
+// Primera versión (a propósito, todavía sin colores-como-condición ni
+// ataques — eso lo pensamos después, como pasó con Bloques: primero
+// arrancó con el modo Práctica solo, y Guerra/ataques se sumaron
+// después). Por ahora es 100% local, sin sala online ni storage.js — un
+// modo práctica cronometrado, como el de los otros juegos.
+//
+// Mecánica: el generador arma una "figura" (una mancha conexa de
+// cuadraditos) juntando entre 8 y 10 piezas de tetris, CADA UNA en una
+// única orientación fija (nunca rotada — ni por el generador ni por el
+// jugador, esa es la gracia del nombre). Esas piezas van al azar a una
+// bandeja de 10 (de sobra a veces quedan 1-2 piezas que NO son parte de
+// la figura — decoys, no entran en ningún lado). El jugador arrastra cada
+// pieza de la bandeja al tablero; si la suelta justo en su lugar
+// correcto, encastra sola. Termina cuando encastró todas las piezas que
+// sí formaban la figura (no hace falta tocar las que sobran).
+
+const CELL = 36; // px por celda del tablero — grande para dedos en celu
+const TRAY_CELL = 20; // px por celda de las fichitas en la bandeja (más chico)
+const GRID_COLS = 8;
+const GRID_ROWS = 8;
+const TOTAL_PIECES = 10;
+const ROUND_OPTIONS = [3, 5, 8];
+const DEFAULT_ROUNDS = 3;
+const PRACTICE_BEST_KEY = "sinvueltas:mejor";
+
+// Las 7 piezas de tetris, cada una en UNA sola orientación fija (esto es
+// justo lo que permite que el juego sea "sin vueltas": el jugador
+// aprende a reconocer cada forma de memoria, como en el Tetris de
+// siempre, pero acá ni el jugador ni el generador la giran jamás).
+// `cells` son offsets [x,y] relativos a la esquina superior izquierda de
+// la caja que envuelve a la pieza.
+const TETROMINOES = {
+  I: { cells: [[0, 0], [1, 0], [2, 0], [3, 0]], w: 4, h: 1, color: "#3E9EFF" },
+  O: { cells: [[0, 0], [1, 0], [0, 1], [1, 1]], w: 2, h: 2, color: "#FFD23F" },
+  T: { cells: [[0, 0], [1, 0], [2, 0], [1, 1]], w: 3, h: 2, color: "#B983FF" },
+  S: { cells: [[1, 0], [2, 0], [0, 1], [1, 1]], w: 3, h: 2, color: "#3DDC84" },
+  Z: { cells: [[0, 0], [1, 0], [1, 1], [2, 1]], w: 3, h: 2, color: "#F0454B" },
+  J: { cells: [[0, 0], [0, 1], [1, 1], [2, 1]], w: 3, h: 2, color: "#7C9BFF" },
+  L: { cells: [[2, 0], [0, 1], [1, 1], [2, 1]], w: 3, h: 2, color: "#FF9F1C" },
+};
+const TETROMINO_TYPES = Object.keys(TETROMINOES);
+
+function randInt(min, max) {
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+function shuffleArr(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function cellKey(x, y) {
+  return x + "," + y;
+}
+// Cuántas piezas de las 10 NO forman parte de la figura ("dejando
+// posiblemente alguna pieza afuera") — la mayoría de las rondas no tiene
+// ninguna, para no frustrar de entrada; después se van sumando.
+function randomDecoyCount() {
+  const r = Math.random();
+  if (r < 0.5) return 0;
+  if (r < 0.85) return 1;
+  return 2;
+}
+
+// Intenta acomodar `count` piezas en una sola mancha conexa (cada pieza
+// nueva tiene que tocar, de canto, a la mancha ya puesta) dentro del
+// tablero de GRID_COLS x GRID_ROWS. Devuelve la lista de piezas puestas
+// (con su posición ya definitiva) o null si se trabó — el llamador
+// reintenta las veces que haga falta.
+function tryPlacePieces(count) {
+  const placed = [];
+  const filled = new Set();
+  const filledList = []; // [x,y] — para elegir un punto de referencia al azar rápido
+  for (let i = 0; i < count; i++) {
+    let ok = false;
+    for (let attempt = 0; attempt < 400 && !ok; attempt++) {
+      const type = TETROMINO_TYPES[randInt(0, TETROMINO_TYPES.length - 1)];
+      const piece = TETROMINOES[type];
+      let ax, ay;
+      if (i === 0) {
+        // La primera pieza arranca cerca del centro, con un poco de azar
+        // para que la figura no salga siempre exactamente centrada.
+        ax = Math.floor((GRID_COLS - piece.w) / 2) + randInt(-1, 1);
+        ay = Math.floor((GRID_ROWS - piece.h) / 2) + randInt(-1, 1);
+      } else {
+        const ref = filledList[randInt(0, filledList.length - 1)];
+        ax = ref[0] - randInt(0, piece.w - 1);
+        ay = ref[1] - randInt(0, piece.h - 1);
+      }
+      const cells = piece.cells.map(([dx, dy]) => [ax + dx, ay + dy]);
+      const inBounds = cells.every(([x, y]) => x >= 0 && x < GRID_COLS && y >= 0 && y < GRID_ROWS);
+      if (!inBounds) continue;
+      if (cells.some(([x, y]) => filled.has(cellKey(x, y)))) continue; // se pisa con otra pieza
+      if (i > 0) {
+        // Tiene que tocar, de canto (no en diagonal), a la mancha existente.
+        const touches = cells.some(([x, y]) =>
+          filled.has(cellKey(x - 1, y)) || filled.has(cellKey(x + 1, y)) ||
+          filled.has(cellKey(x, y - 1)) || filled.has(cellKey(x, y + 1))
+        );
+        if (!touches) continue;
+      }
+      cells.forEach(([x, y]) => {
+        filled.add(cellKey(x, y));
+        filledList.push([x, y]);
+      });
+      placed.push({ type, anchorX: ax, anchorY: ay, cells });
+      ok = true;
+    }
+    if (!ok) return null;
+  }
+  return placed;
+}
+
+// Arma una ronda completa: la figura (piezas solución ya ubicadas) + la
+// bandeja de 10 piezas mezcladas (solución + las que sobran, si hay). Si
+// el armado se traba mucho (raro, pero el algoritmo es al azar), baja de
+// a una la cantidad de piezas solución hasta que encuentra una figura
+// válida — así SIEMPRE sale una ronda jugable, nunca deja al jugador
+// trabado esperando algo que no va a aparecer.
+function generateRound() {
+  let decoyCount = randomDecoyCount();
+  let solutionCount = TOTAL_PIECES - decoyCount;
+  let placed = null;
+  while (solutionCount > 0 && !placed) {
+    for (let tries = 0; tries < 25 && !placed; tries++) {
+      placed = tryPlacePieces(solutionCount);
+    }
+    if (!placed) solutionCount--;
+  }
+  decoyCount = TOTAL_PIECES - solutionCount;
+  const solutionPieces = placed.map((p, i) => ({
+    id: "s" + i,
+    type: p.type,
+    anchorX: p.anchorX,
+    anchorY: p.anchorY,
+    isDecoy: false,
+  }));
+  const decoyPieces = Array.from({ length: decoyCount }, (_, i) => ({
+    id: "d" + i,
+    type: TETROMINO_TYPES[randInt(0, TETROMINO_TYPES.length - 1)],
+    isDecoy: true,
+  }));
+  const targetCells = new Set();
+  placed.forEach((p) => p.cells.forEach(([x, y]) => targetCells.add(cellKey(x, y))));
+  return {
+    tray: shuffleArr([...solutionPieces, ...decoyPieces]),
+    targetCells,
+    solutionCount,
+  };
+}
+
+// ==================== UI COMPARTIDA (mismo lenguaje visual que el resto del sitio) ====================
+function useInjectFont() {
+  useEffect(() => {
+    if (document.getElementById("aq-fonts")) return;
+    const link = document.createElement("link");
+    link.id = "aq-fonts";
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap";
+    document.head.appendChild(link);
+  }, []);
+}
+
+const GRADIENT_BG = "radial-gradient(circle at 20% -10%, #0f3a4a 0%, #0e2130 45%, #0c0620 100%)";
+
+function Screen({ children, style, homeConfirm }) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        width: "100%",
+        background: GRADIENT_BG,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        padding: "28px 18px 40px",
+        fontFamily: "'Nunito', sans-serif",
+        color: "#F3EEFF",
+        boxSizing: "border-box",
+        ...style,
+      }}
+    >
+      {homeConfirm !== null && <HomeButton confirmMessage={homeConfirm} />}
+      {children}
+    </div>
+  );
+}
+
+function HomeButton({ confirmMessage }) {
+  return (
+    <a
+      href="../"
+      onClick={(e) => {
+        if (confirmMessage && !window.confirm(confirmMessage)) e.preventDefault();
+      }}
+      title="Volver al menú de juegos"
+      style={{
+        position: "fixed",
+        top: "calc(env(safe-area-inset-top, 0px) + 14px)",
+        left: 14,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "9px 16px 9px 11px",
+        borderRadius: 30,
+        background: "rgba(0,0,0,0.6)",
+        border: "1.5px solid rgba(255,255,255,0.4)",
+        color: "#fff",
+        fontFamily: "'Nunito', sans-serif",
+        fontWeight: 800,
+        fontSize: 15,
+        textDecoration: "none",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+      }}
+    >
+      <span style={{ fontSize: 19 }}>🏠</span> Menú
+    </a>
+  );
+}
+
+function Title({ children, size = 30 }) {
+  return (
+    <h1
+      style={{
+        fontFamily: "'Baloo 2', sans-serif",
+        fontWeight: 800,
+        fontSize: size,
+        color: "#FFD23F",
+        textShadow: "0 3px 0 rgba(0,0,0,0.35)",
+        margin: "0 0 6px",
+        textAlign: "center",
+        letterSpacing: 0.3,
+      }}
+    >
+      {children}
+    </h1>
+  );
+}
+
+function Sub({ children, style }) {
+  return (
+    <p style={{ color: "#C9B8F0", fontSize: 16, textAlign: "center", margin: "0 0 22px", lineHeight: 1.4, ...style }}>
+      {children}
+    </p>
+  );
+}
+
+function BigButton({ children, onClick, color = "#3E9EFF", disabled, style }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        boxSizing: "border-box",
+        width: "100%",
+        maxWidth: 380,
+        padding: "16px 20px",
+        borderRadius: 18,
+        border: disabled ? "none" : `1.5px solid color-mix(in srgb, ${color} 70%, transparent)`,
+        background: disabled ? "#4a3d63" : `color-mix(in srgb, ${color} 50%, transparent)`,
+        color: disabled ? "#8b7fa8" : "#F3EEFF",
+        textShadow: disabled ? "none" : "0 1px 3px rgba(0,0,0,0.45)",
+        fontFamily: "'Baloo 2', sans-serif",
+        fontWeight: 700,
+        fontSize: 18,
+        boxShadow: disabled ? "none" : "0 6px 0 rgba(0,0,0,0.28)",
+        cursor: disabled ? "default" : "pointer",
+        marginBottom: 14,
+        transition: "transform 0.08s ease",
+        ...style,
+      }}
+      onMouseDown={(e) => { if (!disabled) e.currentTarget.style.transform = "translateY(4px)"; }}
+      onMouseUp={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
+      onTouchStart={(e) => { if (!disabled) e.currentTarget.style.transform = "translateY(4px)"; }}
+      onTouchEnd={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Card({ children, style }) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 420,
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.12)",
+        borderRadius: 22,
+        padding: 20,
+        boxSizing: "border-box",
+        marginBottom: 16,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function pillStyle(active) {
+  return {
+    width: "100%",
+    padding: "10px 8px",
+    borderRadius: 12,
+    border: active ? "2px solid #FFD23F" : "1px solid rgba(255,255,255,0.15)",
+    background: active ? "rgba(255,210,63,0.15)" : "rgba(255,255,255,0.06)",
+    color: active ? "#FFD23F" : "#F3EEFF",
+    fontWeight: 800,
+    fontFamily: "'Baloo 2', sans-serif",
+    fontSize: 14,
+    cursor: "pointer",
+  };
+}
+
+function BgScene() {
+  return (
+    <>
+      <style>{`
+        @keyframes bgsun-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+        @keyframes bgcloud-drift { from { transform: translateX(115vw); } to { transform: translateX(-45vw); } }
+        @keyframes bgfloor-move { from { background-position: 0 0, 0 0; } to { background-position: 64px 0, 0 64px; } }
+        .bgscene-sun { animation: bgsun-pulse 3.2s ease-in-out infinite; }
+        .bgscene-cloud { animation: bgcloud-drift linear infinite; }
+        .bgscene-floor { animation: bgfloor-move 1.1s linear infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .bgscene-sun, .bgscene-cloud, .bgscene-floor { animation: none; }
+        }
+      `}</style>
+      <div style={{ position: "fixed", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none" }}>
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, #2A0F5E 0%, #5A1F94 20%, #9435B0 42%, #E84F8C 62%, #FF6B3D 80%, #FFC93D 100%)" }} />
+        <div className="bgscene-sun" style={{ position: "absolute", left: "50%", top: "7%", width: 120, height: 120, marginLeft: -60, borderRadius: "50%", background: "radial-gradient(circle at 34% 30%, #fff8d8, #ffd23f 55%, #ff9a1c 100%)", boxShadow: "0 0 80px 22px rgba(255,199,82,0.5)" }} />
+        <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "-5.6%", fontSize: 38, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "48s", animationDelay: "-25s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "-3.9%", fontSize: 52, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "32s", animationDelay: "-34s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "0.3%", fontSize: 40, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "40s", animationDelay: "-23s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "3.7%", fontSize: 24, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "30s", animationDelay: "-28s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "8.7%", fontSize: 34, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "46s", animationDelay: "-2s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "12.0%", fontSize: 50, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "22s", animationDelay: "-9s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "16.2%", fontSize: 44, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "44s", animationDelay: "-12s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "17.3%", fontSize: 40, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "36s", animationDelay: "-3s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "21.8%", fontSize: 32, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "38s", animationDelay: "-9s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "24.1%", fontSize: 36, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "24s", animationDelay: "-4s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "28.2%", fontSize: 44, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "34s", animationDelay: "-11s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "32.5%", fontSize: 30, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "24s", animationDelay: "-25s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "34.6%", fontSize: 28, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "38s", animationDelay: "-15s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "38.6%", fontSize: 48, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "30s", animationDelay: "-15s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "43.4%", fontSize: 30, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "48s", animationDelay: "-8s" }}>☁️</span>
+          <span className="bgscene-cloud" style={{ position: "absolute", top: "46.6%", fontSize: 46, opacity: 0.92, filter: "drop-shadow(0 3px 0 rgba(0,0,0,0.18))", animationDuration: "42s", animationDelay: "-11s" }}>☁️</span>
+        </div>
+        <div className="bgscene-floor" style={{ position: "absolute", left: "-70%", right: "-70%", bottom: "-4%", height: "36vh", backgroundColor: "#3a1665", backgroundImage: "linear-gradient(90deg, rgba(255,255,255,0.16) 50%, transparent 50%), linear-gradient(rgba(255,255,255,0.16) 50%, transparent 50%)", backgroundSize: "64px 64px", transform: "perspective(280px) rotateX(58deg)", transformOrigin: "bottom" }} />
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(12,6,32,0) 0%, rgba(12,6,32,0.15) 40%, rgba(12,6,32,0.6) 75%, rgba(12,6,32,0.9) 100%)" }} />
+      </div>
+    </>
+  );
+}
+
+function Home({ onSelect }) {
+  return (
+    <Screen style={{ justifyContent: "center", background: "transparent" }}>
+      <BgScene />
+      <div style={{ position: "relative", zIndex: 1, width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div style={{ fontSize: 64, marginBottom: 6 }}>🧩</div>
+        <Title size={30}>Sin Vueltas</Title>
+        <Card style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <Sub>
+            Te damos 10 piezas de Tetris. Arrastralas para encastrar una figura — pero OJO, nada de
+            girarlas: cada una entra tal cual la ves. Puede que te sobre alguna pieza que no entra en
+            ningún lado.
+          </Sub>
+          <BigButton onClick={() => onSelect("game")}>🎮 Jugar</BigButton>
+        </Card>
+      </div>
+    </Screen>
+  );
+}
+
+// ==================== TABLERO + BANDEJA (la mecánica central) ====================
+// Una pieza "chip" (para la bandeja, chiquita) o "board" (para el tablero
+// o mientras se arrastra, tamaño real) — el mismo render, dos escalas.
+function PieceShape({ type, cellSize, style }) {
+  const piece = TETROMINOES[type];
+  return (
+    <div style={{ position: "relative", width: piece.w * cellSize, height: piece.h * cellSize, ...style }}>
+      {piece.cells.map(([dx, dy], i) => (
+        <div
+          key={i}
+          style={{
+            position: "absolute",
+            left: dx * cellSize,
+            top: dy * cellSize,
+            width: cellSize,
+            height: cellSize,
+            boxSizing: "border-box",
+            border: "1.5px solid rgba(10,5,26,0.4)",
+            borderRadius: 3,
+            background: `linear-gradient(155deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0.05) 45%, rgba(0,0,0,0.18) 100%), ${piece.color}`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// El componente entero de una ronda: tablero + bandeja + arrastre a mano
+// con Pointer Events (no HTML5 drag-and-drop, que anda mal en celulares
+// — mismo motivo por el que el multitouch de Bloques usa touch events a
+// mano en vez del onClick de siempre). Un solo dedo a la vez alcanza acá
+// (no hace falta soltar varias piezas juntas), así que un pointer normal
+// (mouse+touch unificado) es más simple que separar touch/mouse.
+function PuzzleRound({ round, onSolved }) {
+  const [placedIds, setPlacedIds] = useState(() => new Set());
+  // drag = { id, type, isDecoy, anchorX, anchorY (si es de solución), x, y (px, esquina sup-izq relativa al viewport) }
+  const [drag, setDrag] = useState(null);
+  const boardRef = useRef(null);
+  const dragRef = useRef(null); // espejo síncrono de `drag`, para leer la posición más nueva en pointerup sin depender del closure de React
+  dragRef.current = drag;
+
+  const boardW = GRID_COLS * CELL;
+  const boardH = GRID_ROWS * CELL;
+
+  const startDrag = (piece, e) => {
+    e.preventDefault();
+    const rect = boardRef.current.getBoundingClientRect();
+    const px = e.clientX ?? e.touches?.[0]?.clientX;
+    const py = e.clientY ?? e.touches?.[0]?.clientY;
+    const shape = TETROMINOES[piece.type];
+    // Centra la pieza (a tamaño de tablero) bajo el dedo/cursor.
+    const next = {
+      id: piece.id,
+      type: piece.type,
+      isDecoy: piece.isDecoy,
+      anchorX: piece.anchorX,
+      anchorY: piece.anchorY,
+      x: px - (shape.w * CELL) / 2 - rect.left,
+      y: py - (shape.h * CELL) / 2 - rect.top,
+    };
+    setDrag(next);
+  };
+
+  useEffect(() => {
+    if (!drag) return;
+    const move = (e) => {
+      const rect = boardRef.current.getBoundingClientRect();
+      const px = e.clientX ?? e.touches?.[0]?.clientX;
+      const py = e.clientY ?? e.touches?.[0]?.clientY;
+      if (px == null || py == null) return;
+      const shape = TETROMINOES[dragRef.current.type];
+      setDrag((d) => (d ? { ...d, x: px - (shape.w * CELL) / 2 - rect.left, y: py - (shape.h * CELL) / 2 - rect.top } : d));
+    };
+    const up = () => {
+      const d = dragRef.current;
+      if (d) {
+        const gx = Math.round(d.x / CELL);
+        const gy = Math.round(d.y / CELL);
+        if (!d.isDecoy && gx === d.anchorX && gy === d.anchorY) {
+          setPlacedIds((prev) => {
+            const next = new Set(prev);
+            next.add(d.id);
+            return next;
+          });
+        }
+      }
+      setDrag(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("touchmove", move, { passive: false });
+    window.addEventListener("touchend", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", up);
+    };
+  }, [!!drag]);
+
+  useEffect(() => {
+    if (placedIds.size > 0 && placedIds.size === round.solutionCount) onSolved();
+  }, [placedIds.size]);
+
+  // Posición "fantasma" de la pieza que se está arrastrando, encajada a
+  // la celda más cercana — verde si es justo su lugar, gris si no.
+  let ghost = null;
+  if (drag) {
+    const gx = Math.round(drag.x / CELL);
+    const gy = Math.round(drag.y / CELL);
+    const correct = !drag.isDecoy && gx === drag.anchorX && gy === drag.anchorY;
+    ghost = { gx, gy, correct, type: drag.type };
+  }
+
+  const trayPieces = round.tray.filter((p) => !placedIds.has(p.id));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+      <div
+        ref={boardRef}
+        data-board="1"
+        style={{
+          position: "relative",
+          width: boardW,
+          height: boardH,
+          margin: "0 auto 18px",
+          touchAction: "none",
+        }}
+      >
+        {/* Casilleros vacíos de la figura — el "molde" a rellenar. */}
+        {[...round.targetCells].map((key) => {
+          const [x, y] = key.split(",").map(Number);
+          return (
+            <div
+              key={key}
+              style={{
+                position: "absolute",
+                left: x * CELL,
+                top: y * CELL,
+                width: CELL,
+                height: CELL,
+                boxSizing: "border-box",
+                border: "1.5px dashed rgba(255,255,255,0.22)",
+                borderRadius: 3,
+                background: "rgba(255,255,255,0.04)",
+              }}
+            />
+          );
+        })}
+        {/* Piezas ya encastradas correctamente. */}
+        {round.tray
+          .filter((p) => !p.isDecoy && placedIds.has(p.id))
+          .map((p) => (
+            <div key={p.id} style={{ position: "absolute", left: p.anchorX * CELL, top: p.anchorY * CELL }}>
+              <PieceShape type={p.type} cellSize={CELL} />
+            </div>
+          ))}
+        {/* Fantasma de la pieza en arrastre, encajado a la celda más cercana. */}
+        {ghost && (
+          <div
+            style={{
+              position: "absolute",
+              left: ghost.gx * CELL,
+              top: ghost.gy * CELL,
+              opacity: ghost.correct ? 0.9 : 0.35,
+              filter: ghost.correct ? "none" : "grayscale(0.6)",
+              transition: "opacity 0.08s ease",
+              pointerEvents: "none",
+            }}
+          >
+            <PieceShape type={ghost.type} cellSize={CELL} />
+          </div>
+        )}
+        {/* La pieza en arrastre de verdad, siguiendo el dedo/cursor. */}
+        {drag && (
+          <div
+            style={{
+              position: "absolute",
+              left: drag.x,
+              top: drag.y,
+              zIndex: 20,
+              pointerEvents: "none",
+              filter: "drop-shadow(0 8px 10px rgba(0,0,0,0.45))",
+              transform: "scale(1.04)",
+            }}
+          >
+            <PieceShape type={drag.type} cellSize={CELL} />
+          </div>
+        )}
+      </div>
+
+      {/* Bandeja: las piezas que todavía no encastraron (de solución o de
+          sobra, mezcladas — no se distinguen a simple vista). */}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 10,
+          justifyContent: "center",
+          width: "100%",
+          maxWidth: 460,
+          padding: 12,
+          borderRadius: 18,
+          background: "rgba(255,255,255,0.05)",
+          border: "1px solid rgba(255,255,255,0.1)",
+          minHeight: TRAY_CELL * 2 + 24,
+        }}
+      >
+        {trayPieces.map((p) => (
+          <div
+            key={p.id}
+            data-piece-id={p.id}
+            onPointerDown={(e) => startDrag(p, e)}
+            onTouchStart={(e) => startDrag(p, e)}
+            style={{ cursor: "grab", opacity: drag && drag.id === p.id ? 0.25 : 1, transition: "opacity 0.1s ease" }}
+          >
+            <PieceShape type={p.type} cellSize={TRAY_CELL} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ==================== MODO PRÁCTICA (cronometrado, en cadena) ====================
+function PracticeGame({ onBack }) {
+  const [roundCount, setRoundCount] = useState(DEFAULT_ROUNDS);
+  const [session, setSession] = useState(null); // { rounds: [...], index, startTime }
+  const [finished, setFinished] = useState(false);
+  const [finalMs, setFinalMs] = useState(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [bestMs, setBestMs] = useState(null);
+  const [isNewBest, setIsNewBest] = useState(false);
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(`${PRACTICE_BEST_KEY}:${roundCount}`);
+      setBestMs(v ? parseInt(v, 10) : null);
+    } catch {
+      setBestMs(null);
+    }
+  }, [roundCount]);
+
+  useEffect(() => {
+    if (!session || finished) return;
+    const id = setInterval(() => setElapsedMs(Date.now() - session.startTime), 100);
+    return () => clearInterval(id);
+  }, [session, finished]);
+
+  const newRun = () => {
+    setSession({ rounds: Array.from({ length: roundCount }, generateRound), index: 0, startTime: Date.now() });
+    setFinished(false);
+    setFinalMs(null);
+    setElapsedMs(0);
+    setIsNewBest(false);
+  };
+
+  const onRoundSolved = () => {
+    setSession((s) => {
+      if (!s) return s;
+      if (s.index + 1 >= s.rounds.length) {
+        const ms = Date.now() - s.startTime;
+        setFinalMs(ms);
+        setFinished(true);
+        if (bestMs == null || ms < bestMs) {
+          try {
+            localStorage.setItem(`${PRACTICE_BEST_KEY}:${roundCount}`, String(ms));
+          } catch {}
+          setBestMs(ms);
+          setIsNewBest(true);
+        }
+        return s;
+      }
+      return { ...s, index: s.index + 1 };
+    });
+  };
+
+  const fmt = (ms) => (Math.max(0, ms) / 1000).toFixed(1) + "s";
+
+  if (!session) {
+    return (
+      <Screen>
+        <Title size={26}>🧩 Sin Vueltas</Title>
+        <Sub style={{ marginTop: -10 }}>Encastrá las piezas sin girarlas, contra el reloj</Sub>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Cantidad de figuras</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {ROUND_OPTIONS.map((n) => (
+              <button key={n} onClick={() => setRoundCount(n)} style={pillStyle(roundCount === n)}>
+                {n}
+              </button>
+            ))}
+          </div>
+        </Card>
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Cómo se juega</div>
+          <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "#F3EEFF" }}>
+            🧩 Aparecen 10 piezas de Tetris abajo. Arrastrá cada una al lugar que le corresponde en la
+            figura de arriba — sin girarlas, tal cual las ves.
+            <br />
+            👻 Mientras arrastrás, se ve un fantasma de dónde caería: se pone bien visible cuando estás
+            justo en su lugar.
+            <br />
+            🎯 No hace falta usar las 10 — a veces sobra alguna que no entra en ningún lado.
+          </div>
+        </Card>
+        {bestMs != null && (
+          <Sub style={{ marginTop: -6 }}>
+            🏆 Tu mejor tiempo: <b style={{ color: "#FFD23F" }}>{fmt(bestMs)}</b>
+          </Sub>
+        )}
+        <BigButton onClick={newRun}>Empezar ▶️</BigButton>
+        <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Volver
+        </BigButton>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen homeConfirm={finished ? null : "¿Salir? Perdés el progreso de este intento."} style={{ padding: "20px 10px 40px" }}>
+      <Title size={24}>🧩 Sin Vueltas</Title>
+      <div style={{ fontSize: 36, fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", color: finished ? (isNewBest ? "#3DDC84" : "#FFD23F") : "#F3EEFF", marginBottom: 2 }}>
+        {fmt(finished ? finalMs : elapsedMs)}
+      </div>
+      {bestMs != null && <Sub style={{ marginTop: 0, fontSize: 13 }}>Mejor marca: {fmt(bestMs)}</Sub>}
+
+      {finished ? (
+        <Card style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
+          {isNewBest && <div style={{ color: "#3DDC84", fontWeight: 800, marginBottom: 10 }}>🎉 ¡Nueva mejor marca!</div>}
+          <BigButton onClick={newRun}>Otra 🔁</BigButton>
+          <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+            Volver al menú
+          </BigButton>
+        </Card>
+      ) : (
+        <>
+          <Sub style={{ marginTop: 0, marginBottom: 10 }}>
+            Figura <b style={{ color: "#FFD23F" }}>{session.index + 1}</b> de {session.rounds.length}
+          </Sub>
+          <PuzzleRound key={session.index} round={session.rounds[session.index]} onSolved={onRoundSolved} />
+        </>
+      )}
+    </Screen>
+  );
+}
+
+function App() {
+  useInjectFont();
+  const [mode, setMode] = useState("home");
+  if (mode === "home") return <Home onSelect={setMode} />;
+  return <PracticeGame onBack={() => setMode("home")} />;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
