@@ -180,6 +180,38 @@ const TETROMINOES = {
 };
 const TETROMINO_TYPES = Object.keys(TETROMINOES);
 
+// Ataque "Piezas Intrincadas" (modo Guerra): en vez de las 7 de tetris de
+// siempre, la figura se arma con piezas más grandes que NO existen en el
+// Tetris real — pentominós (5 cuadraditos) al recibirlo una vez,
+// hexominós inventados (6 cuadraditos, todavía más largos/raros) al
+// recibirlo dos veces. Mismo espíritu: cada una en una sola orientación
+// fija, nunca se giran.
+const PENTOMINOES = {
+  P5I: { cells: [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]], w: 5, h: 1, color: "#3E9EFF" },
+  P5L: { cells: [[0, 0], [0, 1], [0, 2], [0, 3], [1, 3]], w: 2, h: 4, color: "#FF9F1C" },
+  P5P: { cells: [[0, 0], [1, 0], [0, 1], [1, 1], [0, 2]], w: 2, h: 3, color: "#FFD23F" },
+  P5T: { cells: [[0, 0], [1, 0], [2, 0], [1, 1], [1, 2]], w: 3, h: 3, color: "#B983FF" },
+  P5U: { cells: [[0, 0], [2, 0], [0, 1], [1, 1], [2, 1]], w: 3, h: 2, color: "#3DDC84" },
+  P5W: { cells: [[0, 0], [0, 1], [1, 1], [1, 2], [2, 2]], w: 3, h: 3, color: "#F0454B" },
+  P5Z: { cells: [[0, 0], [1, 0], [1, 1], [1, 2], [2, 2]], w: 3, h: 3, color: "#7C9BFF" },
+  P5X: { cells: [[1, 0], [0, 1], [1, 1], [2, 1], [1, 2]], w: 3, h: 3, color: "#2EC4B6" },
+};
+const HEXOMINOES = {
+  H6I: { cells: [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [5, 0]], w: 6, h: 1, color: "#3E9EFF" },
+  H6L: { cells: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [1, 4]], w: 2, h: 5, color: "#FF9F1C" },
+  H6P: { cells: [[0, 0], [1, 0], [0, 1], [1, 1], [0, 2], [1, 2]], w: 2, h: 3, color: "#FFD23F" },
+  H6T: { cells: [[0, 0], [1, 0], [2, 0], [1, 1], [1, 2], [1, 3]], w: 3, h: 4, color: "#B983FF" },
+  H6Z: { cells: [[0, 0], [1, 0], [1, 1], [1, 2], [2, 2], [2, 3]], w: 3, h: 4, color: "#F0454B" },
+  H6Y: { cells: [[1, 0], [0, 1], [1, 1], [2, 1], [1, 2], [1, 3]], w: 3, h: 4, color: "#7C9BFF" },
+};
+// Qué juego de piezas usar según el nivel del ataque "Piezas Intrincadas"
+// (0 = sin ataque, de tetris de siempre) y su nombre corto para guardar
+// en el estado de la sala (Workers KV, JSON — no puede guardar objetos
+// de función/clase, así que las rondas viajan con el NOMBRE del juego de
+// piezas, no el objeto en sí).
+const PIECE_SET_BY_NAME = { tetromino: TETROMINOES, pentomino: PENTOMINOES, hexomino: HEXOMINOES };
+const PIECE_SET_NAME_BY_STACK = { 0: "tetromino", 1: "pentomino", 2: "hexomino" };
+
 function randInt(min, max) {
   return min + Math.floor(Math.random() * (max - min + 1));
 }
@@ -202,32 +234,32 @@ function randomDecoyCount() {
 }
 
 // Intenta acomodar `count` piezas en una sola mancha conexa (cada pieza
-// nueva tiene que tocar, de canto, a la mancha ya puesta) dentro del
-// tablero de GRID_COLS x GRID_ROWS. Devuelve la lista de piezas puestas
+// nueva tiene que tocar, de canto, a la mancha ya puesta) dentro de un
+// tablero de gridCols x gridRows. Devuelve la lista de piezas puestas
 // (con su posición ya definitiva) o null si se trabó — el llamador
 // reintenta las veces que haga falta.
-function tryPlacePieces(count) {
+function tryPlacePieces(count, gridCols, gridRows, pieceSet, pieceTypes) {
   const placed = [];
   const filled = new Set();
   const filledList = []; // [x,y] — para elegir un punto de referencia al azar rápido
   for (let i = 0; i < count; i++) {
     let ok = false;
     for (let attempt = 0; attempt < 400 && !ok; attempt++) {
-      const type = TETROMINO_TYPES[randInt(0, TETROMINO_TYPES.length - 1)];
-      const piece = TETROMINOES[type];
+      const type = pieceTypes[randInt(0, pieceTypes.length - 1)];
+      const piece = pieceSet[type];
       let ax, ay;
       if (i === 0) {
         // La primera pieza arranca cerca del centro, con un poco de azar
         // para que la figura no salga siempre exactamente centrada.
-        ax = Math.floor((GRID_COLS - piece.w) / 2) + randInt(-1, 1);
-        ay = Math.floor((GRID_ROWS - piece.h) / 2) + randInt(-1, 1);
+        ax = Math.floor((gridCols - piece.w) / 2) + randInt(-1, 1);
+        ay = Math.floor((gridRows - piece.h) / 2) + randInt(-1, 1);
       } else {
         const ref = filledList[randInt(0, filledList.length - 1)];
         ax = ref[0] - randInt(0, piece.w - 1);
         ay = ref[1] - randInt(0, piece.h - 1);
       }
       const cells = piece.cells.map(([dx, dy]) => [ax + dx, ay + dy]);
-      const inBounds = cells.every(([x, y]) => x >= 0 && x < GRID_COLS && y >= 0 && y < GRID_ROWS);
+      const inBounds = cells.every(([x, y]) => x >= 0 && x < gridCols && y >= 0 && y < gridRows);
       if (!inBounds) continue;
       if (cells.some(([x, y]) => filled.has(cellKey(x, y)))) continue; // se pisa con otra pieza
       if (i > 0) {
@@ -265,13 +297,28 @@ function tryPlacePieces(count) {
 // (para la bandeja) y la unión de celdas de la figura (targetCells) —
 // ganás cuando esas celdas quedan cubiertas por las piezas que pusiste,
 // sea cual sea la combinación que uses para lograrlo.
-function generateRound() {
+//
+// `gridCols`/`gridRows` son opcionales (por default GRID_COLS/GRID_ROWS
+// de siempre) — el ataque "Puzzle Gigante" en modo Guerra genera la
+// figura con el tablero x2/x4 llamando esto con el tablero agrandado.
+// `pieceSetName` (opcional, "tetromino" por default) es el ataque
+// "Piezas Intrincadas": cambia el juego de piezas entero (pentominós al
+// recibirlo una vez, hexominós inventados dos veces — ver
+// PIECE_SETS_BY_STACK). `targetCells` sale como ARRAY de claves "x,y"
+// (no Set): así el objeto entero se puede guardar tal cual en Workers KV
+// para el modo online, sin tener que convertir nada a mano.
+function generateRound(gridCols, gridRows, pieceSetName) {
+  gridCols = gridCols || GRID_COLS;
+  gridRows = gridRows || GRID_ROWS;
+  pieceSetName = pieceSetName || "tetromino";
+  const pieceSet = PIECE_SET_BY_NAME[pieceSetName];
+  const pieceTypes = Object.keys(pieceSet);
   let decoyCount = randomDecoyCount();
   let solutionCount = TOTAL_PIECES - decoyCount;
   let placed = null;
   while (solutionCount > 0 && !placed) {
     for (let tries = 0; tries < 25 && !placed; tries++) {
-      placed = tryPlacePieces(solutionCount);
+      placed = tryPlacePieces(solutionCount, gridCols, gridRows, pieceSet, pieceTypes);
     }
     if (!placed) solutionCount--;
   }
@@ -279,19 +326,167 @@ function generateRound() {
   const solutionPieces = placed.map((p, i) => ({ id: "s" + i, type: p.type, isDecoy: false }));
   const decoyPieces = Array.from({ length: decoyCount }, (_, i) => ({
     id: "d" + i,
-    type: TETROMINO_TYPES[randInt(0, TETROMINO_TYPES.length - 1)],
+    type: pieceTypes[randInt(0, pieceTypes.length - 1)],
     isDecoy: true,
   }));
   const targetCells = new Set();
   placed.forEach((p) => p.cells.forEach(([x, y]) => targetCells.add(cellKey(x, y))));
   return {
+    puzzleId: randomId(),
     tray: shuffleArr([...solutionPieces, ...decoyPieces]),
-    targetCells,
+    targetCells: [...targetCells],
     solutionCount,
+    gridCols,
+    gridRows,
+    pieceSetName,
+    placed: [],
   };
 }
-function pieceCellsAt(type, x, y) {
-  return TETROMINOES[type].cells.map(([dx, dy]) => [x + dx, y + dy]);
+function pieceCellsAt(pieceSetName, type, x, y) {
+  const pieceSet = PIECE_SET_BY_NAME[pieceSetName || "tetromino"];
+  return pieceSet[type].cells.map(([dx, dy]) => [x + dx, y + dy]);
+}
+
+// ==================== MODO GUERRA (online, con ataques) ====================
+// Pedido del usuario: "ahora debemos incluir los ataques" — mismo espíritu
+// que Bloques en Cadena (arrancó con Práctica solo, después se sumó
+// Guerra con ataques). Se corre una carrera: cada jugador tiene su propia
+// cola de figuras para resolver, y cada vez que resuelve una manda un
+// ataque a algún rival — gana quien termina toda su cola primero.
+//
+// 4 ataques, cada uno hasta 2 veces por rival (el efecto se duplica la
+// segunda vez):
+//  - "grid" 🧱 Grilla extra: le suma una figura más a la cola del rival.
+//  - "giant" 🔲 Puzzle Gigante: agranda la figura QUE TIENE ABIERTA ahora
+//    (x2 el tablero la 1ra vez, x4 la 2da) — arranca esa figura de nuevo,
+//    más grande, perdiendo el progreso que tenía en ella.
+//  - "spin" 🌀 Girar: gira el tablero Y las piezas, todos al mismo ritmo
+//    (si no girara todo junto, sería imposible — la posición relativa
+//    entre pieza y tablero nunca cambia, solo se hace difícil de seguir a
+//    simple vista). El doble de rápido la 2da vez.
+//  - "intricate" 🧬 Piezas Intrincadas: cambia el juego de piezas de la
+//    figura QUE TIENE ABIERTA (pentominós de 5 cuadraditos la 1ra vez,
+//    hexominós inventados de 6 la 2da) — también arranca esa figura de
+//    nuevo.
+// Además, una regla general (no es un ataque, corre siempre): si pasan
+// PLACEMENT_RESET_MS sin colocar ninguna pieza con éxito, el tablero de
+// la figura actual se vacía solo (las piezas puestas vuelven a la
+// bandeja) — un respiro para cuando el jugador se hizo lío, sobre todo
+// bajo el ataque de girar.
+const STORAGE_PREFIX = "sinvueltas:sala:";
+const SESSION_KEY = "sinvueltas:sesion";
+const POLL_MS = 1200;
+const LOBBY_LIST_POLL_MS = 8000;
+const MIN_PLAYERS = 2;
+const MAX_PLAYERS = 16;
+const GUERRA_GRID_COUNT_OPTIONS = [3, 5, 8];
+const DEFAULT_GUERRA_GRID_COUNT = 5;
+const GUERRA_MAX_STACK = 2;
+const GIANT_SCALE_BY_STACK = { 1: 2, 2: 4 };
+const SPIN_PERIOD_MS_BY_STACK = { 1: 11000, 2: 5500 }; // una vuelta completa, más rápido al 2do envío
+const PLACEMENT_RESET_MS = 7000;
+
+function randomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+function randomId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+const MY_DEVICE_ID = (() => {
+  const KEY = "sinvueltas:deviceId";
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id = randomId();
+    localStorage.setItem(KEY, id);
+  }
+  return id;
+})();
+
+async function readRoom(code) {
+  try {
+    const res = await window.storage.get(STORAGE_PREFIX + code, true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writeRoom(code, room) {
+  await window.storage.set(STORAGE_PREFIX + code, JSON.stringify(room), true);
+}
+function playerKey(code, round, playerId) {
+  return STORAGE_PREFIX + code + ":r" + round + ":player:" + playerId;
+}
+async function readPlayerState(code, round, playerId) {
+  try {
+    const res = await window.storage.get(playerKey(code, round, playerId), true);
+    if (!res) return null;
+    return JSON.parse(res.value);
+  } catch {
+    return null;
+  }
+}
+async function writePlayerState(code, round, playerId, state) {
+  await window.storage.set(playerKey(code, round, playerId), JSON.stringify(state), true);
+}
+async function readAllPlayerStates(code, round, playerIds) {
+  const entries = await Promise.all((playerIds || []).map(async (id) => [id, await readPlayerState(code, round, id)]));
+  const map = {};
+  entries.forEach(([id, state]) => {
+    if (state) map[id] = state;
+  });
+  return map;
+}
+
+// Arma el estado inicial de un jugador para una etapa nueva: cola de
+// `count` figuras (todas normales, sin ataques todavía) + contadores en
+// cero. Cada *Stack (0/1/2) es cuántas veces YA recibió ese ataque —
+// GUERRA_MAX_STACK (2) es el tope, sea quien sea que lo mande.
+function freshGuerraState(count) {
+  return {
+    queue: Array.from({ length: count }, () => generateRound()),
+    solvedCount: 0,
+    giantStack: 0,
+    spinStack: 0,
+    intricateStack: 0,
+    gridExtraStack: 0,
+    lastPlacementAt: Date.now(),
+    finishedAt: null,
+  };
+}
+
+// Ataques "Puzzle Gigante" y "Piezas Intrincadas" regeneran la figura que
+// el jugador tiene ABIERTA ahora (queue[solvedCount]) — nunca las que ya
+// resolvió ni las que todavía ni empezó. Si el jugador ya tenía el OTRO
+// ataque de estos dos encima (por ejemplo, ya estaba agrandada y ahora le
+// llegan piezas intrincadas), la nueva figura combina los dos efectos —
+// por eso lee `state.giantStack`/`state.intricateStack` YA actualizados
+// (el llamador los incrementa antes de llamar a esto), no solo el que se
+// acaba de aplicar.
+function applyRegenToCurrentPuzzle(state) {
+  const scale = state.giantStack ? GIANT_SCALE_BY_STACK[state.giantStack] || 1 : 1;
+  const pieceSetName = PIECE_SET_NAME_BY_STACK[state.intricateStack || 0];
+  const newQueue = [...state.queue];
+  newQueue[state.solvedCount] = generateRound(GRID_COLS * scale, GRID_ROWS * scale, pieceSetName);
+  state.queue = newQueue;
+}
+
+// Se llama desde el sondeo de CUALQUIER cliente conectado (no solo el de
+// quien terminó último) mientras la sala está en "playing" — si ya
+// terminaron todos, pasa la sala a "ended". Guarda de idempotencia
+// (fresh.round) igual que en los otros juegos del sitio.
+async function checkRaceCompletion(roomCode, round) {
+  const fresh = await readRoom(roomCode);
+  if (!fresh || fresh.phase !== "playing") return;
+  if (fresh.round !== round) return;
+  const finishOrder = fresh.finishOrder || [];
+  if (finishOrder.length > 0 && finishOrder.length >= (fresh.players || []).length) {
+    fresh.phase = "ended";
+    await writeRoom(roomCode, fresh);
+  }
 }
 
 // ==================== UI COMPARTIDA (mismo lenguaje visual que el resto del sitio) ====================
@@ -461,6 +656,19 @@ function pillStyle(active) {
     cursor: "pointer",
   };
 }
+const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.15)",
+  background: "rgba(0,0,0,0.25)",
+  color: "#F3EEFF",
+  fontSize: 17,
+  marginBottom: 10,
+  outline: "none",
+  fontFamily: "'Nunito', sans-serif",
+};
 
 function BgScene() {
   return (
@@ -517,7 +725,10 @@ function Home({ onSelect }) {
             girarlas: cada una entra tal cual la ves. Si la ponés mal, no pasa nada: la volvés a agarrar
             y la reacomodás. Puede que te sobre alguna pieza que no haga falta usar.
           </Sub>
-          <BigButton onClick={() => onSelect("game")}>🎮 Jugar</BigButton>
+          <BigButton onClick={() => onSelect("guerra")}>🎮 Jugar con otros</BigButton>
+          <BigButton onClick={() => onSelect("practice")} color="#7C9BFF">
+            🏋️ Practicar solo/a
+          </BigButton>
         </Card>
       </div>
     </Screen>
@@ -527,8 +738,8 @@ function Home({ onSelect }) {
 // ==================== TABLERO + BANDEJA (la mecánica central) ====================
 // Una pieza "chip" (para la bandeja, chiquita) o "board" (para el tablero
 // o mientras se arrastra, tamaño real) — el mismo render, dos escalas.
-function PieceShape({ type, cellSize, style }) {
-  const piece = TETROMINOES[type];
+function PieceShape({ pieceSetName, type, cellSize, style }) {
+  const piece = PIECE_SET_BY_NAME[pieceSetName || "tetromino"][type];
   return (
     <div style={{ position: "relative", width: piece.w * cellSize, height: piece.h * cellSize, ...style }}>
       {piece.cells.map(([dx, dy], i) => (
@@ -550,6 +761,18 @@ function PieceShape({ type, cellSize, style }) {
     </div>
   );
 }
+// Gira un punto (px,py) alrededor de (cx,cy) el ángulo dado (grados,
+// sentido horario, como CSS rotate()). La usa PuzzleRound para "deshacer"
+// la rotación visual del ataque Girar y saber en qué celda de verdad
+// (sin girar) cayó el dedo/cursor.
+function rotatePoint(px, py, cx, cy, angleDeg) {
+  const rad = (angleDeg * Math.PI) / 180;
+  const dx = px - cx;
+  const dy = py - cy;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+}
 
 // El componente entero de una ronda: tablero + bandeja + arrastre a mano
 // con Pointer Events (no HTML5 drag-and-drop, que anda mal en celulares
@@ -567,26 +790,101 @@ function PieceShape({ type, cellSize, style }) {
 // posición fija) — se actualiza cada vez que se suelta una pieza en un
 // lugar válido, sea la primera vez (viene de la bandeja) o reacomodando
 // una que ya estaba en el tablero.
-function PuzzleRound({ round, onSolved }) {
+//
+// Se identifica con `key={round.puzzleId}` donde se usa (Práctica y
+// Guerra): cuando el puzzle cambia — la ronda siguiente, o un rival que
+// lo reemplaza con un ataque — React lo desmonta y monta de nuevo entero,
+// así el estado de colocación arranca limpio sin lógica especial acá
+// adentro para "adoptar" un puzzle distinto a mitad de partida.
+//
+// `spinStack` (0/1/2, modo Guerra): el ataque Girar. Gira el tablero Y la
+// bandeja al mismo ritmo (con requestAnimationFrame, aplicando el
+// transform a mano en vez de React state — así no hay que re-renderizar
+// 60 veces por segundo) — como las dos giran juntas, un lugar que
+// encastra sigue encastrando igual, nomás que ahora hay que seguirlo
+// visualmente mientras da vueltas. rotatePoint() "deshace" esa rotación
+// sobre la posición del dedo/cursor para saber en qué celda de verdad
+// (sin girar) se soltó la pieza.
+function PuzzleRound({ round, spinStack, onSolved, onPlacedChange }) {
   const [placed, setPlaced] = useState([]); // [{ id, type, isDecoy, x, y }]
-  // drag = { id, type, isDecoy, fromBoard, x, y (px, esquina sup-izq relativa al tablero) }
+  // drag = { id, type, isDecoy, fromBoard, x, y (px, esquina sup-izq relativa al tablero, YA sin la rotación) }
   const [drag, setDrag] = useState(null);
-  const boardRef = useRef(null);
+  const [justReset, setJustReset] = useState(false);
+  const boardRef = useRef(null); // el panel de afuera — este NUNCA gira, así su rect siempre es confiable
+  const spinBoardElRef = useRef(null); // adentro del panel: casilleros + piezas puestas + fantasma — ESTO sí gira
+  const spinTrayElRef = useRef(null); // la bandeja entera — gira igual, "al unísono"
+  const spinAngleRef = useRef(0);
   const dragRef = useRef(null); // espejo síncrono de `drag`/`placed`, para leer lo más nuevo en pointerup sin depender del closure de React
   const placedRef = useRef(placed);
+  const lastPlacementAtRef = useRef(Date.now());
   dragRef.current = drag;
   placedRef.current = placed;
 
-  const boardW = GRID_COLS * CELL;
-  const boardH = GRID_ROWS * CELL;
+  const gridCols = round.gridCols || GRID_COLS;
+  const gridRows = round.gridRows || GRID_ROWS;
+  const pieceSetName = round.pieceSetName || "tetromino";
+  const boardW = gridCols * CELL;
+  const boardH = gridRows * CELL;
+  const cellsAt = (type, x, y) => pieceCellsAt(pieceSetName, type, x, y);
+
+  useEffect(() => {
+    if (onPlacedChange) onPlacedChange(placed);
+  }, [placed]);
+
+  // Ataque Girar: mueve `spinAngleRef` con requestAnimationFrame y aplica
+  // el transform directo al DOM (sin pasar por React) — misma lógica de
+  // "esto no necesita re-renderizar nada" que ya usa el resto del sitio
+  // para animaciones. Se frena solo si `spinStack` se apaga (la figura
+  // cambió, o el ataque se dejó de aplicar).
+  useEffect(() => {
+    if (!spinStack) {
+      spinAngleRef.current = 0;
+      if (spinBoardElRef.current) spinBoardElRef.current.style.transform = "";
+      if (spinTrayElRef.current) spinTrayElRef.current.style.transform = "";
+      return;
+    }
+    const periodMs = SPIN_PERIOD_MS_BY_STACK[spinStack] || SPIN_PERIOD_MS_BY_STACK[1];
+    const start = Date.now();
+    let raf;
+    const tick = () => {
+      const angle = (((Date.now() - start) / periodMs) * 360) % 360;
+      spinAngleRef.current = angle;
+      if (spinBoardElRef.current) spinBoardElRef.current.style.transform = `rotate(${angle}deg)`;
+      if (spinTrayElRef.current) spinTrayElRef.current.style.transform = `rotate(${angle}deg)`;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [spinStack]);
+
+  // Regla general (no es un ataque): si pasan PLACEMENT_RESET_MS sin
+  // colocar ninguna pieza con éxito, el tablero se vacía solo — las
+  // piezas puestas vuelven a la bandeja. Un respiro para cuando el
+  // jugador se hizo lío (sobre todo bajo el ataque de girar).
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (placedRef.current.length > 0 && Date.now() - lastPlacementAtRef.current > PLACEMENT_RESET_MS) {
+        setPlaced([]);
+        lastPlacementAtRef.current = Date.now();
+        setJustReset(true);
+        setTimeout(() => setJustReset(false), 1600);
+      }
+    }, 500);
+    return () => clearInterval(id);
+  }, []);
 
   const startDrag = (piece, e, fromBoard) => {
     e.preventDefault();
     const rect = boardRef.current.getBoundingClientRect();
     const px = e.clientX ?? e.touches?.[0]?.clientX;
     const py = e.clientY ?? e.touches?.[0]?.clientY;
-    const shape = TETROMINOES[piece.type];
-    // Centra la pieza (a tamaño de tablero) bajo el dedo/cursor.
+    const shape = PIECE_SET_BY_NAME[pieceSetName][piece.type];
+    // Centra la pieza (a tamaño de tablero) bajo el dedo/cursor — en
+    // coordenadas SIN girar: la pieza en arrastre siempre se ve derecha,
+    // sigue al dedo tal cual, nunca gira (solo gira lo que queda atrás,
+    // el tablero y la bandeja). `clientX/clientY` (crudos, sin restar
+    // nada) se guardan aparte, para el cálculo de a qué celda corresponde
+    // — ver `gridAnchorFor`.
     setDrag({
       id: piece.id,
       type: piece.type,
@@ -594,7 +892,30 @@ function PuzzleRound({ round, onSolved }) {
       fromBoard: !!fromBoard,
       x: px - (shape.w * CELL) / 2 - rect.left,
       y: py - (shape.h * CELL) / 2 - rect.top,
+      clientX: px,
+      clientY: py,
     });
+  };
+
+  // A qué celda de la grilla corresponde un punto de pantalla (clientX,
+  // clientY), para una pieza de ancho/alto `shape` — "deshaciendo" antes
+  // la rotación del ataque Girar si está activa. Misma fórmula que
+  // startDrag/move para el centrado (así arrastrar y soltar usan
+  // exactamente la misma cuenta), solo que acá termina en Math.round en
+  // vez de guardarse tal cual.
+  const gridAnchorFor = (clientX, clientY, shape) => {
+    const rect = boardRef.current.getBoundingClientRect();
+    let px = clientX, py = clientY;
+    if (spinAngleRef.current) {
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const un = rotatePoint(clientX, clientY, cx, cy, -spinAngleRef.current);
+      px = un.x;
+      py = un.y;
+    }
+    const left = px - (shape.w * CELL) / 2 - rect.left;
+    const top = py - (shape.h * CELL) / 2 - rect.top;
+    return { gx: Math.round(left / CELL), gy: Math.round(top / CELL) };
   };
 
   useEffect(() => {
@@ -610,23 +931,26 @@ function PuzzleRound({ round, onSolved }) {
       const px = e.clientX ?? e.touches?.[0]?.clientX;
       const py = e.clientY ?? e.touches?.[0]?.clientY;
       if (px == null || py == null) return;
-      const shape = TETROMINOES[dragRef.current.type];
-      setDrag((d) => (d ? { ...d, x: px - (shape.w * CELL) / 2 - rect.left, y: py - (shape.h * CELL) / 2 - rect.top } : d));
+      const shape = PIECE_SET_BY_NAME[pieceSetName][dragRef.current.type];
+      // La pieza en arrastre en sí sigue al dedo DERECHA (sin rotación) —
+      // solo la lectura de "en qué celda cae" (gridAnchorFor) deshace el giro.
+      setDrag((d) => (d ? { ...d, x: px - (shape.w * CELL) / 2 - rect.left, y: py - (shape.h * CELL) / 2 - rect.top, clientX: px, clientY: py } : d));
     };
     const up = (e) => {
       if (e.cancelable) e.preventDefault();
       const d = dragRef.current;
-      if (d) {
-        const gx = Math.round(d.x / CELL);
-        const gy = Math.round(d.y / CELL);
-        const cells = pieceCellsAt(d.type, gx, gy);
-        const inBounds = cells.every(([x, y]) => x >= 0 && x < GRID_COLS && y >= 0 && y < GRID_ROWS);
+      const clientX = e.clientX ?? e.changedTouches?.[0]?.clientX ?? d?.clientX;
+      const clientY = e.clientY ?? e.changedTouches?.[0]?.clientY ?? d?.clientY;
+      if (d && clientX != null && clientY != null) {
+        const shape = PIECE_SET_BY_NAME[pieceSetName][d.type];
+        const { gx, gy } = gridAnchorFor(clientX, clientY, shape);
+        const cells = cellsAt(d.type, gx, gy);
+        const inBounds = cells.every(([x, y]) => x >= 0 && x < gridCols && y >= 0 && y < gridRows);
         const others = placedRef.current.filter((p) => p.id !== d.id);
-        const overlaps = cells.some(([x, y]) =>
-          others.some((p) => pieceCellsAt(p.type, p.x, p.y).some(([ox, oy]) => ox === x && oy === y))
-        );
+        const overlaps = cells.some(([x, y]) => others.some((p) => cellsAt(p.type, p.x, p.y).some(([ox, oy]) => ox === x && oy === y)));
         if (inBounds && !overlaps) {
           setPlaced((prev) => [...prev.filter((p) => p.id !== d.id), { id: d.id, type: d.type, isDecoy: d.isDecoy, x: gx, y: gy }]);
+          lastPlacementAtRef.current = Date.now();
         }
         // Si no es válido, no se toca `placed` — si venía del tablero,
         // sigue ahí en su posición anterior (nunca se le sacó); si venía
@@ -650,22 +974,26 @@ function PuzzleRound({ round, onSolved }) {
   // puesta — no importa cuál combinación de piezas se usó para lograrlo.
   useEffect(() => {
     const covered = new Set();
-    placed.forEach((p) => pieceCellsAt(p.type, p.x, p.y).forEach(([x, y]) => covered.add(cellKey(x, y))));
-    const done = [...round.targetCells].every((k) => covered.has(k));
+    placed.forEach((p) => cellsAt(p.type, p.x, p.y).forEach(([x, y]) => covered.add(cellKey(x, y))));
+    const done = round.targetCells.every((k) => covered.has(k));
     if (done) onSolved();
   }, [placed]);
 
   // Posición "fantasma" de la pieza que se está arrastrando, encajada a
-  // la celda más cercana — verde si ahí entra (no se pisa con nada y no
-  // se sale del tablero), gris si no.
+  // la celda más cercana (ya deshecha la rotación si está girando) —
+  // verde si ahí entra (no se pisa con nada y no se sale del tablero),
+  // gris si no. Nota: lee spinAngleRef.current (un ref) durante el
+  // render — no dispara re-render por sí solo, pero se recalcula fresco
+  // en cada uno de los muchos renders que ya dispara el arrastre en sí
+  // (cada pointermove), así que en la práctica sigue al dedo bien fluido.
   let ghost = null;
   if (drag) {
-    const gx = Math.round(drag.x / CELL);
-    const gy = Math.round(drag.y / CELL);
-    const cells = pieceCellsAt(drag.type, gx, gy);
-    const inBounds = cells.every(([x, y]) => x >= 0 && x < GRID_COLS && y >= 0 && y < GRID_ROWS);
+    const shape = PIECE_SET_BY_NAME[pieceSetName][drag.type];
+    const { gx, gy } = gridAnchorFor(drag.clientX, drag.clientY, shape);
+    const cells = cellsAt(drag.type, gx, gy);
+    const inBounds = cells.every(([x, y]) => x >= 0 && x < gridCols && y >= 0 && y < gridRows);
     const others = placed.filter((p) => p.id !== drag.id);
-    const overlaps = cells.some(([x, y]) => others.some((p) => pieceCellsAt(p.type, p.x, p.y).some(([ox, oy]) => ox === x && oy === y)));
+    const overlaps = cells.some(([x, y]) => others.some((p) => cellsAt(p.type, p.x, p.y).some(([ox, oy]) => ox === x && oy === y)));
     ghost = { gx, gy, valid: inBounds && !overlaps, type: drag.type };
   }
 
@@ -673,96 +1001,114 @@ function PuzzleRound({ round, onSolved }) {
   const trayPieces = round.tray.filter((p) => !placed.some((pp) => pp.id === p.id) && (!drag || drag.id !== p.id));
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%", touchAction: "none" }}>
-      <div
-        ref={boardRef}
-        data-board="1"
-        style={{
-          position: "relative",
-          width: boardW,
-          height: boardH,
-          margin: "0 auto 18px",
-          padding: 10,
-          boxSizing: "content-box",
-          borderRadius: 18,
-          background: "rgba(12,6,32,0.55)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          touchAction: "none",
-        }}
-      >
-        {/* Casilleros vacíos de la figura — el "molde" a rellenar, con un
-            color bien distinto tanto del fondo del tablero como de las
-            piezas, para que se note claro qué hay que cubrir. */}
-        {[...round.targetCells].map((key) => {
-          const [x, y] = key.split(",").map(Number);
-          return (
-            <div
-              key={key}
-              style={{
-                position: "absolute",
-                left: 10 + x * CELL,
-                top: 10 + y * CELL,
-                width: CELL,
-                height: CELL,
-                boxSizing: "border-box",
-                border: "1.5px solid rgba(255,210,63,0.35)",
-                borderRadius: 4,
-                background: "rgba(255,210,63,0.12)",
-              }}
-            />
-          );
-        })}
-        {/* Piezas puestas en el tablero (en su posición actual, sea o no
-            la que arma la figura de verdad) — se pueden volver a agarrar
-            para reacomodar. */}
-        {boardPieces.map((p) => (
-          <div
-            key={p.id}
-            data-piece-id={p.id}
-            onPointerDown={(e) => startDrag(p, e, true)}
-            onTouchStart={(e) => startDrag(p, e, true)}
-            style={{ position: "absolute", left: 10 + p.x * CELL, top: 10 + p.y * CELL, cursor: "grab" }}
-          >
-            <PieceShape type={p.type} cellSize={CELL} />
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+      {justReset && (
+        <div style={{ color: "#FF9F1C", fontWeight: 800, fontFamily: "'Baloo 2', sans-serif", marginBottom: 8, fontSize: 14 }}>
+          ⏱️ ¡Se reinició el tablero por inactividad!
+        </div>
+      )}
+      {/* Envoltorio con scroll: un puzzle gigante (ataque) puede ser más
+          grande que la pantalla — acá se puede recorrer arrastrando el
+          FONDO (no una pieza) con el dedo normal, ya que solo las piezas
+          en sí bloquean el touch nativo (ver touchAction en cada una). */}
+      <div style={{ width: "100%", maxWidth: "94vw", maxHeight: "56vh", overflow: "auto", marginBottom: 18, borderRadius: 18 }}>
+        <div
+          ref={boardRef}
+          data-board="1"
+          style={{
+            position: "relative",
+            width: boardW,
+            height: boardH,
+            margin: "0 auto",
+            padding: 10,
+            boxSizing: "content-box",
+            borderRadius: 18,
+            background: "rgba(12,6,32,0.55)",
+            border: "1px solid rgba(255,255,255,0.12)",
+          }}
+        >
+          <div ref={spinBoardElRef} style={{ position: "absolute", inset: 0 }}>
+            {/* Casilleros vacíos de la figura — el "molde" a rellenar, con
+                un color bien distinto tanto del fondo del tablero como de
+                las piezas, para que se note claro qué hay que cubrir. */}
+            {round.targetCells.map((key) => {
+              const [x, y] = key.split(",").map(Number);
+              return (
+                <div
+                  key={key}
+                  style={{
+                    position: "absolute",
+                    left: 10 + x * CELL,
+                    top: 10 + y * CELL,
+                    width: CELL,
+                    height: CELL,
+                    boxSizing: "border-box",
+                    border: "1.5px solid rgba(255,210,63,0.35)",
+                    borderRadius: 4,
+                    background: "rgba(255,210,63,0.12)",
+                  }}
+                />
+              );
+            })}
+            {/* Piezas puestas en el tablero (en su posición actual, sea o
+                no la que arma la figura de verdad) — se pueden volver a
+                agarrar para reacomodar. */}
+            {boardPieces.map((p) => (
+              <div
+                key={p.id}
+                data-piece-id={p.id}
+                onPointerDown={(e) => startDrag(p, e, true)}
+                onTouchStart={(e) => startDrag(p, e, true)}
+                style={{ position: "absolute", left: 10 + p.x * CELL, top: 10 + p.y * CELL, cursor: "grab", touchAction: "none" }}
+              >
+                <PieceShape pieceSetName={pieceSetName} type={p.type} cellSize={CELL} />
+              </div>
+            ))}
+            {/* Fantasma de la pieza en arrastre, encajado a la celda más cercana. */}
+            {ghost && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 10 + ghost.gx * CELL,
+                  top: 10 + ghost.gy * CELL,
+                  opacity: ghost.valid ? 0.9 : 0.3,
+                  filter: ghost.valid ? "none" : "grayscale(0.7)",
+                  transition: "opacity 0.08s ease",
+                  pointerEvents: "none",
+                }}
+              >
+                <PieceShape pieceSetName={pieceSetName} type={ghost.type} cellSize={CELL} />
+              </div>
+            )}
           </div>
-        ))}
-        {/* Fantasma de la pieza en arrastre, encajado a la celda más cercana. */}
-        {ghost && (
-          <div
-            style={{
-              position: "absolute",
-              left: 10 + ghost.gx * CELL,
-              top: 10 + ghost.gy * CELL,
-              opacity: ghost.valid ? 0.9 : 0.3,
-              filter: ghost.valid ? "none" : "grayscale(0.7)",
-              transition: "opacity 0.08s ease",
-              pointerEvents: "none",
-            }}
-          >
-            <PieceShape type={ghost.type} cellSize={CELL} />
-          </div>
-        )}
-        {/* La pieza en arrastre de verdad, siguiendo el dedo/cursor. */}
-        {drag && (
-          <div
-            style={{
-              position: "absolute",
-              left: 10 + drag.x,
-              top: 10 + drag.y,
-              zIndex: 20,
-              pointerEvents: "none",
-              filter: "drop-shadow(0 8px 10px rgba(0,0,0,0.45))",
-              transform: "scale(1.04)",
-            }}
-          >
-            <PieceShape type={drag.type} cellSize={CELL} />
-          </div>
-        )}
+        </div>
       </div>
+
+      {/* La pieza en arrastre de verdad, siguiendo el dedo/cursor — FUERA
+          del tablero que gira, así ella nunca gira (queda derecha, fácil
+          de sostener aunque el fondo esté dando vueltas). Se posiciona en
+          coordenadas de pantalla directas (fixed), no relativas al
+          tablero. */}
+      {drag && boardRef.current && (
+        <div
+          style={{
+            position: "fixed",
+            left: boardRef.current.getBoundingClientRect().left + drag.x,
+            top: boardRef.current.getBoundingClientRect().top + drag.y,
+            zIndex: 200,
+            pointerEvents: "none",
+            filter: "drop-shadow(0 8px 10px rgba(0,0,0,0.45))",
+            transform: "scale(1.04)",
+          }}
+        >
+          <PieceShape pieceSetName={pieceSetName} type={drag.type} cellSize={CELL} />
+        </div>
+      )}
 
       {/* Bandeja: las piezas que todavía no se pusieron en el tablero (de
           la figura o de sobra, mezcladas — no se distinguen a simple vista). */}
       <div
+        ref={spinTrayElRef}
         style={{
           display: "flex",
           flexWrap: "wrap",
@@ -775,7 +1121,6 @@ function PuzzleRound({ round, onSolved }) {
           background: "rgba(12,6,32,0.45)",
           border: "1px solid rgba(255,255,255,0.1)",
           minHeight: TRAY_CELL * 2 + 24,
-          touchAction: "none",
         }}
       >
         {trayPieces.map((p) => (
@@ -784,9 +1129,9 @@ function PuzzleRound({ round, onSolved }) {
             data-piece-id={p.id}
             onPointerDown={(e) => startDrag(p, e, false)}
             onTouchStart={(e) => startDrag(p, e, false)}
-            style={{ cursor: "grab" }}
+            style={{ cursor: "grab", touchAction: "none" }}
           >
-            <PieceShape type={p.type} cellSize={TRAY_CELL} />
+            <PieceShape pieceSetName={pieceSetName} type={p.type} cellSize={TRAY_CELL} />
           </div>
         ))}
       </div>
@@ -928,11 +1273,625 @@ function PracticeGame({ onBack }) {
   );
 }
 
+// ==================== JOIN ====================
+function JoinScreen({ onJoined, onBack }) {
+  const [name, setName] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [openRooms, setOpenRooms] = useState([]);
+  const [resumable, setResumable] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const entries = await window.storage.list(STORAGE_PREFIX);
+        if (cancelled) return;
+        const rooms = entries
+          .map((e) => {
+            if (!/^sinvueltas:sala:[^:]+$/.test(e.key)) return null;
+            try {
+              return JSON.parse(e.value);
+            } catch {
+              return null;
+            }
+          })
+          .filter((r) => r && r.phase === "lobby" && Date.now() - (r.createdAt || 0) < 3 * 60 * 60 * 1000)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setOpenRooms(rooms);
+      } catch {}
+    };
+    tick();
+    const id = setInterval(tick, LOBBY_LIST_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let saved;
+      try {
+        saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+      } catch {
+        saved = null;
+      }
+      if (!saved || !saved.code || !saved.playerId) {
+        setResumable(null);
+        return;
+      }
+      const existing = await readRoom(saved.code);
+      if (cancelled) return;
+      if (existing && existing.players.some((p) => p.id === saved.playerId)) {
+        setResumable({ code: saved.code, playerId: saved.playerId, name: (existing.players.find((p) => p.id === saved.playerId) || {}).name });
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+        setResumable(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const doJoin = async (codeMaybe) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setJoinError("Escribí tu nombre.");
+      return;
+    }
+    setJoining(true);
+    setJoinError("");
+    try {
+      const code = codeMaybe || (codeInput.trim() ? codeInput.trim().toUpperCase() : randomCode());
+      let existing = await readRoom(code);
+      if (existing && existing.phase !== "lobby") {
+        setJoinError("Esa sala ya está jugando. Esperá a la próxima partida.");
+        setJoining(false);
+        return;
+      }
+      const me = { id: randomId(), name: trimmed, deviceId: MY_DEVICE_ID, joinedAt: Date.now() };
+      if (!existing) {
+        existing = {
+          code,
+          hostId: me.id,
+          players: [me],
+          phase: "lobby",
+          round: 0,
+          guerraGridCount: DEFAULT_GUERRA_GRID_COUNT,
+          countdownEndsAt: null,
+          finishOrder: [],
+          createdAt: Date.now(),
+        };
+      } else {
+        if (existing.players.length >= MAX_PLAYERS) {
+          setJoinError(`Sala llena (máximo ${MAX_PLAYERS} jugadores).`);
+          setJoining(false);
+          return;
+        }
+        if (existing.players.some((p) => p.name.toLowerCase() === trimmed.toLowerCase())) {
+          setJoinError(`Ya hay alguien llamado "${trimmed}" en esa sala. Cambiá el nombre.`);
+          setJoining(false);
+          return;
+        }
+        existing.players = [...existing.players, me];
+      }
+      await writeRoom(code, existing);
+      window.storage.incrementCounter("players").catch(() => {});
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ code, playerId: me.id }));
+      onJoined(code, me.id);
+    } catch (e) {
+      setJoinError(window.storage.friendlyErrorMessage(e));
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  return (
+    <Screen>
+      <Title size={26}>Sin Vueltas</Title>
+      <Sub style={{ marginTop: -10 }}>De {MIN_PLAYERS} a {MAX_PLAYERS} jugadores, cada uno en su celu</Sub>
+      <Card style={{ width: "100%", maxWidth: 420 }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Tu nombre" style={inputStyle} />
+        <input
+          value={codeInput}
+          onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+          placeholder="Código de sala (opcional)"
+          style={inputStyle}
+        />
+        {joinError && <div style={{ color: "#FF5D7A", fontSize: 13, marginBottom: 8 }}>{joinError}</div>}
+        <BigButton onClick={() => doJoin(null)} disabled={joining}>
+          {codeInput.trim() ? "Unirme a esa sala" : "Crear sala nueva"}
+        </BigButton>
+      </Card>
+
+      {resumable && (
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <Sub style={{ marginTop: 0 }}>Ya estabas en la sala <b>{resumable.code}</b> como {resumable.name}</Sub>
+          <BigButton onClick={() => onJoined(resumable.code, resumable.playerId)} color="#3E9EFF">
+            Volver a esa sala
+          </BigButton>
+        </Card>
+      )}
+
+      {openRooms.length > 0 && (
+        <Card style={{ width: "100%", maxWidth: 420 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", fontWeight: 700, marginBottom: 8 }}>Salas abiertas ahora</div>
+          {openRooms.map((r) => (
+            <button
+              key={r.code}
+              onClick={() => { setCodeInput(r.code); doJoin(r.code); }}
+              style={{ display: "flex", justifyContent: "space-between", width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, padding: "10px 12px", marginBottom: 6, color: "#F3EEFF", cursor: "pointer", fontWeight: 700 }}
+            >
+              <span>{r.code}</span>
+              <span style={{ color: "#8b7fa8" }}>{(r.players || []).length}/{MAX_PLAYERS} jugadores</span>
+            </button>
+          ))}
+        </Card>
+      )}
+
+      <BigButton onClick={onBack} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+        Volver
+      </BigButton>
+    </Screen>
+  );
+}
+
+// Metadatos de cada ataque: emoji, nombre, y qué explicar en el selector.
+const ATTACK_META = {
+  grid: { emoji: "🧱", label: "Grilla extra", desc: "Le suma una figura más a la cola. Hasta 2 veces." },
+  giant: { emoji: "🔲", label: "Puzzle Gigante", desc: "Agranda la figura que tiene abierta ahora (x2, x4 la 2da vez)." },
+  spin: { emoji: "🌀", label: "Girar", desc: "Gira el tablero y las piezas juntos. Más rápido la 2da vez." },
+  intricate: { emoji: "🧬", label: "Piezas Intrincadas", desc: "Cambia las piezas de la figura abierta por otras más grandes y raras." },
+};
+const ATTACK_TYPES = Object.keys(ATTACK_META);
+const STACK_FIELD_BY_ATTACK = { grid: "gridExtraStack", giant: "giantStack", spin: "spinStack", intricate: "intricateStack" };
+
+// ==================== SALA (modo Guerra, con ataques) ====================
+function GameRoom({ roomCode, myId, onBack }) {
+  const [room, setRoom] = useState(null);
+  const [playerStates, setPlayerStates] = useState({});
+  const [myState, setMyState] = useState(null);
+  const [attackCtx, setAttackCtx] = useState(null); // null | { type: "choose" } | { type: <ataque> }
+  const myLiveStateRef = useRef(null);
+  const pendingWriteRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const r = await readRoom(roomCode);
+      if (cancelled || !r) return;
+      setRoom(r);
+      const round = r.round || 0;
+      if (round > 0 && (r.phase === "playing" || r.phase === "ended")) {
+        const ids = (r.players || []).map((p) => p.id);
+        const states = await readAllPlayerStates(roomCode, round, ids);
+        if (cancelled) return;
+        setPlayerStates(states);
+        if (!pendingWriteRef.current) {
+          const mine = states[myId] || myLiveStateRef.current;
+          myLiveStateRef.current = mine;
+          setMyState(mine);
+        }
+        if (r.phase === "playing") await checkRaceCompletion(roomCode, round);
+      }
+    };
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [roomCode, myId]);
+
+  if (!room) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <Sub>Cargando sala...</Sub>
+      </Screen>
+    );
+  }
+
+  const players = room.players || [];
+  const effectiveHost =
+    players.find((p) => p.id === room.hostId) ||
+    [...players].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0] ||
+    null;
+  const isHost = !!effectiveHost && effectiveHost.id === myId;
+
+  const setGuerraGridCount = async (n) => {
+    if ((room.guerraGridCount || DEFAULT_GUERRA_GRID_COUNT) === n) return;
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    fresh.guerraGridCount = n;
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+  };
+
+  const startGame = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh || fresh.players.length < MIN_PLAYERS) return;
+    const round = (fresh.round || 0) + 1;
+    const count = fresh.guerraGridCount || DEFAULT_GUERRA_GRID_COUNT;
+    await Promise.all(fresh.players.map((p) => writePlayerState(roomCode, round, p.id, freshGuerraState(count))));
+    fresh.round = round;
+    fresh.phase = "playing";
+    fresh.finishOrder = [];
+    await writeRoom(roomCode, fresh);
+    setRoom(fresh);
+    const mine = await readPlayerState(roomCode, round, myId);
+    myLiveStateRef.current = mine;
+    setMyState(mine);
+    setPlayerStates((m) => ({ ...m, [myId]: mine }));
+  };
+
+  // Se llama cuando termino de cubrir la figura que tenía abierta —
+  // aplica el avance YA sobre mi estado local (nunca espera red) y pide
+  // que se guarde en segundo plano, igual que en Bloques en Cadena.
+  const onPuzzleSolved = () => {
+    const cur = myLiveStateRef.current;
+    if (!cur || cur.finishedAt) return;
+    const solvedCount = cur.solvedCount + 1;
+    const finishedAt = solvedCount >= cur.queue.length ? Date.now() : null;
+    const next = { ...cur, solvedCount, finishedAt };
+    myLiveStateRef.current = next;
+    setMyState(next);
+    setPlayerStates((m) => ({ ...m, [myId]: next }));
+    pendingWriteRef.current = true;
+    writePlayerState(roomCode, room.round, myId, next)
+      .catch(() => {})
+      .finally(() => {
+        pendingWriteRef.current = false;
+      });
+    if (finishedAt) {
+      markFinished();
+    } else {
+      setAttackCtx({ type: "choose" });
+    }
+  };
+
+  const markFinished = async () => {
+    const fresh = await readRoom(roomCode);
+    if (!fresh) return;
+    if (!(fresh.finishOrder || []).includes(myId)) {
+      fresh.finishOrder = [...(fresh.finishOrder || []), myId];
+      await writeRoom(roomCode, fresh);
+      setRoom(fresh);
+    }
+    await checkRaceCompletion(roomCode, room.round);
+  };
+
+  // Manda un ataque a `targetId`. Nunca a mí mismo (acá no hay easter egg
+  // de bichito al azar como en Bloques). Cada ataque tiene su propio tope
+  // de GUERRA_MAX_STACK (2) aplicaciones — pasado eso, mandarlo de nuevo
+  // no hace nada (silencioso, no hace falta avisar: el jugador que ataca
+  // ve igual que la figura del rival sigue como estaba).
+  const performAttack = async (targetId, type) => {
+    setAttackCtx(null);
+    if (!targetId || targetId === myId) return;
+    const fresh = await readPlayerState(roomCode, room.round, targetId);
+    if (!fresh) return;
+    if (type === "grid") {
+      if ((fresh.gridExtraStack || 0) >= GUERRA_MAX_STACK) return;
+      fresh.gridExtraStack = (fresh.gridExtraStack || 0) + 1;
+      fresh.queue = [...fresh.queue, generateRound()];
+    } else if (type === "giant") {
+      if ((fresh.giantStack || 0) >= GUERRA_MAX_STACK) return;
+      fresh.giantStack = (fresh.giantStack || 0) + 1;
+      fresh.lastPlacementAt = Date.now(); // respiro fresco de 7s, no que llegue el ataque y ya se le resetee
+      applyRegenToCurrentPuzzle(fresh);
+    } else if (type === "spin") {
+      if ((fresh.spinStack || 0) >= GUERRA_MAX_STACK) return;
+      fresh.spinStack = (fresh.spinStack || 0) + 1;
+    } else if (type === "intricate") {
+      if ((fresh.intricateStack || 0) >= GUERRA_MAX_STACK) return;
+      fresh.intricateStack = (fresh.intricateStack || 0) + 1;
+      fresh.lastPlacementAt = Date.now();
+      applyRegenToCurrentPuzzle(fresh);
+    } else {
+      return;
+    }
+    await writePlayerState(roomCode, room.round, targetId, fresh);
+  };
+
+  // Un solo click sin querer no debería sacarte de una partida en curso.
+  const leaveRoom = async () => {
+    if (!window.confirm("¿Salir de la sala?")) return;
+    try {
+      const fresh = await readRoom(roomCode);
+      if (fresh) {
+        fresh.players = (fresh.players || []).filter((p) => p.id !== myId);
+        await writeRoom(roomCode, fresh);
+      }
+    } catch {}
+    localStorage.removeItem(SESSION_KEY);
+    onBack();
+  };
+
+  // ---------- LOBBY ----------
+  if (room.phase === "lobby") {
+    return (
+      <Screen homeConfirm="¿Salir de la sala?" style={{ background: "transparent" }}>
+        <BgScene />
+        <div style={{ position: "relative", zIndex: 1, width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <Title size={26}>Sala {room.code}</Title>
+          <Sub style={{ marginTop: -10 }}>
+            Compartí el código para que se sumen ({players.length}/{MAX_PLAYERS}). Mínimo {MIN_PLAYERS} jugadores.
+          </Sub>
+          <Card style={{ width: "100%", maxWidth: 420 }}>
+            {players.map((p) => (
+              <div key={p.id} style={{ padding: "6px 2px", color: "#F3EEFF" }}>
+                {p.id === effectiveHost?.id ? "👑 " : "• "}
+                {p.name}
+                {p.id === myId ? " (vos)" : ""}
+              </div>
+            ))}
+          </Card>
+          <Card style={{ width: "100%", maxWidth: 420 }}>
+            <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Cantidad de figuras</div>
+            {isHost ? (
+              <div style={{ display: "flex", gap: 8 }}>
+                {GUERRA_GRID_COUNT_OPTIONS.map((n) => (
+                  <button key={n} onClick={() => setGuerraGridCount(n)} style={{ ...pillStyle((room.guerraGridCount || DEFAULT_GUERRA_GRID_COUNT) === n), flex: 1 }}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{ color: "#F3EEFF", fontWeight: 700 }}>{room.guerraGridCount || DEFAULT_GUERRA_GRID_COUNT}</div>
+            )}
+          </Card>
+          <Card style={{ width: "100%", maxWidth: 420 }}>
+            <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 6, fontWeight: 700 }}>Cómo se juega</div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "#F3EEFF" }}>
+              🏁 Cada uno tiene su propia cola de {room.guerraGridCount || DEFAULT_GUERRA_GRID_COUNT} figuras. Gana quien
+              termina toda su cola primero.
+              <br />
+              💥 Cada figura que resolvés, elegís un ataque y a quién mandárselo:
+              {ATTACK_TYPES.map((t) => ` ${ATTACK_META[t].emoji} ${ATTACK_META[t].label}`).join(",")} — cada uno hasta 2
+              veces por rival, y el efecto se duplica la segunda vez.
+              <br />
+              ⏱️ Si no colocás ninguna pieza en {Math.round(PLACEMENT_RESET_MS / 1000)}s, el tablero se vacía solo (las
+              piezas puestas vuelven a la bandeja) — un respiro si te hiciste lío.
+            </div>
+          </Card>
+          {isHost ? (
+            <BigButton onClick={startGame} disabled={players.length < MIN_PLAYERS}>
+              {players.length < MIN_PLAYERS ? `Esperando jugadores (mín. ${MIN_PLAYERS})...` : "Empezar 🎮"}
+            </BigButton>
+          ) : (
+            <Sub>Esperando a que {effectiveHost ? effectiveHost.name : "el anfitrión/a"} empiece...</Sub>
+          )}
+          <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+            Salir de la sala
+          </BigButton>
+        </div>
+      </Screen>
+    );
+  }
+
+  // ---------- ENDED ----------
+  if (room.phase === "ended") {
+    const finishOrder = room.finishOrder || [];
+    const ranked = [
+      ...finishOrder.map((id) => players.find((p) => p.id === id)).filter(Boolean),
+      ...players.filter((p) => !finishOrder.includes(p.id)),
+    ];
+    const medals = ["🥇", "🥈", "🥉"];
+    return (
+      <Screen style={{ background: "transparent" }}>
+        <BgScene />
+        <div style={{ position: "relative", zIndex: 1, width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <Title size={26}>🏆 ¡Fin de la partida!</Title>
+          {ranked[0] && (
+            <Sub style={{ marginTop: -10 }}>
+              Ganó <b style={{ color: "#FFD23F" }}>{ranked[0].name}</b>
+            </Sub>
+          )}
+          <Card style={{ width: "100%", maxWidth: 420 }}>
+            {ranked.map((p, i) => (
+              <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 2px", borderBottom: i < ranked.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
+                <span>
+                  {medals[i] || `${i + 1}°`} {p.name}
+                  {p.id === myId ? " (vos)" : ""}
+                </span>
+              </div>
+            ))}
+          </Card>
+          <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+            Salir de la sala
+          </BigButton>
+        </div>
+      </Screen>
+    );
+  }
+
+  // ---------- JUGANDO ----------
+  if (!myState) {
+    return (
+      <Screen style={{ justifyContent: "center" }}>
+        <Sub>Cargando...</Sub>
+      </Screen>
+    );
+  }
+  if (myState.finishedAt) {
+    const others = players.filter((p) => p.id !== myId);
+    return (
+      <Screen homeConfirm="¿Salir? Perdés tu progreso de esta partida." style={{ background: "transparent" }}>
+        <BgScene />
+        <div style={{ position: "relative", zIndex: 1, width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <Title size={24}>🏁 ¡Terminaste tu cola!</Title>
+          <Sub style={{ marginTop: -10 }}>Esperando a que terminen los demás...</Sub>
+          <Card style={{ width: "100%", maxWidth: 420 }}>
+            {players.map((p) => {
+              const st = playerStates[p.id];
+              return (
+                <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 2px" }}>
+                  <span>{p.name}{p.id === myId ? " (vos)" : ""}</span>
+                  <span style={{ color: st && st.finishedAt ? "#3DDC84" : "#8b7fa8" }}>
+                    {st ? `${st.solvedCount}/${st.queue.length}` : "…"}
+                    {st && st.finishedAt ? " ✅" : ""}
+                  </span>
+                </div>
+              );
+            })}
+          </Card>
+          <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+            Salir de la sala
+          </BigButton>
+        </div>
+      </Screen>
+    );
+  }
+
+  const currentPuzzle = myState.queue[myState.solvedCount];
+  const candidates = players.filter((p) => p.id !== myId && !(playerStates[p.id] && playerStates[p.id].finishedAt));
+
+  return (
+    <Screen homeConfirm="¿Salir? Perdés tu progreso de esta partida." style={{ padding: "20px 10px 40px", background: "transparent" }}>
+      <BgScene />
+      <style>{`
+        .sinvueltas-3dbtn { transition: transform 0.1s ease; }
+        .sinvueltas-3dbtn:active { transform: translateY(3px) scale(0.98); }
+      `}</style>
+      <div style={{ position: "relative", zIndex: 1, width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <Title size={22}>Sala {room.code}</Title>
+        <Sub style={{ marginTop: -10, marginBottom: 10 }}>
+          Figura <b style={{ color: "#FFD23F" }}>{myState.solvedCount + 1}</b> de {myState.queue.length}
+        </Sub>
+
+        {!attackCtx && currentPuzzle && (
+          <PuzzleRound
+            key={currentPuzzle.puzzleId}
+            round={currentPuzzle}
+            spinStack={myState.spinStack || 0}
+            onSolved={onPuzzleSolved}
+          />
+        )}
+
+        {attackCtx && attackCtx.type === "choose" && (
+          <Card style={{ width: "100%", maxWidth: 420 }}>
+            <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 10, fontWeight: 700 }}>💥 ¡Figura resuelta! ¿Qué ataque mandás?</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {ATTACK_TYPES.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setAttackCtx({ type: t })}
+                  className="sinvueltas-3dbtn"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "12px 14px",
+                    borderRadius: 14,
+                    border: "1px solid rgba(255,255,255,0.15)",
+                    background: "rgba(255,255,255,0.06)",
+                    color: "#F3EEFF",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ fontSize: 24 }}>{ATTACK_META[t].emoji}</span>
+                  <span>
+                    <div style={{ fontWeight: 800, fontFamily: "'Baloo 2', sans-serif" }}>{ATTACK_META[t].label}</div>
+                    <div style={{ fontSize: 12, color: "#8b7fa8" }}>{ATTACK_META[t].desc}</div>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <BigButton onClick={() => setAttackCtx(null)} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0", marginTop: 10, marginBottom: 0 }}>
+              Saltear (no atacar)
+            </BigButton>
+          </Card>
+        )}
+
+        {attackCtx && attackCtx.type !== "choose" && (() => {
+          const stackField = STACK_FIELD_BY_ATTACK[attackCtx.type];
+          const eligible = candidates.filter((p) => ((playerStates[p.id] && playerStates[p.id][stackField]) || 0) < GUERRA_MAX_STACK);
+          return (
+          <Card style={{ width: "100%", maxWidth: 420 }}>
+            <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 10, fontWeight: 700 }}>
+              {ATTACK_META[attackCtx.type].emoji} ¿A quién le mandás {ATTACK_META[attackCtx.type].label}?
+            </div>
+            {eligible.length === 0 ? (
+              <Sub style={{ marginTop: 0 }}>Ya le mandaste este ataque el máximo de veces a todos.</Sub>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {eligible.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => performAttack(p.id, attackCtx.type)}
+                    className="sinvueltas-3dbtn"
+                    style={{ padding: "12px 14px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "#F3EEFF", fontWeight: 700, cursor: "pointer" }}
+                  >
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <BigButton onClick={() => setAttackCtx({ type: "choose" })} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0", marginTop: 10, marginBottom: 0 }}>
+              Volver
+            </BigButton>
+          </Card>
+          );
+        })()}
+
+        <Card style={{ width: "100%", maxWidth: 420, marginTop: 6 }}>
+          <div style={{ fontSize: 13, color: "#8b7fa8", marginBottom: 8, fontWeight: 700 }}>Cómo van</div>
+          {players.map((p) => {
+            const st = playerStates[p.id];
+            return (
+              <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "5px 2px" }}>
+                <span>{p.name}{p.id === myId ? " (vos)" : ""}</span>
+                <span style={{ color: st && st.finishedAt ? "#3DDC84" : "#8b7fa8" }}>
+                  {st ? `${st.solvedCount}/${st.queue.length}` : "…"}
+                  {st && st.finishedAt ? " ✅" : ""}
+                </span>
+              </div>
+            );
+          })}
+        </Card>
+
+        <BigButton onClick={leaveRoom} color="transparent" style={{ boxShadow: "none", color: "#C9B8F0" }}>
+          Salir de la sala
+        </BigButton>
+      </div>
+    </Screen>
+  );
+}
+
 function App() {
   useInjectFont();
   const [mode, setMode] = useState("home");
+  const [roomCode, setRoomCode] = useState(null);
+  const [myId, setMyId] = useState(null);
+
   if (mode === "home") return <Home onSelect={setMode} />;
-  return <PracticeGame onBack={() => setMode("home")} />;
+  if (mode === "practice") return <PracticeGame onBack={() => setMode("home")} />;
+  if (mode === "game" && roomCode && myId) {
+    return (
+      <GameRoom
+        roomCode={roomCode}
+        myId={myId}
+        onBack={() => {
+          setRoomCode(null);
+          setMyId(null);
+          setMode("home");
+        }}
+      />
+    );
+  }
+  return (
+    <JoinScreen
+      onJoined={(code, id) => {
+        setRoomCode(code);
+        setMyId(id);
+        setMode("game");
+      }}
+      onBack={() => setMode("home")}
+    />
+  );
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
